@@ -63,7 +63,7 @@ Create **one Team Leader task** using `TaskCreate` with: project summary, user's
 
 **Team Leader responsibilities:**
 
-1. Decide which specialist workers to spawn (2-5). Always explain the choice.
+1. Decide which specialist workers to spawn, using the sizing heuristics below. Always explain the choice.
 2. **Map skills to workers:**
    a. Read `~/.claude/skills/skill-taxonomy.yml`
    b. Identify which categories are relevant to the current task (match task description against category descriptions and skill use-cases)
@@ -99,6 +99,17 @@ If no skills match a worker's role + the task's categories, omit the block for t
 | Data Engineer | Schema design, migrations, query performance, data modeling, pipelines | No data layer changes |
 | Performance Engineer | Profiling, benchmarks, latency budgets, memory, algorithmic complexity | No performance-sensitive paths touched |
 | Technical Writer | API docs, user guides, changelog, developer experience of documentation | No public-facing or doc surface |
+
+**Team sizing heuristics:**
+
+| Complexity | Design Workers | Signals |
+|---|---|---|
+| Simple (1-2 files) | 2 | Isolated bug, small feature, single concern |
+| Moderate (3-10 files) | 3-4 | Multi-file changes, 2-3 concerns |
+| Complex (10-30 files) | 4-6 | Cross-cutting concerns, large features |
+| Very complex (30+ files) | 6-9 | Full-stack features, systemic changes |
+
+Start with the smallest team that covers all required dimensions. More workers = more parallelism but more coordination overhead.
 
 **Spawning examples:**
 - New user-facing command -> Architect + Senior Coder + UX/UI + Tester + Security + Technical Writer
@@ -259,11 +270,11 @@ If user wants isolation (or task warrants it), follow `worktree-protocol.md`:
 
 ### Task-by-Task Execution
 
-On approval, begin execution. **Agent team per task: implementer + spec reviewer + quality reviewer.**
+On approval, begin execution. **Agent team per task: implementer + audit team (spec + simplify + harden).**
 
 ### Execution Loop
 
-Each task gets its own **task team** — three agents working in sequence:
+Each task gets its own **task team** — implementer builds, audit team reviews:
 
 ```
 For each task in plan:
@@ -275,18 +286,46 @@ For each task in plan:
      - Do NOT make implementer read plan file — provide full text
   3. Handle implementer status (see below)
 
-  REVIEW TEAM (only if implementer reports DONE or DONE_WITH_CONCERNS)
-  4. Dispatch spec reviewer (see prompts/spec-reviewer.md) — model: haiku
-     - If issues found -> implementer fixes -> re-review until clean
-  5. Record HEAD_SHA (git rev-parse HEAD)
-  6. Dispatch quality reviewer (see prompts/quality-reviewer.md) — model: sonnet
-     - If issues found -> implementer fixes -> re-review until clean
+  AUDIT TEAM (only if implementer reports DONE or DONE_WITH_CONCERNS)
+  4. Record HEAD_SHA, collect modified files list (git diff --name-only BASE..HEAD)
+  5. Dispatch audit team IN PARALLEL (all read-only Explore agents):
+     a. Spec reviewer (see prompts/spec-reviewer.md) — "does it match the spec?"
+     b. Simplify auditor (see prompts/simplify-auditor.md) — "is there a simpler way?"
+     c. Harden auditor (see prompts/harden-auditor.md) — "what would an attacker try?"
+  6. Triage findings (see Audit Triage below)
+  7. If findings to fix -> implementer fixes -> re-audit (max 3 rounds)
 
   GATE
-  7. VERIFY: run test suite, confirm pass with fresh output
-  8. Mark task complete
-  9. Next task
+  8. VERIFY: run test suite, confirm pass with fresh output
+  9. Mark task complete
+  10. Next task
 ```
+
+**Audit agents MUST be read-only (Explore).** This prevents reviewers from silently "fixing" things instead of flagging them. The separation between finding and fixing is the whole point.
+
+**Fresh audit agents each round.** Don't reuse auditors — carried context biases toward "already checked" areas.
+
+### Audit Triage
+
+After collecting findings from all auditors:
+
+**Refactor gate:** For any finding categorized as "refactor" (not a bug or security issue), apply this bar: *"Would a senior engineer say this is clearly wrong, not just imperfect?"* Reject style preferences and marginal improvements.
+
+**Severity routing:**
+- **Critical/High** — implementer fixes immediately, re-audit
+- **Medium** — include in next fix round
+- **Low/Cosmetic** — fix inline if trivial, otherwise note in completion summary and skip
+
+**Budget check:** If fix rounds add 30%+ to the original implementation diff, tighten scope — skip medium/low simplify findings, focus on harden patches and spec gaps.
+
+**Drift check (between audit rounds):** Before spawning the next audit round, re-read the original task description. If findings are pulling into unrelated areas or scope has expanded beyond the task, re-scope or exit the audit loop.
+
+### Audit Loop Exit
+
+Exit when ANY are true:
+1. **Clean audit** — all auditors report zero findings
+2. **Low-only round** — all remaining findings are low severity, fix inline
+3. **Loop cap reached** — 3 audit rounds completed. Fix remaining critical/high inline, log unresolved medium/low in completion summary
 
 ### Implementer Status Protocol
 
@@ -312,7 +351,7 @@ When a task fails during execution (test failures, unexpected behavior, build er
 
 1. **Investigate** — read errors completely, reproduce, check recent changes, trace data flow
 2. **Analyze** — find working examples, compare against references, identify differences
-3. **Hypothesize** — single hypothesis, test minimally, one variable at a time
+3. **Hypothesize** — simple bugs: sequential single hypothesis. Complex bugs with multiple plausible causes: dispatch parallel debug team (one Explore agent per hypothesis)
 4. **Implement** — create failing test, fix root cause, verify
 
 **Iron law: no fixes without root cause investigation.** If 3+ fix attempts fail, question the architecture and escalate to user.
@@ -362,6 +401,29 @@ Which option?
    - **Discard:** require user to type "discard" to confirm -> delete branch -> cleanup worktree
 
 **Never** proceed with failing tests, merge without verifying, or delete work without confirmation.
+
+### Learning Loop (completion summary)
+
+After all tasks, produce a summary that includes audit findings across all rounds:
+
+```
+## Completion Summary
+
+**Audit rounds:** N of 3 max
+**Exit reason:** clean audit | low-only round | loop cap
+
+### Recurring patterns
+- [pattern]: appeared N times across rounds, severity, resolution
+- [pattern]: ...
+
+### Unresolved (low severity, deferred)
+- [finding]: reason deferred
+
+### Out-of-scope observations
+- [anything auditors flagged outside the task scope]
+```
+
+Recurring patterns are the signal — if the same finding type appears across multiple tasks or rounds, it indicates a systemic issue worth noting for future work.
 
 ---
 
@@ -427,8 +489,10 @@ All protocol files live in the coding-team skill directory:
 | File | Purpose |
 |------|---------|
 | `prompts/implementer.md` | Implementer (task team member) prompt template |
-| `prompts/spec-reviewer.md` | Spec compliance reviewer template |
-| `prompts/quality-reviewer.md` | Code quality reviewer template |
+| `prompts/spec-reviewer.md` | Spec compliance reviewer (read-only) |
+| `prompts/simplify-auditor.md` | Simplify auditor — clarity and complexity (read-only) |
+| `prompts/harden-auditor.md` | Harden auditor — security and resilience (read-only) |
+| `prompts/quality-reviewer.md` | Legacy quality reviewer (use simplify + harden instead) |
 | `prompts/spec-doc-reviewer.md` | Design doc reviewer template |
 | `prompts/plan-doc-reviewer.md` | Plan doc reviewer template |
 | `debugging-protocol.md` | Four-phase root cause investigation |

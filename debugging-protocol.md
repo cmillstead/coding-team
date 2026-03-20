@@ -31,10 +31,19 @@ If you haven't completed Phase 1, you cannot propose fixes.
 
 ## Phase 3: Hypothesis and Testing
 
+**Simple bugs (single plausible cause):** Sequential approach.
 1. **Form single hypothesis** — "I think X is the root cause because Y." Be specific.
 2. **Test minimally** — smallest possible change, one variable at a time.
 3. **Verify** — did it work? Yes -> Phase 4. No -> form NEW hypothesis. Don't stack fixes.
 4. **When you don't know** — say so. Don't pretend. Ask for help or research more.
+
+**Complex bugs (multiple plausible causes):** Parallel hypothesis investigation.
+When Phase 2 reveals 2-3 competing theories, dispatch a **debug team** — one agent per hypothesis, all investigating in parallel (read-only Explore agents). Each agent:
+- States the hypothesis clearly
+- Gathers evidence for/against
+- Reports: confirmed, refuted, or inconclusive with evidence
+
+The agent that confirms its hypothesis (or the strongest evidence) informs Phase 4. This is faster than sequential hypothesis testing for multi-component bugs.
 
 ## Phase 4: Implementation
 
