@@ -144,6 +144,16 @@ A **learning loop summary** captures recurring audit patterns across all rounds,
 
 Everything is self-contained — no external plugin dependencies.
 
+### Agent teams (optional)
+
+When Claude Code's experimental agent teams feature is available (`CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`, v2.1.32+, Opus 4.6), the skill automatically upgrades three coordination patterns from subagents to native agent teams with peer-to-peer messaging:
+
+- **Debugging with 3+ competing hypotheses** — investigators message each other when finding cross-cutting evidence, eliminating dead-end investigations in real time
+- **Design cross-review with 4+ workers** — workers message siblings directly during cross-review instead of routing everything through the leader
+- **Parallel dispatch for 3+ domains with shared infrastructure** — teams flag cross-domain discoveries immediately, preventing conflicting fixes
+
+When agent teams aren't available, all three patterns fall back to the existing subagent behavior. Detection happens automatically at session start.
+
 ### TDD
 
 All implementation follows test-driven development:
@@ -163,7 +173,7 @@ Four-phase root cause investigation (`debugging-protocol.md`):
 
 1. **Investigate** — read errors completely, reproduce, check recent changes, trace data flow
 2. **Analyze** — match against known patterns (race conditions, nil propagation, state corruption, integration failures, config drift, stale cache), check git log for prior fixes in same area
-3. **Hypothesize** — simple bugs: sequential single hypothesis. Complex bugs with multiple plausible causes: dispatch parallel debug team (one read-only Explore agent per hypothesis, investigating concurrently)
+3. **Hypothesize** — simple bugs: sequential single hypothesis. Complex bugs with multiple plausible causes: dispatch parallel debug team. With agent teams (3+ hypotheses): investigators message each other to disprove theories in real time. Without: independent read-only Explore agents per hypothesis
 4. **Implement** — create failing test, fix root cause, verify
 
 **Iron law:** no fixes without root cause investigation. If 3+ fix attempts fail, question the architecture and escalate to user.
@@ -190,7 +200,7 @@ Technical evaluation of feedback (`review-reception-protocol.md`). Read, underst
 
 ### Parallel dispatch
 
-Multiple agent teams for independent problems (`parallel-dispatch-protocol.md`). When 3+ failures have different root causes in independent subsystems, dispatch one team per domain in parallel. Each team gets focused scope, clear context, constraints, and expected output format. Results are reviewed for conflicts and verified with a full test suite run.
+Multiple agent teams for independent problems (`parallel-dispatch-protocol.md`). When 3+ failures have different root causes in independent subsystems, dispatch one team per domain in parallel. With agent teams (3+ domains, possibly shared infrastructure): teammates message each other when discovering cross-domain dependencies, preventing conflicting fixes. Without: independent subagent teams. Results are reviewed for conflicts and verified with a full test suite run.
 
 ### Model routing
 

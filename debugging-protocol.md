@@ -50,7 +50,50 @@ Also check:
 4. **When you don't know** — say so. Don't pretend. Ask for help or research more.
 
 **Complex bugs (multiple plausible causes):** Parallel hypothesis investigation.
-When Phase 2 reveals 2-3 competing theories, dispatch a **debug team** — one agent per hypothesis, all investigating in parallel (read-only Explore agents). Each agent:
+
+**If AGENT_TEAMS_AVAILABLE = true and 3+ competing hypotheses:**
+
+Use native agent teams instead of independent Explore subagents.
+
+1. Create team:
+   `Teammate({ operation: "spawnTeam", team_name: "debug-<feature>-<timestamp>" })`
+
+2. Create tasks (one per hypothesis):
+   ```
+   TaskCreate({
+     subject: "Hypothesis N: <description>",
+     description: "Investigate whether <hypothesis>. Gather evidence for AND against. Message other teammates if you find evidence that affects their hypothesis. Report: confirmed, refuted, or inconclusive with evidence.",
+     activeForm: "Investigating..."
+   })
+   ```
+
+3. Spawn investigators (one per hypothesis, all read-only Explore):
+   - Spawn prompt includes: the hypothesis, relevant code paths, error context, and instruction to message peers when finding cross-cutting evidence
+   - Explicit instruction: "If you find evidence that refutes another teammate's hypothesis, message them immediately via SendMessage. If another teammate sends you evidence against your hypothesis, pivot your investigation."
+   - All teammates run in Explore (read-only) mode
+
+4. Monitor via lead:
+   - Watch for idle notifications (teammate finished investigating)
+   - Check inbox for cross-team findings
+   - When all teammates report or idle: collect results
+
+5. Synthesize:
+   - The hypothesis with the strongest confirming evidence (and no refuting evidence from peers) informs Phase 4
+   - If debate produced convergence on a root cause not in any original hypothesis, use that
+
+6. Shutdown and cleanup:
+   `Teammate({ operation: "requestShutdown", target_agent_id: "<each>" })`
+   Wait for approvals.
+   `Teammate({ operation: "cleanup" })`
+
+**Fall back to subagents when:**
+- `AGENT_TEAMS_AVAILABLE = false`
+- Only 2 hypotheses (overhead not justified — sequential or simple parallel subagents suffice)
+- Hypotheses are trivially independent (e.g., different subsystems with no shared state — no cross-cutting evidence possible)
+
+**Subagent path (AGENT_TEAMS_AVAILABLE = false, or 2 hypotheses):**
+
+Dispatch a **debug team** — one agent per hypothesis, all investigating in parallel (read-only Explore agents). Each agent:
 - States the hypothesis clearly
 - Gathers evidence for/against
 - Reports: confirmed, refuted, or inconclusive with evidence

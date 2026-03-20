@@ -16,6 +16,20 @@ When and how to dispatch multiple agent teams in parallel for independent proble
 - Teams would interfere (editing same files, using same resources)
 - Exploratory debugging (don't know what's broken yet)
 
+## Choosing Coordination Mode
+
+**Use native agent teams (when AGENT_TEAMS_AVAILABLE = true) if:**
+- 3+ independent domains AND
+- There is ANY chance domains share underlying infrastructure (shared DB, shared config, shared auth, shared state) AND
+- Failures surfaced around the same time (possible common trigger)
+
+**Use subagents (current behavior) if:**
+- AGENT_TEAMS_AVAILABLE = false, OR
+- Domains are provably independent (different repos, different services, zero shared code), OR
+- 2 domains only (overhead not justified)
+
+---
+
 ## The Pattern
 
 ### 1. Identify Independent Domains
@@ -33,7 +47,39 @@ Each investigation team gets:
 
 Each team can be a single agent (for simple investigations) or a full task team (implementer + reviewers) for complex fixes.
 
-### 3. Dispatch in Parallel
+### 3. Dispatch
+
+**Agent teams mode (AGENT_TEAMS_AVAILABLE = true, 3+ domains, possibly shared infrastructure):**
+
+1. Create team:
+   `Teammate({ operation: "spawnTeam", team_name: "parallel-fix-<timestamp>" })`
+
+2. Create tasks (one per domain):
+   ```
+   TaskCreate({
+     subject: "Fix: <domain>",
+     description: "<scope, goal, context, constraints, expected output>",
+     activeForm: "Investigating <domain>..."
+   })
+   ```
+
+3. Spawn one teammate per domain:
+   - Spawn prompt includes: specific scope, error messages, relevant code, constraints, expected output format
+   - Additional instruction: "If during investigation you discover this failure is related to another domain being investigated by a teammate, message them immediately. Do NOT proceed with a fix that depends on assumptions about another domain's state without coordinating."
+
+4. Monitor:
+   - Watch for cross-domain messages (the signal that "independent" failures may share a root cause)
+   - If cross-domain dependency discovered: pause affected teams, re-scope, potentially merge into a single investigation
+   - Otherwise: let teams work to completion
+
+5. Review and integrate (same as subagent step 4 below)
+
+6. Shutdown and cleanup:
+   `Teammate({ operation: "requestShutdown", target_agent_id: "<each>" })`
+   Wait for approvals.
+   `Teammate({ operation: "cleanup" })`
+
+**Subagent mode (AGENT_TEAMS_AVAILABLE = false, or 2 domains, or provably independent):**
 
 Use the Agent tool with multiple calls in a single message. All teams run concurrently.
 

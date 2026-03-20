@@ -15,6 +15,23 @@ Use `/brainstorming` for business ideas, strategy, and non-code exploration.
 
 When invoked at the start of a conversation (or when the user asks for help with a code task), determine the right entry point:
 
+**Step 0: Detect available coordination tools.**
+
+```
+AGENT_TEAMS_AVAILABLE = false
+
+Check if Teammate tool is available in this session.
+Check if SendMessage tool is available in this session.
+Check if TaskCreate (team-aware variant) is available.
+
+If ALL three are present:
+  AGENT_TEAMS_AVAILABLE = true
+```
+
+Store this flag for the session. Pass it to any protocol that has a teams-vs-subagents decision point.
+
+**Note:** The `Task` tool (subagent spawner) and the `TaskCreate`/`TaskList`/`TaskUpdate` tools (team task management) are different tools. Agent teams require both — `Task` for spawning agents into teams, and `TaskCreate`/`TaskList` for the shared task list. If only `Task` is available, `AGENT_TEAMS_AVAILABLE` remains false.
+
 **Step 1: Check if this is a continuation.** If the user mentions a phase number, task number, feature name, "continue", "pick up where I left off", or any reference to prior work — this is a **resumed session**. Go to Step 2 before routing.
 
 **Step 2: Discover existing plans.** You have NO memory of prior conversations. Do NOT guess filenames.
@@ -99,7 +116,25 @@ Create **one Team Leader task** using `TaskCreate` with: project summary, user's
 3. Create workers simultaneously via `TaskCreate`. Pass each worker: full context + all sibling task IDs + an explicit **out-of-scope statement** (what this worker should NOT address) + their **skill advisory block**.
 4. Wait for all workers (`TaskList`).
 5. **Quality check** — before synthesizing, evaluate each worker's output. If a worker's output is off-scope, thin, or clearly low quality: respawn it with a more constrained prompt. Don't patch bad output — scrap and rerun.
-6. Cross-review pass — create follow-up tasks where workers read sibling outputs via `TaskOutput(sibling_id)` and flag cross-domain concerns.
+6. Cross-review pass:
+
+   **If AGENT_TEAMS_AVAILABLE = true AND team has 4+ workers:**
+
+   a. After all workers complete their primary analysis, broadcast a cross-review prompt:
+      ```
+      SendMessage({
+        operation: "broadcast",
+        message: "Cross-review phase. Read your siblings' outputs (available in the shared task list). Flag any cross-domain concerns. Message the relevant sibling directly if you need clarification or see a conflict with your own findings. Report cross-domain flags to team-lead when done."
+      })
+      ```
+   b. Workers message each other directly to resolve cross-domain questions.
+   c. Team Leader collects final cross-review flags from each worker's messages.
+   d. Shutdown workers after collection.
+
+   **Otherwise (AGENT_TEAMS_AVAILABLE = false OR team < 4 workers):**
+
+   Create follow-up tasks where workers read sibling outputs via `TaskOutput(sibling_id)` and flag cross-domain concerns.
+
 7. Synthesize into a design doc. Return it.
 
 **Skill advisory block format (included in each worker's prompt):**
@@ -567,6 +602,73 @@ All protocol files live in the coding-team skill directory:
 | `worktree-protocol.md` | Git worktree setup and cleanup |
 | `review-reception-protocol.md` | How to handle review feedback |
 | `parallel-dispatch-protocol.md` | When/how to dispatch parallel agent teams |
+
+---
+
+## Agent Teams Routing Summary
+
+When `AGENT_TEAMS_AVAILABLE = true`, use this table to decide coordination mode:
+
+| Situation | Agent Teams? | Rationale |
+|-----------|-------------|-----------|
+| Phase 2: design workers (primary analysis) | No | Workers analyze independently, report to leader. Subagents are correct. |
+| Phase 2: cross-review pass, 4+ workers | **Yes** | Direct peer messaging for cross-domain flags beats leader-mediated routing. |
+| Phase 2: cross-review pass, <4 workers | No | Small team, leader mediation is fine. |
+| Phase 3: spec review | No | Single reviewer, iterative. No parallelism. |
+| Phase 4: planning | No | Single planning worker. No parallelism. |
+| Phase 5: task implementation | No | One implementer per task. Subagent. |
+| Phase 5: audit team (spec/simplify/harden) | No | Read-only reviewers report findings to lead. No inter-reviewer coordination needed. |
+| Debugging: simple bug | No | Sequential, single agent. |
+| Debugging: 2 hypotheses | No | Subagents suffice, overhead not justified. |
+| Debugging: 3+ hypotheses with possible cross-cutting evidence | **Yes** | Scientific debate pattern. Investigators disprove each other in real time. |
+| Parallel dispatch: 2 domains, provably independent | No | Subagents. |
+| Parallel dispatch: 3+ domains, possibly shared infrastructure | **Yes** | Cross-domain discovery prevents wasted work on conflicting fixes. |
+
+**Default is subagents.** Agent teams are the exception for specific high-value patterns, not the rule.
+
+---
+
+## Agent Teams Lifecycle
+
+All agent team usage follows this lifecycle:
+
+```
+1. CREATE TEAM
+   Teammate({ operation: "spawnTeam", team_name: "<descriptive-name>" })
+
+2. CREATE TASKS
+   TaskCreate({ subject, description, activeForm })
+   - Set dependencies with blocked_by if tasks have ordering requirements
+
+3. SPAWN TEAMMATES
+   Use Task tool with team_name parameter to spawn into the team
+   - Each teammate gets: full context, clear scope, constraints, output format
+   - Teammates auto-load CLAUDE.md, MCP servers, and skills
+   - Teammates do NOT inherit lead's conversation history — include everything they need in the spawn prompt
+
+4. COORDINATE
+   - Monitor via TaskList for task status
+   - Check inbox for messages from teammates
+   - Broadcast when all teammates need the same information
+   - Direct message for targeted coordination
+
+5. SHUTDOWN
+   For each teammate:
+     Teammate({ operation: "requestShutdown", target_agent_id: "<id>" })
+   Wait for each to approve (they finish current work first)
+
+6. CLEANUP
+   Teammate({ operation: "cleanup" })
+   - Only the lead runs cleanup
+   - Verify all teammates are shut down before cleanup
+   - Cleanup removes shared team resources (inbox, config, task files)
+```
+
+**Never:**
+- Let teammates run cleanup (their team context may not resolve correctly)
+- Skip shutdown and go straight to cleanup (check for active teammates first)
+- Spawn teammates without the team existing (spawnTeam first)
+- Forget to include task-specific context in spawn prompts (teammates have no conversation history)
 
 ---
 
