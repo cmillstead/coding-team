@@ -48,7 +48,10 @@ These apply to every agent in the team:
 1. Read project context — files, docs, recent commits, CLAUDE.md
 2. Ask clarifying questions **one at a time** — multiple choice preferred, open-ended when needed
 3. If upcoming questions involve visual content (mockups, layouts, diagrams), offer the visual companion as its own standalone message before continuing questions
-4. Propose 2-3 approaches with trade-offs and your recommendation
+4. Propose 2-3 approaches with trade-offs and your recommendation. Structure:
+   - At least one **minimal viable** approach (fewest files, smallest diff)
+   - At least one **ideal architecture** approach (best long-term trajectory)
+   - For complex features, add a **dream state** sketch: current state → this plan → 12-month ideal
 5. Get user approval on direction
 
 Do NOT create the Team Leader until the user has approved an approach.
@@ -154,6 +157,14 @@ Create a **Planning Worker task** with: design doc + full project context.
 
 Worker is Architect + Senior Coder. Produces implementation plan.
 
+### Step 0: Scope Challenge (before planning)
+
+Before writing tasks, the planning worker must answer:
+
+1. **What existing code already solves sub-problems?** Can we reuse rather than rebuild?
+2. **What is the minimum set of changes?** Flag work that could be deferred without blocking the core goal.
+3. **Complexity smell:** If the plan touches 8+ files or introduces 2+ new classes/services, challenge whether the same goal can be achieved with fewer moving parts.
+
 ### Plan Document Format
 
 Every plan starts with this header:
@@ -232,13 +243,30 @@ git commit -m "feat: add specific feature"
 - Never mock the thing being tested
 - Every task batch ends with: run tests -> run linter -> confirm both pass -> commit
 
-**Quality gate — self-review before returning:**
+### Required Plan Sections
+
+Beyond the task list, every plan must include:
+
+**Failure modes** — for each new codepath or integration point:
+
+| Codepath | Failure mode | Tested? | Error handling? | User sees |
+|---|---|---|---|---|
+| `module.function` | timeout on external call | ? | ? | ? |
+
+Any row with tested=no AND error handling=no AND user sees=silent → **critical gap** that must be addressed in a task.
+
+**NOT in scope** — work considered and explicitly deferred, with one-line rationale each. Prevents scope creep and captures ideas for future work.
+
+**What already exists** — existing code/flows that partially solve sub-problems and whether the plan reuses them.
+
+### Quality gate — self-review before returning
 
 1. Pick 3 tasks at random — could a developer implement each without asking a single question?
 2. Are all file references exact (`src/config.rs:14`, not "the config file")?
 3. Does every feature task have a corresponding test task?
 4. Are there security implications not addressed?
 5. Is there any step that silently assumes context the implementer won't have?
+6. Does the failure modes table have any critical gaps (no test + no handling + silent)?
 
 ### Plan Review Loop
 
