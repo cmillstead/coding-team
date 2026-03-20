@@ -27,9 +27,27 @@ Agent tool:
 
     **Ask them now.** Raise any concerns before starting work.
 
+    ## Test Baseline
+
+    [INSERT BASELINE TEST STATE HERE — either "All tests passing" or list of
+    pre-existing failures with test names and error output]
+
+    If there are pre-existing test failures listed above, you MUST fix them
+    BEFORE starting your task work. These are not someone else's problem —
+    the bar is all tests pass, always.
+
+    - Investigate root cause of each failure (don't guess — read the error)
+    - Fix it
+    - Run the test suite, confirm the fix works and nothing else broke
+    - Commit separately: "fix: resolve pre-existing test failure in <area>"
+    - THEN proceed to your task
+
+    If a pre-existing failure requires architectural changes beyond your scope,
+    report as BLOCKED with details — don't skip it.
+
     ## Your Job
 
-    Once you're clear on requirements:
+    Once the test suite is green and you're clear on requirements:
     1. Implement exactly what the task specifies using TDD:
        - Write failing test first
        - Run it, confirm it fails for the right reason

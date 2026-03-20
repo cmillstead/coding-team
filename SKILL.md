@@ -305,12 +305,27 @@ On approval, begin execution. **Agent team per task: implementer + audit team (s
 Each task gets its own **task team** — implementer builds, audit team reviews:
 
 ```
+BASELINE (once, before first task)
+  0. Run full test suite and record results as BASELINE_FAILURES
+     - If all tests pass: baseline is clean
+     - If tests fail: these are PRE-EXISTING failures that must be fixed
+     - Pass BASELINE_FAILURES to every implementer
+
 For each task in plan:
   1. Record BASE_SHA (git rev-parse HEAD)
 
+  PRE-EXISTING FAILURES (if any remain from baseline)
+  1a. The first implementer that encounters pre-existing failures MUST fix them
+      before starting task work. This is non-negotiable — all tests must pass
+      before new work begins. Include the failures in the implementer prompt
+      as a "Fix before starting" section.
+  1b. If pre-existing failures are in an unrelated area and the fix is non-trivial,
+      treat it as a separate mini-task: investigate root cause, fix, verify, commit
+      with "fix: resolve pre-existing test failure in <area>" before proceeding.
+
   IMPLEMENTER (see prompts/implementer.md)
   2. Dispatch implementer — use model tier from the plan
-     - Pass: full task text, context, working directory
+     - Pass: full task text, context, working directory, baseline test state
      - Do NOT make implementer read plan file — provide full text
   3. Handle implementer status (see below)
 
@@ -428,7 +443,7 @@ Which option?
    - **Keep as-is:** report branch name and worktree path, done
    - **Discard:** require user to type "discard" to confirm -> delete branch -> cleanup worktree
 
-**Never** proceed with failing tests, merge without verifying, or delete work without confirmation.
+**Never** proceed with failing tests, merge without verifying, delete work without confirmation, or dismiss pre-existing test failures as "not our problem."
 
 ### Learning Loop (completion summary)
 
@@ -544,6 +559,7 @@ All protocol files live in the coding-team skill directory:
 - Fix bugs without root cause investigation
 - Retry the same failed approach more than 3 times
 - Performatively agree with review feedback without verifying
+- Dismiss pre-existing test failures — fix them or escalate, never ignore
 
 **Always:**
 - Verify tests before offering completion options

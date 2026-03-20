@@ -26,6 +26,7 @@ BEFORE claiming any status or expressing satisfaction:
 | Bug fixed | Test original symptom: passes | Code changed, assumed fixed |
 | Agent completed | VCS diff shows changes | Agent reports "success" |
 | Requirements met | Line-by-line checklist | Tests passing |
+| Baseline clean | Full test suite: 0 failures before task starts | "Pre-existing, not our problem" |
 
 ## When to Apply
 

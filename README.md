@@ -40,6 +40,8 @@ Assembles specialist agent teams to collaboratively work through code tasks:
 
 ## Execution: task teams
 
+Before the first task, the full test suite runs to establish a **baseline**. If any tests are already failing, the first implementer fixes them before starting task work — no pre-existing failure is dismissed as "not our problem."
+
 Each task gets its own team:
 
 - **Implementer** — builds and tests the code (TDD red-green-refactor)
@@ -60,7 +62,7 @@ Everything is self-contained — no external plugin dependencies:
 
 - **TDD** — red-green-refactor, no code without a failing test
 - **Debugging** — four-phase root cause investigation; parallel hypothesis teams for complex bugs
-- **Verification** — evidence before claims at every gate
+- **Verification** — evidence before claims at every gate, test baseline before execution
 - **Worktrees** — git worktree isolation for feature work
 - **Review reception** — technical evaluation of feedback, push back when wrong
 - **Parallel dispatch** — multiple agent teams for independent problems
