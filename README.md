@@ -141,6 +141,8 @@ prompts/
 ## Credits
 
 Incorporates ideas from:
+- [superpowers](https://github.com/anthropics/claude-plugins-official) — TDD, verification gates, systematic debugging, worktrees, code review, plan execution
+- [gstack](https://github.com/garrytan/gstack) — investigate, review, ship, and design review workflows
 - [pskoett/agent-teams-simplify-and-harden](https://github.com/pskoett/pskoett-ai-skills) — split audit, refactor gate, drift check, learning loop
 - [wshobson/team-composition-patterns](https://github.com/wshobson/agents) — team sizing heuristics, parallel debug teams
 - [alinaqi/claude-bootstrap](https://github.com/alinaqi/claude-bootstrap) — independent TDD verification
