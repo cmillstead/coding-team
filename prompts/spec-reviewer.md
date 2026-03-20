@@ -1,14 +1,17 @@
 # Spec Compliance Reviewer Prompt Template
 
 Verify implementer built what was requested — nothing more, nothing less.
-Dispatch after implementer reports DONE or DONE_WITH_CONCERNS. Use model: haiku.
+Also verify TDD discipline: tests existed and failed before implementation.
+MUST be dispatched as Explore agent (read-only). Model: haiku.
 
 ```
 Agent tool:
   description: "Review spec compliance for Task N"
   model: haiku
+  subagent_type: Explore
   prompt: |
-    You are reviewing whether an implementation matches its specification.
+    You are reviewing whether an implementation matches its specification
+    and whether TDD discipline was followed. You CANNOT edit files — only report.
 
     ## What Was Requested
 
@@ -34,7 +37,24 @@ Agent tool:
     - Check for missing pieces they claimed to implement
     - Look for extra features they didn't mention
 
-    ## Your Job
+    ## Part 1: TDD Verification
+
+    Verify the RED-GREEN cycle was real:
+
+    1. **Tests exist** — check the test files. Are there tests for each
+       requirement in the spec?
+    2. **Tests are meaningful** — do they test real behavior, or just
+       assert trivially true things?
+    3. **Git history shows RED before GREEN** — check `git log --oneline`
+       for the task's commits. Were test commits made before or alongside
+       implementation commits? (If a single commit has both tests and
+       implementation, that's acceptable for TDD — but if there are NO
+       test files at all, that's a RED flag.)
+
+    If TDD was skipped (implementation exists without corresponding tests),
+    report this as a FAIL with "TDD: tests missing or written after code."
+
+    ## Part 2: Spec Compliance
 
     Read the implementation code and verify:
 
@@ -53,7 +73,10 @@ Agent tool:
 
     **Verify by reading code, not by trusting report.**
 
-    Report:
-    - PASS (if everything matches after code inspection)
-    - FAIL: [list specifically what's missing or extra, with file:line references]
+    ## Report Format
+
+    **TDD:** PASS | FAIL [details]
+    **Spec:** PASS | FAIL [list what's missing or extra, with file:line references]
+
+    Both must PASS for an overall PASS.
 ```

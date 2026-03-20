@@ -289,7 +289,7 @@ For each task in plan:
   AUDIT TEAM (only if implementer reports DONE or DONE_WITH_CONCERNS)
   4. Record HEAD_SHA, collect modified files list (git diff --name-only BASE..HEAD)
   5. Dispatch audit team IN PARALLEL (all read-only Explore agents):
-     a. Spec reviewer (see prompts/spec-reviewer.md) — "does it match the spec?"
+     a. Spec reviewer (see prompts/spec-reviewer.md) — "does it match the spec? was TDD followed?"
      b. Simplify auditor (see prompts/simplify-auditor.md) — "is there a simpler way?"
      c. Harden auditor (see prompts/harden-auditor.md) — "what would an attacker try?"
   6. Triage findings (see Audit Triage below)
@@ -489,7 +489,7 @@ All protocol files live in the coding-team skill directory:
 | File | Purpose |
 |------|---------|
 | `prompts/implementer.md` | Implementer (task team member) prompt template |
-| `prompts/spec-reviewer.md` | Spec compliance reviewer (read-only) |
+| `prompts/spec-reviewer.md` | Spec compliance + TDD verification (read-only) |
 | `prompts/simplify-auditor.md` | Simplify auditor — clarity and complexity (read-only) |
 | `prompts/harden-auditor.md` | Harden auditor — security and resilience (read-only) |
 | `prompts/quality-reviewer.md` | Legacy quality reviewer (use simplify + harden instead) |
