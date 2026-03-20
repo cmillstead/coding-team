@@ -13,6 +13,22 @@ Assembles specialist agent teams to collaboratively work through code tasks. The
 5. **Execution** — task teams (implementer + audit team) build and verify
 6. **Completion** — full verification, learning loop, then merge / PR / keep / discard
 
+## Architecture: composable phases
+
+The main SKILL.md is a slim router (~165 lines) that knows the phase sequence, input/output contracts, and which file to read for details. When Claude enters a phase, it reads only that phase's file. Standalone skills load independently when invoked directly.
+
+**Context window budget:**
+
+| Invocation | Loaded | Lines |
+|---|---|---|
+| `/coding-team` (router decides) | Main SKILL.md | ~165 |
+| `/coding-team` → Phase 2 (heaviest) | Main + `phases/design-team.md` | ~315 |
+| `/coding-team` → Phase 5 (typical) | Main + `phases/execution.md` | ~280 |
+| `/debug` (standalone) | `skills/debug/SKILL.md` only | ~110 |
+| `/verify` (standalone) | `skills/verify/SKILL.md` only | ~50 |
+
+Phase files do not reference each other. The main SKILL.md's phase contracts define the input/output handoff between phases.
+
 ## How it works
 
 ### Session routing
@@ -259,9 +275,16 @@ For simple tasks (typo, rename, single-file fix), skip the skill and just do it 
 ## File structure
 
 ```
-SKILL.md                          # main entry point (orchestration logic)
+SKILL.md                          # router + phase contracts (~165 lines)
 README.md                         # this file (user guide)
 coding-team-router.py             # session-start hook
+phases/                           # pipeline phase details (loaded on demand)
+  dialogue.md                     # Phase 1 — clarify, propose, approve
+  design-team.md                  # Phase 2 — specialist workers + synthesis
+  spec-review.md                  # Phase 3 — write and validate design spec
+  planning.md                     # Phase 4 — detailed TDD implementation plan
+  execution.md                    # Phase 5 — task teams + audit loops
+  completion.md                   # Phase 6 — verify, merge/PR, learning loop
 skills/                           # standalone skills (can be invoked independently)
   debug/SKILL.md                  # /debug — root cause investigation
   verify/SKILL.md                 # /verify — evidence-before-claims gates

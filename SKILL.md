@@ -84,552 +84,51 @@ These apply to every agent in the team:
 
 ---
 
-## Phase 1: Dialogue (Main Claude)
-
-1. Read project context — files, docs, recent commits, CLAUDE.md
-2. Ask clarifying questions **one at a time** — multiple choice preferred, open-ended when needed
-3. If upcoming questions involve visual content (mockups, layouts, diagrams), offer the visual companion as its own standalone message before continuing questions
-4. Propose 2-3 approaches with trade-offs and your recommendation. Structure:
-   - At least one **minimal viable** approach (fewest files, smallest diff)
-   - At least one **ideal architecture** approach (best long-term trajectory)
-   - For complex features, add a **dream state** sketch: current state → this plan → 12-month ideal
-5. Get user approval on direction
-
-Do NOT create the Team Leader until the user has approved an approach.
-
-**Scope check:** If the request describes multiple independent subsystems, flag this immediately. Help decompose into sub-projects before detailed design. Each sub-project gets its own design -> plan -> execution cycle.
-
----
-
-## Phase 2: Design Team
-
-Create **one Team Leader task** using `TaskCreate` with: project summary, user's idea, approved approach, and all relevant context from Phase 1.
-
-**Team Leader responsibilities:**
-
-1. Decide which specialist workers to spawn, using the sizing heuristics below. Always explain the choice.
-2. **Map skills to workers:**
-   a. Read `~/.claude/skills/skill-taxonomy.yml`
-   b. Identify which categories are relevant to the current task (match task description against category descriptions and skill use-cases)
-   c. For each worker, filter to skills whose category lists that worker's role
-   d. Build an advisory skill block for each worker's prompt (see format below)
-3. Create workers simultaneously via `TaskCreate`. Pass each worker: full context + all sibling task IDs + an explicit **out-of-scope statement** (what this worker should NOT address) + their **skill advisory block**.
-4. Wait for all workers (`TaskList`).
-5. **Quality check** — before synthesizing, evaluate each worker's output. If a worker's output is off-scope, thin, or clearly low quality: respawn it with a more constrained prompt. Don't patch bad output — scrap and rerun.
-6. Cross-review pass:
-
-   **If AGENT_TEAMS_AVAILABLE = true AND team has 4+ workers:**
-
-   a. After all workers complete their primary analysis, broadcast a cross-review prompt:
-      ```
-      SendMessage({
-        operation: "broadcast",
-        message: "Cross-review phase. Read your siblings' outputs (available in the shared task list). Flag any cross-domain concerns. Message the relevant sibling directly if you need clarification or see a conflict with your own findings. Report cross-domain flags to team-lead when done."
-      })
-      ```
-   b. Workers message each other directly to resolve cross-domain questions.
-   c. Team Leader collects final cross-review flags from each worker's messages.
-   d. Shutdown workers after collection.
-
-   **Otherwise (AGENT_TEAMS_AVAILABLE = false OR team < 4 workers):**
-
-   Create follow-up tasks where workers read sibling outputs via `TaskOutput(sibling_id)` and flag cross-domain concerns.
-
-7. Synthesize into a design doc. Return it.
-
-**Skill advisory block format (included in each worker's prompt):**
-
-> ## Available Skills
->
-> The following skills are installed and relevant to this task.
-> Invoke any that would strengthen your analysis using the Skill tool.
->
-> - `skill-name` — one-line description of when to use it
-
-If no skills match a worker's role + the task's categories, omit the block for that worker.
-
-**Specialist roles:**
-
-| Role | Focus | Skip when |
-|------|-------|-----------|
-| Architect | System design, composability, data flow, fit with existing architecture | Trivial bug fixes |
-| Senior Coder | Implementation approach, patterns, idiomatic code, complexity trade-offs | Never |
-| UX/UI Designer | First-run UX, error messages, command discoverability, feedback, consistency | Pure backend / no user-facing surface |
-| Tester | Test strategy, edge cases, what's hard to test, integration vs unit | Never |
-| Security Engineer | Trust boundaries, input validation, threat model, new attack surface | Pure refactors with no new surface area |
-| DevOps/Infra | CI/CD, deployment, containerization, observability, build pipeline | No deployment or infra changes |
-| Data Engineer | Schema design, migrations, query performance, data modeling, pipelines | No data layer changes |
-| Performance Engineer | Profiling, benchmarks, latency budgets, memory, algorithmic complexity | No performance-sensitive paths touched |
-| Technical Writer | API docs, user guides, changelog, developer experience of documentation | No public-facing or doc surface |
-
-**Team sizing heuristics:**
-
-| Complexity | Design Workers | Signals |
-|---|---|---|
-| Simple (1-2 files) | 2 | Isolated bug, small feature, single concern |
-| Moderate (3-10 files) | 3-4 | Multi-file changes, 2-3 concerns |
-| Complex (10-30 files) | 4-6 | Cross-cutting concerns, large features |
-| Very complex (30+ files) | 6-9 | Full-stack features, systemic changes |
-
-Start with the smallest team that covers all required dimensions. More workers = more parallelism but more coordination overhead.
-
-**Spawning examples:**
-- New user-facing command -> Architect + Senior Coder + UX/UI + Tester + Security + Technical Writer
-- Backend/CLI feature -> Architect + Senior Coder + Tester + Security
-- Database-heavy feature -> Architect + Senior Coder + Data Engineer + Tester + Security
-- Performance-sensitive feature -> Architect + Senior Coder + Performance Engineer + Tester
-- Feature with CI/deploy changes -> Architect + Senior Coder + DevOps/Infra + Tester
-- Refactor -> Architect + Senior Coder + Tester
-- Bug fix -> Senior Coder + Tester (lightweight)
-- New public API or tool -> Architect + Senior Coder + Tester + Security + Technical Writer
-
-**Worker output format:**
-- Findings from their specialist lens
-- Concerns or risks with the proposed approach
-- Recommendations and alternatives
-- Cross-domain flags after reading sibling outputs
-
-**Team Leader synthesis:**
-- Resolve conflicts between workers
-- Produce design doc covering: architecture, components, data flow, error handling, testing strategy, security considerations
-- Flag unresolved trade-offs for user decision
-
----
-
-## Phase 3: Design Approval + Spec Review
-
-Main Claude presents the synthesized design doc. Get explicit approval. Revise if needed.
-
-**After user approval, write and review the spec:**
-
-1. Write spec to `docs/plans/YYYY-MM-DD-<feature>-design.md` (always in the **main repo root**, not a worktree)
-2. Dispatch spec-document-reviewer agent (see `prompts/spec-doc-reviewer.md`)
-3. If Issues Found: fix, re-dispatch, repeat (max 3 iterations, then surface to user)
-4. If Approved: present spec to user for final review before proceeding
-5. Only proceed to Phase 4 after user confirms the written spec
-
----
-
-## Phase 4: Planning Worker
-
-Create a **Planning Worker task** with: design doc + full project context.
-
-Worker is Architect + Senior Coder. Produces implementation plan.
-
-### Step 0: Scope Challenge (before planning)
-
-Before writing tasks, the planning worker must answer:
-
-1. **What existing code already solves sub-problems?** Can we reuse rather than rebuild?
-2. **What is the minimum set of changes?** Flag work that could be deferred without blocking the core goal.
-3. **Complexity smell:** If the plan touches 8+ files or introduces 2+ new classes/services, challenge whether the same goal can be achieved with fewer moving parts.
-
-### Plan Document Format
-
-Every plan starts with this header:
-
-```markdown
-# [Feature Name] Implementation Plan
-
-**Goal:** [One sentence describing what this builds]
-
-**Architecture:** [2-3 sentences about approach]
-
-**Tech Stack:** [Key technologies/libraries]
-
----
-```
-
-### File Structure
-
-Before defining tasks, map out which files will be created or modified and what each one is responsible for. Design units with clear boundaries and well-defined interfaces. Prefer smaller, focused files.
-
-### Task Structure
-
-````markdown
-### Task N: [Component Name]
-
-**Files:**
-- Create: `exact/path/to/file.py`
-- Modify: `exact/path/to/existing.py:123-145`
-- Test: `tests/exact/path/to/test.py`
-
-**Model:** haiku | sonnet | opus
-
-- [ ] **Step 1: Write the failing test**
-
-```python
-def test_specific_behavior():
-    result = function(input)
-    assert result == expected
-```
-
-- [ ] **Step 2: Run test to verify it fails**
-
-Run: `pytest tests/path/test.py::test_name -v`
-Expected: FAIL with "function not defined"
-
-- [ ] **Step 3: Write minimal implementation**
-
-```python
-def function(input):
-    return expected
-```
-
-- [ ] **Step 4: Run test to verify it passes**
-
-Run: `pytest tests/path/test.py::test_name -v`
-Expected: PASS
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add tests/path/test.py src/path/file.py
-git commit -m "feat: add specific feature"
-```
-````
-
-**Each step is one action (2-5 minutes).** Complete code in plan — not "add validation here." Exact commands with expected output.
-
-**Model assignment per task:** The planning worker assigns a model tier to each task:
-- **haiku** — touches 1-2 files with complete spec, mechanical changes
-- **sonnet** — touches multiple files, needs judgment, integration work
-- **opus** — requires design decisions, broad codebase understanding
-
-**Testing rules baked into every plan:**
-- Never mock what you can use for real
-- Only mock external systems genuinely unavailable in test environment
-- Never mock the thing being tested
-- Every task batch ends with: run tests -> run linter -> confirm both pass -> commit
-
-### Required Plan Sections
-
-Beyond the task list, every plan must include:
-
-**Failure modes** — for each new codepath or integration point:
-
-| Codepath | Failure mode | Tested? | Error handling? | User sees |
-|---|---|---|---|---|
-| `module.function` | timeout on external call | ? | ? | ? |
-
-Any row with tested=no AND error handling=no AND user sees=silent → **critical gap** that must be addressed in a task.
-
-**NOT in scope** — work considered and explicitly deferred, with one-line rationale each. Prevents scope creep and captures ideas for future work.
-
-**What already exists** — existing code/flows that partially solve sub-problems and whether the plan reuses them.
-
-### Quality gate — self-review before returning
-
-1. Pick 3 tasks at random — could a developer implement each without asking a single question?
-2. Are all file references exact (`src/config.rs:14`, not "the config file")?
-3. Does every feature task have a corresponding test task?
-4. Are there security implications not addressed?
-5. Is there any step that silently assumes context the implementer won't have?
-6. Does the failure modes table have any critical gaps (no test + no handling + silent)?
-
-### Plan Review Loop
-
-After writing the plan:
-
-1. Dispatch plan-document-reviewer agent (see `prompts/plan-doc-reviewer.md`)
-2. If Issues Found: fix, re-dispatch (max 3 iterations, then surface to user)
-3. If Approved: save plan and proceed
-
-Save plan to: `docs/plans/YYYY-MM-DD-<feature>.md` (always in the **main repo root**, not a worktree)
-
----
-
-## Phase 5: Execution
-
-Present to user:
-
-> "Design and plan complete. Ready to execute?"
->
-> If the task is non-trivial, offer a worktree: "Want me to set up an isolated worktree for this?"
-
-### Worktree Setup (optional)
-
-If user wants isolation (or task warrants it), follow the `/worktree` skill (`skills/worktree/SKILL.md`).
-
-### Task-by-Task Execution
-
-On approval, begin execution. **Agent team per task: implementer + audit team (spec + simplify + harden).** Implementer follows the `/tdd` skill for all implementation work.
-
-### Execution Loop
-
-Each task gets its own **task team** — implementer builds, audit team reviews:
-
-```
-BASELINE (once, before first task)
-  0. Run full test suite and record results as BASELINE_FAILURES
-     - If all tests pass: baseline is clean
-     - If tests fail: these are PRE-EXISTING failures that must be fixed
-     - Pass BASELINE_FAILURES to every implementer
-
-For each task in plan:
-  1. Record BASE_SHA (git rev-parse HEAD)
-
-  PRE-EXISTING FAILURES (if any remain from baseline)
-  1a. The first implementer that encounters pre-existing failures MUST fix them
-      before starting task work. This is non-negotiable — all tests must pass
-      before new work begins. Include the failures in the implementer prompt
-      as a "Fix before starting" section.
-  1b. If pre-existing failures are in an unrelated area and the fix is non-trivial,
-      treat it as a separate mini-task: investigate root cause, fix, verify, commit
-      with "fix: resolve pre-existing test failure in <area>" before proceeding.
-
-  IMPLEMENTER (see prompts/implementer.md)
-  2. Dispatch implementer — use model tier from the plan
-     - Pass: full task text, context, working directory, baseline test state
-     - Do NOT make implementer read plan file — provide full text
-  3. Handle implementer status (see below)
-
-  AUDIT TEAM (only if implementer reports DONE or DONE_WITH_CONCERNS)
-  4. Record HEAD_SHA, collect modified files list (git diff --name-only BASE..HEAD)
-  5. Dispatch audit team IN PARALLEL (all read-only Explore agents):
-     a. Spec reviewer (see prompts/spec-reviewer.md) — "does it match the spec? was TDD followed?"
-     b. Simplify auditor (see prompts/simplify-auditor.md) — "is there a simpler way?"
-     c. Harden auditor (see prompts/harden-auditor.md) — "what would an attacker try?"
-  6. Triage findings (see Audit Triage below)
-  7. If findings to fix -> implementer fixes -> re-audit (max 3 rounds)
-
-  GATE
-  8. VERIFY: run test suite, confirm pass with fresh output
-  9. Mark task complete
-  10. Next task
-```
-
-**Audit agents MUST be read-only (Explore).** This prevents reviewers from silently "fixing" things instead of flagging them. The separation between finding and fixing is the whole point.
-
-**Fresh audit agents each round.** Don't reuse auditors — carried context biases toward "already checked" areas.
-
-### Audit Triage
-
-After collecting findings from all auditors:
-
-**Refactor gate:** For any finding categorized as "refactor" (not a bug or security issue), apply this bar: *"Would a senior engineer say this is clearly wrong, not just imperfect?"* Reject style preferences and marginal improvements.
-
-**Severity routing:**
-- **Critical/High** — implementer fixes immediately, re-audit
-- **Medium** — include in next fix round
-- **Low/Cosmetic** — fix inline if trivial, otherwise note in completion summary and skip
-
-**Budget check:** If fix rounds add 30%+ to the original implementation diff, tighten scope — skip medium/low simplify findings, focus on harden patches and spec gaps.
-
-**Drift check (between audit rounds):** Before spawning the next audit round, re-read the original task description. If findings are pulling into unrelated areas or scope has expanded beyond the task, re-scope or exit the audit loop.
-
-### Audit Loop Exit
-
-Exit when ANY are true:
-1. **Clean audit** — all auditors report zero findings
-2. **Low-only round** — all remaining findings are low severity, fix inline
-3. **Loop cap reached** — 3 audit rounds completed. Fix remaining critical/high inline, log unresolved medium/low in completion summary
-
-### Implementer Status Protocol
-
-The implementer on each task team reports one of four statuses:
-
-**DONE:** Proceed to spec compliance review.
-
-**DONE_WITH_CONCERNS:** Read the concerns. If about correctness or scope, address before review. If observational ("this file is getting large"), note and proceed.
-
-**NEEDS_CONTEXT:** Provide missing context and re-dispatch.
-
-**BLOCKED:** Assess the blocker:
-1. Context problem -> provide more context, re-dispatch same model
-2. Needs more reasoning -> re-dispatch with a more capable model
-3. Task too large -> break into smaller pieces
-4. Plan itself is wrong -> escalate to user
-
-**Never** ignore an escalation or retry the same model without changes.
-
-### When Tasks Fail: Debugging Protocol
-
-When a task fails during execution, follow the `/debug` skill (`skills/debug/SKILL.md`). Iron law: no fixes without root cause investigation.
-
-### Verification Gates
-
-At every phase transition and before any completion claim, follow the `/verify` skill (`skills/verify/SKILL.md`). No "should pass," no "looks correct," no trusting agent team reports without independent verification.
-
----
-
-## Phase 6: Completion
-
-After all tasks are executed and verified:
-
-1. **Run full test suite** — verify everything passes (fresh output required)
-2. **Run linter** — verify clean output
-3. **Determine base branch:**
-   ```bash
-   git merge-base HEAD main 2>/dev/null || git merge-base HEAD master 2>/dev/null
-   ```
-
-4. **Present options:**
-
-```
-Implementation complete. All tests pass. What would you like to do?
-
-1. Merge back to <base-branch> locally
-2. Push and create a Pull Request
-3. Keep the branch as-is (I'll handle it later)
-4. Discard this work
-
-Which option?
-```
-
-5. **Execute choice:**
-   - **Merge locally:** checkout base -> pull -> merge -> verify tests on merged result -> delete feature branch -> cleanup worktree if applicable
-   - **Push and create PR:** push -> create PR with summary and test plan
-   - **Keep as-is:** report branch name and worktree path, done
-   - **Discard:** require user to type "discard" to confirm -> delete branch -> cleanup worktree
-
-**Never** proceed with failing tests, merge without verifying, delete work without confirmation, or dismiss pre-existing test failures as "not our problem."
-
-### Learning Loop (completion summary)
-
-After all tasks, produce a summary that includes audit findings across all rounds:
-
-```
-## Completion Summary
-
-**Audit rounds:** N of 3 max
-**Exit reason:** clean audit | low-only round | loop cap
-
-### Recurring patterns
-- [pattern]: appeared N times across rounds, severity, resolution
-- [pattern]: ...
-
-### Unresolved (low severity, deferred)
-- [finding]: reason deferred
-
-### Out-of-scope observations
-- [anything auditors flagged outside the task scope]
-```
-
-Recurring patterns are the signal — if the same finding type appears across multiple tasks or rounds, it indicates a systemic issue worth noting for future work.
-
----
-
-## Skill Taxonomy Maintenance
-
-coding-team reads `~/.claude/skills/skill-taxonomy.yml` to map skills to workers.
-
-- **Installing a skill:** Add it to the appropriate category. If no category fits, create a new one with role mappings.
-- **Removing a skill:** Remove its entry from the taxonomy.
-- **The taxonomy is advisory** — workers decide which skills to actually invoke based on the task.
-
----
-
-## Handling Review Feedback
-
-Follow the `/review-feedback` skill (`skills/review-feedback/SKILL.md`).
-
----
-
-## Parallel Dispatch
-
-Follow the `/parallel-fix` skill (`skills/parallel-fix/SKILL.md`).
-
----
-
-## Output Files
-
-- `docs/plans/YYYY-MM-DD-<feature>-design.md` — design doc (written after Phase 3 approval)
-- `docs/plans/YYYY-MM-DD-<feature>.md` — implementation plan (written after Phase 4)
-
----
-
-## Reference Files
-
-**Standalone skills** (can be invoked independently or from the pipeline):
-
-| Skill | Path | Purpose |
-|-------|------|---------|
-| `/debug` | `skills/debug/SKILL.md` | Four-phase root cause investigation |
-| `/verify` | `skills/verify/SKILL.md` | Evidence-before-claims gates |
-| `/review-feedback` | `skills/review-feedback/SKILL.md` | How to handle review feedback |
-| `/worktree` | `skills/worktree/SKILL.md` | Git worktree setup and cleanup |
-| `/parallel-fix` | `skills/parallel-fix/SKILL.md` | Parallel agent dispatch for independent failures |
-| `/tdd` | `skills/tdd/SKILL.md` | Test-driven development cycle |
-
-**Agent prompt templates** (used by the execution loop):
-
-| File | Purpose |
-|------|---------|
-| `prompts/implementer.md` | Implementer (task team member) prompt template |
-| `prompts/spec-reviewer.md` | Spec compliance + TDD verification (read-only) |
-| `prompts/simplify-auditor.md` | Simplify auditor — clarity and complexity (read-only) |
-| `prompts/harden-auditor.md` | Harden auditor — security and resilience (read-only) |
-| `prompts/quality-reviewer.md` | Legacy quality reviewer (use simplify + harden instead) |
-| `prompts/spec-doc-reviewer.md` | Design doc reviewer template |
-| `prompts/plan-doc-reviewer.md` | Plan doc reviewer template |
-
----
-
-## Agent Teams Routing Summary
-
-When `AGENT_TEAMS_AVAILABLE = true`, use this table to decide coordination mode:
-
-| Situation | Agent Teams? | Rationale |
-|-----------|-------------|-----------|
-| Phase 2: design workers (primary analysis) | No | Workers analyze independently, report to leader. Subagents are correct. |
-| Phase 2: cross-review pass, 4+ workers | **Yes** | Direct peer messaging for cross-domain flags beats leader-mediated routing. |
-| Phase 2: cross-review pass, <4 workers | No | Small team, leader mediation is fine. |
-| Phase 3: spec review | No | Single reviewer, iterative. No parallelism. |
-| Phase 4: planning | No | Single planning worker. No parallelism. |
-| Phase 5: task implementation | No | One implementer per task. Subagent. |
-| Phase 5: audit team (spec/simplify/harden) | No | Read-only reviewers report findings to lead. No inter-reviewer coordination needed. |
-| Debugging: simple bug | No | Sequential, single agent. |
-| Debugging: 2 hypotheses | No | Subagents suffice, overhead not justified. |
-| Debugging: 3+ hypotheses with possible cross-cutting evidence | **Yes** | Scientific debate pattern. Investigators disprove each other in real time. |
-| Parallel dispatch: 2 domains, provably independent | No | Subagents. |
-| Parallel dispatch: 3+ domains, possibly shared infrastructure | **Yes** | Cross-domain discovery prevents wasted work on conflicting fixes. |
-
-**Default is subagents.** Agent teams are the exception for specific high-value patterns, not the rule.
-
----
-
-## Agent Teams Lifecycle
-
-All agent team usage follows this lifecycle:
-
-```
-1. CREATE TEAM
-   Teammate({ operation: "spawnTeam", team_name: "<descriptive-name>" })
-
-2. CREATE TASKS
-   TaskCreate({ subject, description, activeForm })
-   - Set dependencies with blocked_by if tasks have ordering requirements
-
-3. SPAWN TEAMMATES
-   Use Task tool with team_name parameter to spawn into the team
-   - Each teammate gets: full context, clear scope, constraints, output format
-   - Teammates auto-load CLAUDE.md, MCP servers, and skills
-   - Teammates do NOT inherit lead's conversation history — include everything they need in the spawn prompt
-
-4. COORDINATE
-   - Monitor via TaskList for task status
-   - Check inbox for messages from teammates
-   - Broadcast when all teammates need the same information
-   - Direct message for targeted coordination
-
-5. SHUTDOWN
-   For each teammate:
-     Teammate({ operation: "requestShutdown", target_agent_id: "<id>" })
-   Wait for each to approve (they finish current work first)
-
-6. CLEANUP
-   Teammate({ operation: "cleanup" })
-   - Only the lead runs cleanup
-   - Verify all teammates are shut down before cleanup
-   - Cleanup removes shared team resources (inbox, config, task files)
-```
-
-**Never:**
-- Let teammates run cleanup (their team context may not resolve correctly)
-- Skip shutdown and go straight to cleanup (check for active teammates first)
-- Spawn teammates without the team existing (spawnTeam first)
-- Forget to include task-specific context in spawn prompts (teammates have no conversation history)
+## Phase Sequence
+
+Each phase reads its detail file on entry. Do not read ahead — load only the active phase.
+
+### Phase 1: Dialogue
+**Purpose:** Clarify requirements, propose approaches, get user approval.
+**Input:** User's request + project context (CLAUDE.md, recent commits, files).
+**Output:** Approved approach with trade-offs.
+**Detail:** Read `phases/dialogue.md`
+**Exit gate:** User has approved an approach. Do NOT proceed without approval.
+
+### Phase 2: Design Team
+**Purpose:** Specialist workers analyze the problem from multiple angles.
+**Input:** Approved approach from Phase 1 + project context.
+**Output:** Synthesized design doc.
+**Detail:** Read `phases/design-team.md`
+**Exit gate:** User has approved the design doc.
+
+### Phase 3: Spec Review
+**Purpose:** Write and validate the design spec.
+**Input:** Approved design doc from Phase 2.
+**Output:** Reviewed spec at `docs/plans/YYYY-MM-DD-<feature>-design.md`.
+**Detail:** Read `phases/spec-review.md`
+**Exit gate:** User has confirmed the written spec.
+
+### Phase 4: Planning
+**Purpose:** Produce detailed implementation plan with TDD tasks.
+**Input:** Approved spec from Phase 3 + project context.
+**Output:** Reviewed plan at `docs/plans/YYYY-MM-DD-<feature>.md`.
+**Detail:** Read `phases/planning.md`
+**Exit gate:** Plan passes automated review.
+
+### Phase 5: Execution
+**Purpose:** Task-by-task implementation with audit loops.
+**Input:** Approved plan from Phase 4.
+**Output:** Implemented, tested, audited code on feature branch.
+**Detail:** Read `phases/execution.md`
+**Exit gate:** All tasks pass verification with fresh test output.
+
+### Phase 6: Completion
+**Purpose:** Verify, merge/PR/keep/discard, learning loop.
+**Input:** Completed execution from Phase 5.
+**Output:** Merged code or PR or kept branch + completion summary.
+**Detail:** Read `phases/completion.md`
+**Exit gate:** User has chosen a completion option and it's been executed.
 
 ---
 
@@ -654,3 +153,48 @@ All agent team usage follows this lifecycle:
 - Get confirmation before discarding work
 - Use the model tier assigned in the plan
 - Match process weight to task weight — don't force full pipeline for trivial tasks
+
+---
+
+## Output Files
+
+- `docs/plans/YYYY-MM-DD-<feature>-design.md` — design doc (written after Phase 3 approval)
+- `docs/plans/YYYY-MM-DD-<feature>.md` — implementation plan (written after Phase 4)
+
+---
+
+## Reference Files
+
+**Standalone skills** (can be invoked independently or from the pipeline):
+
+| Skill | Path | Purpose |
+|-------|------|---------|
+| `/debug` | `skills/debug/SKILL.md` | Four-phase root cause investigation |
+| `/verify` | `skills/verify/SKILL.md` | Evidence-before-claims gates |
+| `/review-feedback` | `skills/review-feedback/SKILL.md` | How to handle review feedback |
+| `/worktree` | `skills/worktree/SKILL.md` | Git worktree setup and cleanup |
+| `/parallel-fix` | `skills/parallel-fix/SKILL.md` | Parallel agent dispatch for independent failures |
+| `/tdd` | `skills/tdd/SKILL.md` | Test-driven development cycle |
+
+**Phase details** (loaded on demand by the active phase):
+
+| Phase | File | Lines |
+|-------|------|-------|
+| Dialogue | `phases/dialogue.md` | ~15 |
+| Design Team | `phases/design-team.md` | ~150 |
+| Spec Review | `phases/spec-review.md` | ~12 |
+| Planning | `phases/planning.md` | ~120 |
+| Execution | `phases/execution.md` | ~115 |
+| Completion | `phases/completion.md` | ~45 |
+
+**Agent prompt templates** (used by the execution loop):
+
+| File | Purpose |
+|------|---------|
+| `prompts/implementer.md` | Implementer (task team member) prompt template |
+| `prompts/spec-reviewer.md` | Spec compliance + TDD verification (read-only) |
+| `prompts/simplify-auditor.md` | Simplify auditor — clarity and complexity (read-only) |
+| `prompts/harden-auditor.md` | Harden auditor — security and resilience (read-only) |
+| `prompts/quality-reviewer.md` | Legacy quality reviewer (use simplify + harden instead) |
+| `prompts/spec-doc-reviewer.md` | Design doc reviewer template |
+| `prompts/plan-doc-reviewer.md` | Plan doc reviewer template |
