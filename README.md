@@ -17,7 +17,9 @@ Assembles specialist agent teams to collaboratively work through code tasks. The
 
 ### Session routing
 
-When invoked, the skill determines where to start based on what you bring:
+When invoked, the skill first checks whether you're continuing prior work. If you mention a phase, task number, feature name, or "continue" — it lists `docs/plans/*.md` to discover existing plans (never guesses filenames), reads headers to match your request, checks git log for progress, and resumes at the next incomplete task.
+
+For fresh tasks (no prior plans), it routes based on what you bring:
 
 | You have... | Entry point |
 |---|---|
@@ -30,17 +32,6 @@ When invoked, the skill determines where to start based on what you bring:
 | A trivial task (rename, typo, single-file fix) | Skip the skill — just do it directly |
 
 The skill matches process weight to task weight. A typo fix doesn't need 5 specialist workers.
-
-### Resuming work (plan discovery)
-
-When starting a conversation that continues prior work (you mention a phase, task number, or feature name), the skill:
-
-1. **Lists `docs/plans/`** — discovers what plan files exist (never guesses filenames)
-2. **Reads matching plans** — scans titles/headers to find the relevant feature
-3. **Checks git log** — sees what's already been committed
-4. **Resumes at the right point** — matches your request to the next incomplete task
-
-This means you can clear context between phases and pick up where you left off.
 
 ### Phase 1: Dialogue
 
