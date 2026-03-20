@@ -31,6 +31,17 @@ When invoked, the skill determines where to start based on what you bring:
 
 The skill matches process weight to task weight. A typo fix doesn't need 5 specialist workers.
 
+### Resuming work (plan discovery)
+
+When starting a conversation that continues prior work (you mention a phase, task number, or feature name), the skill:
+
+1. **Lists `docs/plans/`** — discovers what plan files exist (never guesses filenames)
+2. **Reads matching plans** — scans titles/headers to find the relevant feature
+3. **Checks git log** — sees what's already been committed
+4. **Resumes at the right point** — matches your request to the next incomplete task
+
+This means you can clear context between phases and pick up where you left off.
+
 ### Phase 1: Dialogue
 
 The skill reads project context (files, docs, recent commits, CLAUDE.md), then asks clarifying questions one at a time — multiple choice preferred, open-ended when needed. For UI-related work, a visual companion is offered before continuing.

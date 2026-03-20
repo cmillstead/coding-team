@@ -27,6 +27,17 @@ When invoked at the start of a conversation (or when the user asks for help with
 
 **Don't force the full pipeline for tasks that don't need it.** A typo fix doesn't need 5 specialist workers. Match the process weight to the task weight. But for anything non-trivial, start at the appropriate phase.
 
+### Plan Discovery (resuming work)
+
+When starting a conversation that continues prior work (user mentions a phase, task number, or feature name):
+
+1. **List what exists** — `ls docs/plans/` (or Glob `docs/plans/*.md`). Do NOT guess filenames.
+2. **Read the matching plan(s)** — scan titles/headers to find the relevant feature. If multiple plans exist, show the user a list and ask which one.
+3. **Check git for progress** — `git log --oneline -20` to see what's already been committed for this feature.
+4. **Resume at the right point** — match the user's request to the next incomplete task in the plan.
+
+**Common failure mode:** the user says "continue with phase 7c" after clearing context. You have no memory of filenames. Do NOT search for `phase-7c.md` or invent names — list the directory first, then match by content.
+
 ---
 
 ## Guiding Principles
