@@ -17,7 +17,7 @@ Assembles specialist agent teams to collaboratively work through code tasks. The
 
 ### Session routing
 
-When invoked, the skill first checks whether you're continuing prior work. If you mention a phase, task number, feature name, or "continue" — it lists `docs/plans/*.md` to discover existing plans (never guesses filenames), reads headers to match your request, checks git log for progress, and resumes at the next incomplete task.
+When invoked, the skill first checks whether you're continuing prior work. If you mention a phase, task number, feature name, or "continue" — it finds the **main repo root** (not a worktree), lists `docs/plans/*.md` there to discover existing plans (never guesses filenames), reads headers to match your request, checks git log for progress, and resumes at the next incomplete task.
 
 For fresh tasks (no prior plans), it routes based on what you bring:
 

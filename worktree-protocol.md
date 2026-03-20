@@ -58,6 +58,17 @@ Tests passing (<N> tests, 0 failures)
 Ready to implement <feature-name>
 ```
 
+## Plan Files
+
+Plan and design docs (`docs/plans/*.md`) live in the **main repo root**, not in worktrees. When resuming work in a worktree, resolve the main repo root to find plans:
+
+```bash
+MAIN_ROOT=$(git rev-parse --path-format=absolute --git-common-dir | sed 's/\/.git$//')
+ls "$MAIN_ROOT/docs/plans/"
+```
+
+Always pass full paths to plan files when providing context to implementers working in a worktree.
+
 ## Cleanup
 
 After work is complete (Phase 6), cleanup depends on the completion choice:

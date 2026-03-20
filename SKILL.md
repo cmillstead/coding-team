@@ -19,12 +19,23 @@ When invoked at the start of a conversation (or when the user asks for help with
 
 **Step 2: Discover existing plans.** You have NO memory of prior conversations. Do NOT guess filenames.
 
+Plans live in the **main repo**, not in worktrees. Find the repo root first:
+
+```bash
+# Get the main repo root (not a worktree)
+MAIN_ROOT=$(git rev-parse --path-format=absolute --git-common-dir | sed 's/\/.git$//')
 ```
-Glob docs/plans/*.md
+
+Then search for plans there:
+
+```
+Glob $MAIN_ROOT/docs/plans/*.md
 ```
 
 - **No docs/plans/ directory or no .md files:** This is a fresh task. Route using the table below.
 - **Files found:** Read each file's first 10 lines (title/header). Match the user's request to a plan by content, not filename. If ambiguous, show the user the list and ask which one. Then check `git log --oneline -20` for committed progress. Resume at the next incomplete task.
+
+**If you are in a worktree:** the plan files will NOT be in your current directory. Always resolve back to the main repo root to find them. Pass the full path to plan files when providing context to implementers.
 
 **Step 3: Route.** For fresh tasks (no prior plans), or after plan discovery:
 
@@ -156,7 +167,7 @@ Main Claude presents the synthesized design doc. Get explicit approval. Revise i
 
 **After user approval, write and review the spec:**
 
-1. Write spec to `docs/plans/YYYY-MM-DD-<feature>-design.md`
+1. Write spec to `docs/plans/YYYY-MM-DD-<feature>-design.md` (always in the **main repo root**, not a worktree)
 2. Dispatch spec-document-reviewer agent (see `prompts/spec-doc-reviewer.md`)
 3. If Issues Found: fix, re-dispatch, repeat (max 3 iterations, then surface to user)
 4. If Approved: present spec to user for final review before proceeding
@@ -289,7 +300,7 @@ After writing the plan:
 2. If Issues Found: fix, re-dispatch (max 3 iterations, then surface to user)
 3. If Approved: save plan and proceed
 
-Save plan to: `docs/plans/YYYY-MM-DD-<feature>.md`
+Save plan to: `docs/plans/YYYY-MM-DD-<feature>.md` (always in the **main repo root**, not a worktree)
 
 ---
 
