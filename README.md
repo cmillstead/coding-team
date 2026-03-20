@@ -44,7 +44,7 @@ Each task gets its own team:
 
 - **Implementer** — builds and tests the code (TDD red-green-refactor)
 - **Audit team** (all read-only, dispatched in parallel):
-  - **Spec reviewer** — does it match the spec? Nothing missing, nothing extra.
+  - **Spec reviewer** — does it match the spec? Was TDD actually followed? Nothing missing, nothing extra.
   - **Simplify auditor** — dead code, naming, over-abstraction, control flow
   - **Harden auditor** — input validation, injection vectors, auth, race conditions
 
@@ -130,7 +130,7 @@ review-reception-protocol.md      # handling review feedback
 parallel-dispatch-protocol.md     # multi-agent parallel dispatch
 prompts/
   implementer.md                  # implementer agent template
-  spec-reviewer.md                # spec compliance reviewer (read-only)
+  spec-reviewer.md                # spec compliance + TDD verification (read-only)
   simplify-auditor.md             # simplify auditor — clarity/complexity (read-only)
   harden-auditor.md               # harden auditor — security/resilience (read-only)
   quality-reviewer.md             # legacy combined reviewer (use simplify + harden)
@@ -143,6 +143,7 @@ prompts/
 Incorporates ideas from:
 - [pskoett/agent-teams-simplify-and-harden](https://github.com/pskoett/pskoett-ai-skills) — split audit, refactor gate, drift check, learning loop
 - [wshobson/team-composition-patterns](https://github.com/wshobson/agents) — team sizing heuristics, parallel debug teams
+- [alinaqi/claude-bootstrap](https://github.com/alinaqi/claude-bootstrap) — independent TDD verification
 
 ## License
 
