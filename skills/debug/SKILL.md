@@ -1,6 +1,18 @@
-# Debugging Protocol
+---
+name: debug
+description: "Use when investigating a bug, test failure, or unexpected behavior. Four-phase root cause investigation: investigate, analyze, hypothesize, implement. Dispatches parallel hypothesis teams for complex bugs. Use instead of guessing at fixes."
+---
 
-When a task fails during execution, follow this protocol instead of guessing.
+# /debug — Root Cause Investigation
+
+When invoked standalone (not from /coding-team), read project context first:
+- CLAUDE.md, recent commits (`git log --oneline -10`), failing test output
+- If the user provided an error message, start at Phase 1 with that as input
+- If the user said "debug" without specifics, ask what's broken
+
+When invoked from /coding-team Phase 5, the lead provides full context. Skip the above.
+
+---
 
 ## The Iron Law
 
@@ -110,7 +122,12 @@ The agent that confirms its hypothesis (or the strongest evidence) informs Phase
 1. **Create failing test case** — simplest possible reproduction, automated if possible.
 2. **Implement single fix** — address the root cause, ONE change at a time. No "while I'm here" improvements.
 3. **Blast radius check** — if the fix touches >5 files, flag it to the user before proceeding. A large blast radius for a bug fix is a smell.
-4. **Verify fix** — test passes? No other tests broken? Issue resolved?
+4. **Verify fix** — apply verification gate:
+   1. IDENTIFY: What command proves this?
+   2. RUN: Execute it fresh
+   3. READ: Full output, check exit code
+   4. VERIFY: Does output confirm the claim?
+   5. ONLY THEN: Make the claim
 5. **If fix doesn't work** — count attempts. If < 3, return to Phase 1 with new information. If >= 3, STOP.
 
 ## Phase 5: Report

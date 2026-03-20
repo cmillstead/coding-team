@@ -1,6 +1,18 @@
-# Parallel Dispatch Protocol
+---
+name: parallel-fix
+description: "Use when facing 3+ independent test failures or broken subsystems with different root causes. Dispatches one agent team per domain in parallel. Each team gets focused scope and constraints. Results are reviewed for conflicts and verified with a full test suite run."
+---
 
-When and how to dispatch multiple agent teams in parallel for independent problems.
+# /parallel-fix — Parallel Agent Dispatch for Independent Failures
+
+When invoked standalone:
+- If the user provides failing tests or error output, group by independent domain
+- If the user says "everything is broken" without specifics, run the test suite first to identify failures, then group
+- After all teams return, run full test suite to verify (verification protocol)
+
+When invoked from /coding-team, the lead provides grouped failures. Skip the above.
+
+---
 
 ## When to Use
 
@@ -114,3 +126,12 @@ Return: summary of root cause and what you fixed.
 - **No context** — paste error messages, don't just say "fix the race condition"
 - **No constraints** — team might refactor everything outside their scope
 - **Vague output** — "fix it" gives you no insight into what changed
+
+## Verification Gate
+
+Before claiming all fixes are complete:
+1. IDENTIFY: What command proves this?
+2. RUN: Execute full test suite fresh
+3. READ: Full output, check exit code
+4. VERIFY: Does output confirm all tests pass?
+5. ONLY THEN: Make the claim

@@ -1,6 +1,18 @@
-# Review Reception Protocol
+---
+name: review-feedback
+description: "Use when receiving code review feedback — from PR reviewers, teammates, users, or external contributors. Technical evaluation protocol: read, understand, verify against codebase, evaluate technically, then respond or push back with reasoning. No performative agreement."
+---
 
-How to handle code review feedback — from reviewers, users, or external contributors.
+# /review-feedback — Handling Code Review
+
+When invoked standalone:
+- If the user pastes review comments, start at step 1 (READ)
+- If the user says "I got feedback on my PR" without specifics, ask them to paste or link the feedback
+- Apply verification protocol before claiming any fix is complete
+
+When invoked from /coding-team, the lead provides review context. Skip the above.
+
+---
 
 ## The Response Pattern
 
@@ -68,3 +80,12 @@ For multi-item feedback:
 ```
 
 State the correction factually and move on. No long apology.
+
+## Verification Gate
+
+Before claiming any fix is complete:
+1. IDENTIFY: What command proves this?
+2. RUN: Execute it fresh
+3. READ: Full output, check exit code
+4. VERIFY: Does output confirm the claim?
+5. ONLY THEN: Make the claim

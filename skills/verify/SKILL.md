@@ -1,4 +1,9 @@
-# Verification Protocol
+---
+name: verify
+description: "Use before any completion claim, commit, PR, or phase transition. Evidence-before-claims gate: identify the command, run it fresh, read full output, verify it confirms your claim, only then make the claim. Use when tempted to say 'should pass' or 'looks correct'."
+---
+
+# /verify — Evidence-Before-Claims Verification
 
 No completion claims without fresh verification evidence.
 

@@ -26,9 +26,9 @@ For fresh tasks (no prior plans), it routes based on what you bring:
 | A vague idea or new feature request | Phase 1 — dialogue to clarify |
 | A design or spec, needs a plan | Phase 4 — planning worker |
 | A plan file, ready to build | Phase 5 — execution |
-| A bug report or test failure | Debugging protocol |
-| A PR with review feedback | Review reception protocol |
-| Multiple independent failures | Parallel dispatch protocol |
+| A bug report or test failure | `/debug` skill |
+| A PR with review feedback | `/review-feedback` skill |
+| Multiple independent failures | `/parallel-fix` skill |
 | A trivial task (rename, typo, single-file fix) | Skip the skill — just do it directly |
 
 The skill matches process weight to task weight. A typo fix doesn't need 5 specialist workers.
@@ -140,9 +140,18 @@ After all tasks pass verification (fresh test output required), four options are
 
 A **learning loop summary** captures recurring audit patterns across all rounds, unresolved low-severity findings, and out-of-scope observations.
 
-## Internalized protocols
+## Standalone skills
 
-Everything is self-contained — no external plugin dependencies.
+Protocols are extracted as standalone skills that can be invoked independently or from the pipeline. Each loads only when needed, keeping the main skill's context footprint small.
+
+| Skill | Purpose |
+|-------|---------|
+| `/debug` | Four-phase root cause investigation with parallel hypothesis teams |
+| `/verify` | Evidence-before-claims gates for every completion claim |
+| `/review-feedback` | Technical evaluation of code review feedback |
+| `/worktree` | Git worktree setup, safety checks, and cleanup |
+| `/parallel-fix` | Parallel agent dispatch for independent failures |
+| `/tdd` | Test-driven development cycle (red-green-refactor) |
 
 ### Agent teams (optional)
 
@@ -153,54 +162,6 @@ When Claude Code's experimental agent teams feature is available (`CLAUDE_CODE_E
 - **Parallel dispatch for 3+ domains with shared infrastructure** — teams flag cross-domain discoveries immediately, preventing conflicting fixes
 
 When agent teams aren't available, all three patterns fall back to the existing subagent behavior. Detection happens automatically at session start.
-
-### TDD
-
-All implementation follows test-driven development:
-
-1. **RED** — write one failing test showing desired behavior
-2. **Verify RED** — run test, confirm it fails for the right reason (feature missing, not typo)
-3. **GREEN** — write minimal code to pass the test
-4. **Verify GREEN** — run test, confirm it passes, no other tests broken
-5. **REFACTOR** — clean up, keep tests green
-6. **Repeat**
-
-If code is written before a test: delete it, start over with the test.
-
-### Debugging
-
-Four-phase root cause investigation (`debugging-protocol.md`):
-
-1. **Investigate** — read errors completely, reproduce, check recent changes, trace data flow
-2. **Analyze** — match against known patterns (race conditions, nil propagation, state corruption, integration failures, config drift, stale cache), check git log for prior fixes in same area
-3. **Hypothesize** — simple bugs: sequential single hypothesis. Complex bugs with multiple plausible causes: dispatch parallel debug team. With agent teams (3+ hypotheses): investigators message each other to disprove theories in real time. Without: independent read-only Explore agents per hypothesis
-4. **Implement** — create failing test, fix root cause, verify
-
-**Iron law:** no fixes without root cause investigation. If 3+ fix attempts fail, question the architecture and escalate to user.
-
-### Verification
-
-Evidence-before-claims gates (`verification-protocol.md`):
-
-1. **IDENTIFY** — what command proves the claim?
-2. **RUN** — execute the full command (fresh, in this message)
-3. **READ** — full output, check exit code
-4. **VERIFY** — does output confirm the claim?
-5. **ONLY THEN** — make the claim
-
-No "should pass," no "looks correct," no trusting agent reports without independent verification. Applied at every phase transition and before any completion claim.
-
-### Worktrees
-
-Git worktree isolation for feature work (`worktree-protocol.md`). Creates an isolated copy of the repo with a feature branch, runs project setup, verifies a clean baseline. Offered for non-trivial tasks. Cleanup depends on completion choice — merged/discarded worktrees are removed, kept/pushed worktrees stay.
-
-### Review reception
-
-Technical evaluation of feedback (`review-reception-protocol.md`). Read, understand, verify against codebase reality, evaluate technically, then respond or push back with reasoning. No performative agreement ("Great point!") — just fix it or discuss technically. Push back when feedback breaks existing functionality, lacks context, violates YAGNI, or is technically incorrect.
-
-### Parallel dispatch
-
-Multiple agent teams for independent problems (`parallel-dispatch-protocol.md`). When 3+ failures have different root causes in independent subsystems, dispatch one team per domain in parallel. With agent teams (3+ domains, possibly shared infrastructure): teammates message each other when discovering cross-domain dependencies, preventing conflicting fixes. Without: independent subagent teams. Results are reviewed for conflicts and verified with a full test suite run.
 
 ### Model routing
 
@@ -222,10 +183,27 @@ Clone to your skills directory:
 git clone git@github.com:cmillstead/coding-team.git ~/.claude/skills/coding-team
 ```
 
-Or symlink if you keep skills elsewhere:
+### Full pipeline only
+
+If you only want the `/coding-team` orchestrated pipeline, you're done.
+
+### Standalone skills (optional)
+
+To also expose individual protocols as standalone slash commands:
 
 ```bash
-ln -s /path/to/coding-team ~/.claude/skills/coding-team
+# All standalone skills
+for skill in debug verify review-feedback worktree parallel-fix tdd; do
+  ln -s ~/.claude/skills/coding-team/skills/$skill ~/.claude/skills/$skill
+done
+```
+
+Or pick just the ones you want:
+
+```bash
+# Just debugging and verification
+ln -s ~/.claude/skills/coding-team/skills/debug ~/.claude/skills/debug
+ln -s ~/.claude/skills/coding-team/skills/verify ~/.claude/skills/verify
 ```
 
 ### Optional: session-start hook
@@ -281,15 +259,17 @@ For simple tasks (typo, rename, single-file fix), skip the skill and just do it 
 ## File structure
 
 ```
-SKILL.md                          # full skill definition (implementation spec)
+SKILL.md                          # main entry point (orchestration logic)
 README.md                         # this file (user guide)
 coding-team-router.py             # session-start hook
-debugging-protocol.md             # root cause investigation + parallel hypothesis teams
-verification-protocol.md          # evidence-before-claims gates
-worktree-protocol.md              # git worktree setup/cleanup
-review-reception-protocol.md      # handling review feedback
-parallel-dispatch-protocol.md     # multi-agent parallel dispatch
-prompts/
+skills/                           # standalone skills (can be invoked independently)
+  debug/SKILL.md                  # /debug — root cause investigation
+  verify/SKILL.md                 # /verify — evidence-before-claims gates
+  review-feedback/SKILL.md        # /review-feedback — handling review feedback
+  worktree/SKILL.md               # /worktree — git worktree setup/cleanup
+  parallel-fix/SKILL.md           # /parallel-fix — parallel agent dispatch
+  tdd/SKILL.md                    # /tdd — test-driven development cycle
+prompts/                          # agent prompt templates (used by execution loop)
   implementer.md                  # implementer agent template
   spec-reviewer.md                # spec compliance + TDD verification (read-only)
   simplify-auditor.md             # simplify auditor — clarity/complexity (read-only)

@@ -1,6 +1,18 @@
-# Worktree Protocol
+---
+name: worktree
+description: "Use when you need an isolated git worktree for feature work. Handles directory selection, gitignore safety, branch creation, project setup, and baseline verification. Use before starting any non-trivial implementation to avoid polluting the main workspace."
+---
 
-Create isolated git worktrees for feature work. Prevents polluting the main workspace.
+# /worktree — Isolated Feature Workspace
+
+When invoked standalone:
+- If the user provides a feature/branch name, use it
+- If not, ask: "What are you working on? (used for branch naming)"
+- After setup, report the worktree path and baseline test status
+
+When invoked from /coding-team Phase 5, the lead provides the feature name. Skip the above.
+
+---
 
 ## When to Use
 

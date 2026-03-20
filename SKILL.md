@@ -61,9 +61,9 @@ Glob $MAIN_ROOT/docs/plans/*.md
 | New feature idea, vague request | **Phase 1** — start dialogue |
 | Has a design/spec, needs a plan | **Phase 4** — planning worker |
 | Has a plan file, ready to build | **Phase 5** — execution |
-| Bug report or test failure | **Debugging protocol** (`debugging-protocol.md`) |
-| Existing PR with review feedback | **Review reception protocol** (`review-reception-protocol.md`) |
-| Multiple independent failures | **Parallel dispatch** (`parallel-dispatch-protocol.md`) |
+| Bug report or test failure | `/debug` skill (`skills/debug/SKILL.md`) |
+| Existing PR with review feedback | `/review-feedback` skill (`skills/review-feedback/SKILL.md`) |
+| Multiple independent failures | `/parallel-fix` skill (`skills/parallel-fix/SKILL.md`) |
 | Simple mechanical task (rename, format, single-file edit) | Skip coding-team — just do it directly |
 
 **Don't force the full pipeline for tasks that don't need it.** A typo fix doesn't need 5 specialist workers. Match the process weight to the task weight. But for anything non-trivial, start at the appropriate phase.
@@ -79,7 +79,7 @@ These apply to every agent in the team:
 - **Quality gates before handoff** — no agent passes work to the next stage until tests pass and linting is clean. Build green -> commit -> move on.
 - **Focused agents produce correct agents** — one worker, one lens, one scope. Workers that wander produce slop.
 - **No ambiguity in specs** — the Planning Worker leaves nothing to inference. Exact file paths, exact line ranges, complete code snippets, exact commands with expected output.
-- **Evidence before claims** — no completion claims without fresh verification output. If you haven't run the command in this message, you cannot claim it passes. See `verification-protocol.md`.
+- **Evidence before claims** — no completion claims without fresh verification output. If you haven't run the command in this message, you cannot claim it passes. See `/verify` skill (`skills/verify/SKILL.md`).
 - **Right-size the model** — use the cheapest model that can handle the task. Haiku for mechanical edits, Sonnet for implementation, Opus for architecture and review.
 
 ---
@@ -349,15 +349,11 @@ Present to user:
 
 ### Worktree Setup (optional)
 
-If user wants isolation (or task warrants it), follow `worktree-protocol.md`:
-1. Find or create worktree directory
-2. Verify it's gitignored
-3. Create worktree with feature branch
-4. Run project setup and verify clean baseline
+If user wants isolation (or task warrants it), follow the `/worktree` skill (`skills/worktree/SKILL.md`).
 
 ### Task-by-Task Execution
 
-On approval, begin execution. **Agent team per task: implementer + audit team (spec + simplify + harden).**
+On approval, begin execution. **Agent team per task: implementer + audit team (spec + simplify + harden).** Implementer follows the `/tdd` skill for all implementation work.
 
 ### Execution Loop
 
@@ -449,26 +445,11 @@ The implementer on each task team reports one of four statuses:
 
 ### When Tasks Fail: Debugging Protocol
 
-When a task fails during execution (test failures, unexpected behavior, build errors), follow the debugging protocol in `debugging-protocol.md`:
-
-1. **Investigate** — read errors completely, reproduce, check recent changes, trace data flow
-2. **Analyze** — find working examples, compare against references, identify differences
-3. **Hypothesize** — simple bugs: sequential single hypothesis. Complex bugs with multiple plausible causes: dispatch parallel debug team (one Explore agent per hypothesis)
-4. **Implement** — create failing test, fix root cause, verify
-
-**Iron law: no fixes without root cause investigation.** If 3+ fix attempts fail, question the architecture and escalate to user.
+When a task fails during execution, follow the `/debug` skill (`skills/debug/SKILL.md`). Iron law: no fixes without root cause investigation.
 
 ### Verification Gates
 
-At every phase transition and before any completion claim, follow the verification protocol in `verification-protocol.md`:
-
-1. **IDENTIFY** what command proves the claim
-2. **RUN** the full command (fresh, in this message)
-3. **READ** full output, check exit code
-4. **VERIFY** output confirms the claim
-5. **ONLY THEN** make the claim
-
-No "should pass," no "looks correct," no trusting agent team reports without independent verification.
+At every phase transition and before any completion claim, follow the `/verify` skill (`skills/verify/SKILL.md`). No "should pass," no "looks correct," no trusting agent team reports without independent verification.
 
 ---
 
@@ -529,21 +510,6 @@ Recurring patterns are the signal — if the same finding type appears across mu
 
 ---
 
-## TDD Protocol
-
-All implementation follows test-driven development:
-
-1. **RED** — write one failing test showing desired behavior
-2. **Verify RED** — run test, confirm it fails for the right reason (feature missing, not typo)
-3. **GREEN** — write minimal code to pass the test
-4. **Verify GREEN** — run test, confirm it passes, no other tests broken
-5. **REFACTOR** — clean up, keep tests green
-6. **Repeat**
-
-**If code is written before a test:** delete it, start over with the test. No exceptions without user permission.
-
----
-
 ## Skill Taxonomy Maintenance
 
 coding-team reads `~/.claude/skills/skill-taxonomy.yml` to map skills to workers.
@@ -556,24 +522,13 @@ coding-team reads `~/.claude/skills/skill-taxonomy.yml` to map skills to workers
 
 ## Handling Review Feedback
 
-When receiving code review feedback (from user, PR reviewers, or quality reviewer agents), follow `review-reception-protocol.md`:
-
-- Verify before implementing — don't blindly agree
-- Push back with technical reasoning when feedback is wrong
-- Ask for clarification on unclear items before implementing any
-- No performative agreement ("Great point!") — just fix it or discuss technically
-- One item at a time, test each
+Follow the `/review-feedback` skill (`skills/review-feedback/SKILL.md`).
 
 ---
 
 ## Parallel Dispatch
 
-When facing multiple independent failures or tasks, follow `parallel-dispatch-protocol.md`:
-
-- Group failures by independent domain
-- One agent team per domain, all dispatched in same message
-- Each team gets focused scope, clear context, constraints, and expected output
-- Review all results, check for conflicts, run full test suite
+Follow the `/parallel-fix` skill (`skills/parallel-fix/SKILL.md`).
 
 ---
 
@@ -586,7 +541,18 @@ When facing multiple independent failures or tasks, follow `parallel-dispatch-pr
 
 ## Reference Files
 
-All protocol files live in the coding-team skill directory:
+**Standalone skills** (can be invoked independently or from the pipeline):
+
+| Skill | Path | Purpose |
+|-------|------|---------|
+| `/debug` | `skills/debug/SKILL.md` | Four-phase root cause investigation |
+| `/verify` | `skills/verify/SKILL.md` | Evidence-before-claims gates |
+| `/review-feedback` | `skills/review-feedback/SKILL.md` | How to handle review feedback |
+| `/worktree` | `skills/worktree/SKILL.md` | Git worktree setup and cleanup |
+| `/parallel-fix` | `skills/parallel-fix/SKILL.md` | Parallel agent dispatch for independent failures |
+| `/tdd` | `skills/tdd/SKILL.md` | Test-driven development cycle |
+
+**Agent prompt templates** (used by the execution loop):
 
 | File | Purpose |
 |------|---------|
@@ -597,11 +563,6 @@ All protocol files live in the coding-team skill directory:
 | `prompts/quality-reviewer.md` | Legacy quality reviewer (use simplify + harden instead) |
 | `prompts/spec-doc-reviewer.md` | Design doc reviewer template |
 | `prompts/plan-doc-reviewer.md` | Plan doc reviewer template |
-| `debugging-protocol.md` | Four-phase root cause investigation |
-| `verification-protocol.md` | Evidence-before-claims gates |
-| `worktree-protocol.md` | Git worktree setup and cleanup |
-| `review-reception-protocol.md` | How to handle review feedback |
-| `parallel-dispatch-protocol.md` | When/how to dispatch parallel agent teams |
 
 ---
 
