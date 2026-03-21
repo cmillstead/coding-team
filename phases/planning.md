@@ -12,6 +12,28 @@ Before writing tasks, the planning worker must answer:
 2. **What is the minimum set of changes?** Flag work that could be deferred without blocking the core goal.
 3. **Complexity smell:** If the plan touches 8+ files or introduces 2+ new classes/services, challenge whether the same goal can be achieved with fewer moving parts.
 
+## Step 0.5: Skill Relevance Check
+
+Before writing tasks, check if any planned work needs specialized skill involvement. This check is self-contained — no external taxonomy file needed.
+
+**Detection rules (checked in order, first match wins per task):**
+
+| Task modifies... | Category | Include in task annotation |
+|---|---|---|
+| `phases/*.md`, `prompts/*.md`, `skills/*/SKILL.md`, `SKILL.md`, `CLAUDE.md`, `memory/*.md` | prompt-engineering | **Advisory skills:** PROMPT_CRAFT_ADVISORY |
+| Test files only (`tests/**`, `*_test.*`, `test_*.*`) | testing | **Advisory skills:** `/tdd` — follow red-green-refactor cycle |
+| Auth, payment, encryption, or data-deletion code paths | security-sensitive | **Advisory skills:** `/codex challenge` recommended after implementation |
+
+**PROMPT_CRAFT_ADVISORY** (include this text verbatim in annotated tasks):
+
+> This task writes CC instructions. Apply prompt engineering language rules:
+> 1. Framing determines defaults — state desired behavior first in conditionals, before exceptions
+> 2. Name tools explicitly — write "Agent tool", "Teammate tool", "Edit tool", not "dispatch agents" or "use tools"
+> 3. Prohibitions must be explicit — CC does not infer what it should NOT do; state every prohibition directly
+> 4. Quantify thresholds — write "3 files", "5 minutes", "2 rounds", not "large", "many", "several"
+
+**Annotating tasks:** For each task in the plan, add an `**Advisory skills:**` line after the `**Model:**` line. Reference the advisory by name (e.g., "PROMPT_CRAFT_ADVISORY"). If no detection rule matches, write `**Advisory skills:** None`.
+
 ## Plan Document Format
 
 Every plan starts with this header:

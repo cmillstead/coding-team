@@ -14,12 +14,15 @@ If user wants isolation (or task warrants it), follow the `/worktree` skill (`sk
 
 On approval, begin execution. **Agent team per task: implementer + audit team (spec + simplify + harden).** Implementer follows the `/tdd` skill for all implementation work.
 
-**CRITICAL: The main agent is the orchestrator, not the implementer.** You do NOT write code, edit files, or run tests yourself during Phase 5. Your job is to:
-1. Dispatch agents (implementer, auditors) using the Agent tool
-2. Read their results
-3. Decide what to do next (re-dispatch, proceed, escalate)
+**CRITICAL: The main agent is the orchestrator, not the implementer.** You do NOT write code, edit files, or run tests yourself during Phase 5. Your ONLY permitted tools during execution are:
+- **Agent tool** — dispatch implementer and auditor subagents
+- **Teammate tool** — dispatch teammates (if agent teams available)
+- **SendMessage tool** — coordinate with teammates
+- **TaskCreate / TaskList / TaskUpdate tools** — manage shared task list
+- **Read tool** — read files for context (NEVER edit them)
+- **Bash tool for git commands only** — `git diff`, `git log`, `git rev-parse` (NOT test commands, NOT `pytest`, NOT `npm test`, NOT `cargo test`)
 
-If you catch yourself using Edit, Write, or running test commands directly — STOP. You are doing the implementer's job. Dispatch an agent instead.
+If you use Edit, Write, or Bash to run tests during Phase 5, the task must be re-done by an agent. Your direct edit bypasses the audit loop and is not trusted — it skips spec review, simplify audit, and harden audit. Unreviewed code does not ship.
 
 **Why subagents for execution:** Evaluate the three signals (see SKILL.md Step 0):
 - **Implementer dispatch:** COORDINATION=no (one implementer per task, owns distinct files per plan), DISCOVERY=no (plan specifies exact changes), COMPLEXITY=varies but independent → **subagents**
@@ -51,15 +54,20 @@ For each task in plan:
   IMPLEMENTER (see prompts/implementer.md)
   2. Dispatch implementer via Agent tool — use model tier from the plan
      - Pass: full task text, context, working directory, baseline test state
+     - If the task has advisory skills: include the advisory block in the implementer prompt's Advisory Skills section. The implementer applies these rules throughout implementation.
      - Do NOT make implementer read plan file — provide full text
   3. Handle implementer status (see Implementer Status Protocol below)
 
   AUDIT TEAM (only if implementer reports DONE or DONE_WITH_CONCERNS)
   4. Record HEAD_SHA, collect modified files list (git diff --name-only BASE..HEAD)
-  5. Dispatch 3 audit agents IN PARALLEL via Agent tool (all read-only Explore):
+  5. Dispatch audit agents IN PARALLEL via Agent tool (all read-only Explore):
      a. Spec reviewer (see prompts/spec-reviewer.md) — "does it match the spec? was TDD followed?"
      b. Simplify auditor (see prompts/simplify-auditor.md) — "is there a simpler way?"
      c. Harden auditor (see prompts/harden-auditor.md) — "what would an attacker try?"
+     d. Prompt-craft auditor (see prompts/prompt-craft-auditor.md) — triggers when BOTH:
+        (i) Task has PROMPT_CRAFT_ADVISORY annotation, AND
+        (ii) Modified files include at least 1 file matching: `phases/*.md`, `prompts/*.md`, `skills/*/SKILL.md`, `SKILL.md`, `CLAUDE.md`, `memory/*.md`
+        Both conditions required (belt and suspenders). If either is missing, skip this auditor.
   6. Triage findings (see Audit Triage below)
   7. If findings to fix → dispatch new implementer to fix → re-audit (max 3 rounds)
      Fresh audit agents each round — don't reuse.
@@ -160,6 +168,10 @@ During execution, after every 3 completed tasks, print a context check VERBATIM 
 >
 > Progress so far: Tasks 1-{N} committed and verified.
 > ---
+
+Also print on each mid-phase reminder:
+
+> **Orchestrator check:** You are the orchestrator. If you have been writing code directly, stop and re-dispatch through Agent tool or Teammate tool. Direct edits bypass the audit loop.
 
 ## Debugging Detour Reminders
 

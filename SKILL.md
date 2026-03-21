@@ -118,6 +118,9 @@ After finding a matching plan, determine where the user left off:
 
 | User's situation | Entry point |
 |---|---|
+| Task modifies CC instruction files (`phases/*.md`, `prompts/*.md`, `skills/*/SKILL.md`, `SKILL.md`, `CLAUDE.md`, `memory/*.md`) AND user has no spec or a vague request | **Phase 2** — route through design team with Prompt/Skill Specialist |
+| Task modifies CC instruction files AND user has a complete spec with explicit file paths and content | **Phase 4** with PROMPT_CRAFT_ADVISORY on every task that touches instruction files |
+| CC behavioral issue ("CC keeps doing X", "CC ignores my instructions", "CC uses wrong tool") | `/prompt-craft diagnose` skill — not `/debug`. Behavioral issues are instruction problems, not code bugs. |
 | New feature idea, vague request | **Phase 1** — start dialogue |
 | Has a design/spec, needs a plan | **Phase 4** — planning worker |
 | Has a plan file, ready to build | **Phase 5** — execution |
@@ -259,6 +262,7 @@ Each phase reads its detail file on entry. Do not read ahead — load only the a
 | `prompts/spec-reviewer.md` | Spec compliance + TDD verification (read-only) |
 | `prompts/simplify-auditor.md` | Simplify auditor — clarity and complexity (read-only) |
 | `prompts/harden-auditor.md` | Harden auditor — security and resilience (read-only) |
+| `prompts/prompt-craft-auditor.md` | Prompt-craft auditor — CC instruction quality (read-only, conditional) |
 | `prompts/quality-reviewer.md` | Legacy quality reviewer (use simplify + harden instead) |
 | `prompts/spec-doc-reviewer.md` | Design doc reviewer template |
 | `prompts/plan-doc-reviewer.md` | Plan doc reviewer template |
