@@ -92,6 +92,22 @@ After the header, every plan includes a context brief. The planning worker fills
 The planning worker MUST fill this section. If no organizational context is known, write: "No non-obvious context identified. Standard development environment."
 Do NOT invent context you do not have evidence for. If a field's answer is unknown, omit the field entirely. Fabricated context is worse than no context — it causes implementers to work around constraints that don't exist.
 
+## Project-Specific Eval Criteria (optional)
+
+If the context brief identifies domain-specific constraints, the planning worker generates eval criteria that auditors MUST check beyond their standard lens.
+
+```markdown
+## Project-Specific Eval Criteria
+
+> Domain-specific checks that auditors MUST verify beyond their standard lens. These encode project context that generic audits miss.
+
+- [ ] [Criterion — e.g., "No destructive database operations without rollback mechanism"]
+- [ ] [Criterion — e.g., "MCP message handling changes must preserve backward compatibility"]
+- [ ] [Criterion — e.g., "All new public API surfaces must be documented in tools.md"]
+```
+
+If the context brief has no domain-specific constraints, omit this section entirely. Do NOT generate generic criteria — they must encode actual project context. Generic criteria like "code should be well-tested" add noise, not signal.
+
 ## File Structure
 
 Before defining tasks, map out which files will be created or modified and what each one is responsible for. Design units with clear boundaries and well-defined interfaces. Prefer smaller, focused files.

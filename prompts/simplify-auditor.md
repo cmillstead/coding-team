@@ -29,6 +29,16 @@ Agent tool:
     - **Consolidation** — duplicate logic that should be extracted
     - **API surface** — public methods/exports that should be private
 
+    ## Project-Specific Criteria
+
+    [INSERT PROJECT-SPECIFIC EVAL CRITERIA FROM PLAN — if the plan has a
+    "Project-Specific Eval Criteria" section, paste the criteria here.
+    If the plan has no such section, write "No project-specific criteria."]
+
+    If project-specific criteria are listed above, verify each one against the
+    implementation. Flag violations as HIGH severity — these represent organizational
+    context that generic audits miss.
+
     ## Calibration
 
     Only flag things that are CLEARLY wrong, not just imperfect.

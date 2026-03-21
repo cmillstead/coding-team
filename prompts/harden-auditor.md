@@ -20,6 +20,16 @@ Agent tool:
 
     [LIST OF MODIFIED FILES from git diff --name-only]
 
+    ## Project-Specific Criteria
+
+    [INSERT PROJECT-SPECIFIC EVAL CRITERIA FROM PLAN — if the plan has a
+    "Project-Specific Eval Criteria" section, paste the criteria here.
+    If the plan has no such section, write "No project-specific criteria."]
+
+    If project-specific criteria are listed above, verify each one against the
+    implementation. Flag violations as HIGH severity — these represent organizational
+    context that generic audits miss.
+
     ## What to Check
 
     - **Input validation** — unvalidated or unbounded external inputs
