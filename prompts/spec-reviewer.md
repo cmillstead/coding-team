@@ -73,6 +73,13 @@ Agent tool:
 
     **Verify by reading code, not by trusting report.**
 
+    ## Part 3: Documentation Backstop
+
+    **Documentation backstop:**
+    - If the implementer reported "No doc impact": run `grep -l '<changed-file-stems>' README.md CLAUDE.md ARCHITECTURE.md` in the repo root
+    - If any match, flag as POSSIBLE_DOC_DRIFT — the orchestrator will assess whether the doc is actually stale
+    - Do NOT assess doc staleness yourself — just flag the path match
+
     ## Report Format
 
     **TDD:** PASS | FAIL [details]

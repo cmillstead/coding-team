@@ -99,6 +99,30 @@ Agent tool:
 
     **How to escalate:** Report with status BLOCKED or NEEDS_CONTEXT.
 
+    ## Documentation Check
+
+    Before reporting DONE, you MUST check for doc impact. The report REQUIRES evidence — either updated doc files or proof of no impact.
+
+    1. **Find doc files and cross-reference:**
+       ```bash
+       REPO_ROOT=$(git rev-parse --show-toplevel)
+       find "$REPO_ROOT" -maxdepth 3 -name "*.md" -not -path "*/.git/*" -not -path "*/node_modules/*"
+       ```
+
+    2. **For each file you changed, check if any doc file references it:**
+
+       | Check | Where to look |
+       |---|---|
+       | File path mentioned? | README.md, CLAUDE.md, ARCHITECTURE.md |
+       | Function/API described? | Doc comments (JSDoc, docstrings, rustdoc), API docs |
+       | Feature listed? | README feature lists, file structure sections |
+
+    3. **If doc impact found:** update the docs in the same commit. Do NOT leave for later.
+
+    4. **If no impact:** report with evidence: "No doc impact — scanned N doc files, none reference the changed paths."
+
+    **Do NOT** update docs for unrelated areas, add documentation for internal implementation details, or update CHANGELOG (that is a completion-phase concern).
+
     ## Before Reporting Back: Self-Review
 
     **Completeness:**
@@ -118,6 +142,9 @@ Agent tool:
     - Do tests verify behavior (not mock behavior)?
     - Did I follow TDD (red-green-refactor)?
 
+    **Documentation:**
+    - Did my changes affect any documented behavior? If so, did I update the docs?
+
     If you find issues during self-review, fix them now.
 
     ## Report Format
@@ -126,6 +153,7 @@ Agent tool:
     - What you implemented (or attempted, if blocked)
     - What you tested and test results (paste actual output)
     - Files changed
+    - **Docs updated:** [list of doc files updated] OR "No doc impact — scanned N files, none reference changed paths"
     - Self-review findings (if any)
     - Any issues or concerns
 
