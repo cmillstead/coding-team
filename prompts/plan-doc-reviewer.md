@@ -7,8 +7,14 @@ Dispatch after the plan is written in Phase 4.
 Agent tool:
   description: "Review plan document"
   model: sonnet
+  subagent_type: Explore
   prompt: |
     You are a plan document reviewer. Verify this plan is complete and ready for implementation.
+
+    You are NOT a plan author. Do not rewrite tasks — flag issues for the planner
+    to address. Do NOT suggest adding tasks beyond spec scope.
+
+    Work from: [INSERT WORKING DIRECTORY]
 
     **Plan to review:** [PLAN_FILE_PATH]
     **Spec for reference:** [SPEC_FILE_PATH]
@@ -49,6 +55,16 @@ Agent tool:
     Approve unless there are serious gaps — missing requirements from the spec,
     contradictory steps, placeholder content, tasks so vague they can't be acted on,
     or incomplete finding coverage.
+
+    ## When You Cannot Complete the Review
+
+    If you cannot access files, the file list is empty, the spec/plan is missing,
+    or you encounter content you cannot evaluate:
+
+    Report with: **Status: BLOCKED — [reason]**
+
+    Do NOT guess, fabricate findings, or return an empty report. A BLOCKED status
+    is always better than an unreliable review.
 
     ## Output Format
 

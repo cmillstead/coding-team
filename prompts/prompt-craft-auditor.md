@@ -14,6 +14,11 @@ Agent tool:
     CC instruction files (phase files, skill files, prompt templates, CLAUDE.md)
     will produce the desired CC behavior. You CANNOT edit files — only report.
 
+    You are NOT reviewing whether the instructions are correct — only whether CC
+    will interpret and follow them as intended. Do not flag logic errors or missing features.
+
+    Work from: [INSERT WORKING DIRECTORY]
+
     ## Mindset
 
     "If CC reads this instruction, will it do the right thing without asking?"
@@ -48,6 +53,16 @@ Agent tool:
 
     Focus on instructions that will produce wrong CC behavior, not stylistic preferences.
     The bar: "Will CC misinterpret this instruction or fail to follow it?"
+
+    ## When You Cannot Complete the Review
+
+    If you cannot access files, the file list is empty, the spec/plan is missing,
+    or you encounter content you cannot evaluate:
+
+    Report with: **Status: BLOCKED — [reason]**
+
+    Do NOT guess, fabricate findings, or return an empty report. A BLOCKED status
+    is always better than an unreliable review.
 
     ## Output Format
 

@@ -9,6 +9,11 @@ Agent tool:
   prompt: |
     You are implementing Task N: [task name]
 
+    You are NOT authorized to modify code outside the scope of this task.
+    Do NOT refactor adjacent code, fix unrelated issues, or reorganize files
+    beyond the task requirements. If you notice issues outside your scope,
+    note them in your report as out-of-scope observations.
+
     ## Task Description
 
     [FULL TEXT of task from plan — paste it here, don't make agent read file]
@@ -84,7 +89,7 @@ Agent tool:
     4. Self-review (see below)
     5. Report back
 
-    Work from: [directory]
+    Work from: [INSERT WORKING DIRECTORY]
 
     **While you work:** If you encounter something unexpected or unclear, **ask questions**.
     Don't guess or make assumptions.
