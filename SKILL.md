@@ -118,12 +118,12 @@ After finding a matching plan, determine where the user left off:
 
 When resuming a session (detected in Step 1), check what changed since the last activity:
 
-1. Check time since last commit on the feature branch:
+1. Compute hours since last commit on the feature branch:
    ```bash
-   git log -1 --format="%ci" HEAD
+   HOURS_SINCE=$(( ($(date +%s) - $(git log -1 --format="%ct" HEAD)) / 3600 ))
    ```
 
-2. If more than 24 hours since last activity:
+2. If `HOURS_SINCE` is greater than 24:
    a. Check for commits on the base branch since the branch diverged:
       ```bash
       git log --oneline $(git merge-base HEAD main)..origin/main
@@ -134,14 +134,14 @@ When resuming a session (detected in Step 1), check what changed since the last 
       >
       > Any of these affect our work? (If unsure, I'll proceed.)
    c. Wait for user response before routing to Step 3.
+   d. If no commits found on the base branch, proceed directly to Step 3.
+   e. If the project has a `memory/decisions/` directory, check for new decision entries on main since the branch point:
+      ```bash
+      git log --diff-filter=A --name-only --format="" $(git merge-base HEAD main)..origin/main -- "memory/decisions/"
+      ```
+      If new decisions found, read them and include in the context refresh report.
 
-3. If 24 hours or less since last activity, skip this step — proceed directly to Step 3.
-
-4. If the project has a `memory/decisions/` directory, check for new decision entries on main since the branch point:
-   ```bash
-   git log --diff-filter=A --name-only --format="" $(git merge-base HEAD main)..origin/main -- "memory/decisions/"
-   ```
-   If new decisions found, read them and include in the context refresh report.
+3. If `HOURS_SINCE` is 24 or less, skip this step — proceed directly to Step 3.
 
 **Step 3: Route.** For fresh tasks (no prior plans), or after plan discovery:
 
