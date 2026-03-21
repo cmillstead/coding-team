@@ -171,7 +171,37 @@ Save plan to: `docs/plans/YYYY-MM-DD-<feature>.md` (always in the **main repo ro
 
 ## Next Steps
 
-After the plan passes review and is saved, print this block VERBATIM (substitute the actual plan path):
+After the plan passes review and is saved:
+
+1. Evaluate risk signals against the plan:
+
+| Signal | Detection |
+|---|---|
+| Plan touches 5+ files | Count files in task list `**Files:**` sections |
+| Plan has opus-tier tasks | Any task with `**Model:** opus` |
+| Plan introduces new security surface | Tasks touch auth, payment, encryption, session, token, CORS, or CSP files |
+| Plan modifies CC instruction files | Tasks touch `phases/*.md`, `skills/*/SKILL.md`, `prompts/*.md`, `CLAUDE.md`, `SKILL.md` |
+| Plan includes database migrations | Tasks create or alter schema, migrations, or indexes |
+| User previously requested Codex review | User said "codex", "second opinion", or "cross-model" in this session |
+
+2. Run: `command -v codex >/dev/null 2>&1` to check if Codex CLI is available.
+
+3. **If ANY risk signal is true AND Codex is available**, print this VERBATIM (substitute actual values), then STOP — do not print anything after this block. Your next message depends on the user's answer:
+
+> ---
+>
+> **Plan saved to `docs/plans/<actual-path>`.**
+>
+> This plan [touches N files / modifies security surface / has opus-tier tasks / etc.].
+>
+> Run `/codex review` for an independent second opinion on the plan? (Y/n)
+>
+> ---
+
+   - User says yes: run `/codex review` against the plan file. After Codex review completes, continue with step 4.
+   - User says no or sends a different message: continue with step 4.
+
+4. **If no risk signals fire OR Codex is not available OR Codex review is done**, print this VERBATIM (substitute actual values):
 
 > ---
 >
@@ -180,7 +210,6 @@ After the plan passes review and is saved, print this block VERBATIM (substitute
 > **Next:** Phase 5 execution. "Proceed to Phase 5"
 >
 > **Recommended before execution:**
-> - `/codex review` — get a Codex second opinion on the plan (iterative — Codex reviews, Claude revises, up to 5 rounds)
 > - `/worktree` — set up an isolated workspace (offered automatically)
 >
 > **Context check:** Phase 5 typically uses 60-80% of the context window. Clearing here preserves capacity for execution. The plan is on disk.
@@ -190,3 +219,5 @@ After the plan passes review and is saved, print this block VERBATIM (substitute
 > **During execution:** If you hit a bug that requires investigation, `/freeze` will lock edits to the affected directory so debugging can't accidentally change unrelated code. `/debug` auto-suggests this.
 >
 > ---
+
+**User override:** If the user has said "never ask about codex" or "skip codex gates" in this session, skip step 3 entirely for the rest of the session.

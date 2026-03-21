@@ -244,7 +244,36 @@ When the debug detour completes and execution resumes, print:
 
 ## Next Steps
 
-After all tasks are executed and verified, print this block VERBATIM:
+After all tasks are executed and verified:
+
+1. Evaluate risk signals against the completed diff. Run these commands:
+   a. Count changed files: `git diff $(git merge-base HEAD main) --name-only | wc -l`
+   b. If count is 5+, gate fires.
+   c. Check for security-sensitive files: `git diff $(git merge-base HEAD main) --name-only | grep -iE "auth|payment|encrypt|session|token|cors|csp"`
+   d. If any output, gate fires.
+   e. Check for CC instruction files: `git diff $(git merge-base HEAD main) --name-only | grep -iE "phases/|skills/|prompts/|CLAUDE.md|SKILL.md"`
+   f. If any output, gate fires.
+
+2. Run: `command -v codex >/dev/null 2>&1` to check if Codex CLI is available.
+
+3. **If ANY risk signal fired AND Codex is available**, print this VERBATIM (substitute actual values), then STOP — do not print anything after this block. Your next message depends on the user's answer:
+
+> ---
+>
+> **All tasks executed and verified.**
+>
+> This diff [changes N files / touches security-sensitive code / modifies CC instructions / etc.].
+>
+> Run Codex on the full diff? Options: **review** / **challenge** (adversarial — recommended for security-sensitive changes) / **both** / **skip**
+>
+> ---
+
+   - User says "review": run `/codex review` against the diff. Then continue with step 4.
+   - User says "challenge": run `/codex challenge` against the diff. Then continue with step 4.
+   - User says "both": run `/codex review` first, then `/codex challenge`. Then continue with step 4.
+   - User says "skip" or sends a different message: continue with step 4.
+
+4. **If no risk signals fired OR Codex not available OR Codex review done**, print this VERBATIM:
 
 > ---
 >
@@ -252,16 +281,13 @@ After all tasks are executed and verified, print this block VERBATIM:
 >
 > **Next:** Phase 6 completion. "Proceed to Phase 6"
 >
-> **Recommended before completion:**
-> - `/codex review` — cross-model review of the full diff (findings overlap with Claude's audit = high confidence)
-> - `/codex challenge` — adversarial review (recommended for auth, payment, encryption, data deletion changes)
-> - `/verify` — if you want to independently re-run the full test suite before proceeding
->
 > **Preview — offered again in Phase 6:**
 > - `/retro` — engineering retrospective
 > - `/document-release` — update docs to match shipped code
 > - `/prompt-craft audit` — if this feature changed any skills or prompts
 >
-> **Shipping shortcut:** `/ship` for a fully automated release instead of the manual Phase 6 flow.
+> **Shipping shortcut:** `/ship` for automated release instead of manual Phase 6.
 >
 > ---
+
+**User override:** If the user has said "never ask about codex" or "skip codex gates" in this session, skip step 3 entirely for the rest of the session.
