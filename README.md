@@ -175,6 +175,7 @@ Protocols are extracted as standalone skills that can be invoked independently o
 | `/worktree` | Git worktree setup, safety checks, and cleanup |
 | `/parallel-fix` | Parallel agent dispatch for independent failures |
 | `/tdd` | Test-driven development cycle (red-green-refactor) |
+| `/prompt-craft` | Skill & prompt engineering — create, diagnose, audit, taxonomy |
 
 ### Agent teams vs subagents
 
@@ -221,7 +222,7 @@ To also expose individual protocols as standalone slash commands:
 
 ```bash
 # All standalone skills
-for skill in debug verify review-feedback worktree parallel-fix tdd; do
+for skill in debug verify review-feedback worktree parallel-fix tdd prompt-craft; do
   ln -s ~/.claude/skills/coding-team/skills/$skill ~/.claude/skills/$skill
 done
 ```
@@ -304,6 +305,7 @@ skills/                           # standalone skills (can be invoked independen
   worktree/SKILL.md               # /worktree — git worktree setup/cleanup
   parallel-fix/SKILL.md           # /parallel-fix — parallel agent dispatch
   tdd/SKILL.md                    # /tdd — test-driven development cycle
+  prompt-craft/SKILL.md           # /prompt-craft — skill & prompt engineering
 prompts/                          # agent prompt templates (used by execution loop)
   implementer.md                  # implementer agent template
   spec-reviewer.md                # spec compliance + TDD verification (read-only)
