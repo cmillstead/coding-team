@@ -28,7 +28,7 @@ Which option?
    - **Keep as-is:** report branch name and worktree path, done
    - **Discard:** require user to type "discard" to confirm -> delete branch -> cleanup worktree
 
-**Never** proceed with failing tests, merge without verifying, delete work without confirmation, or dismiss pre-existing test failures as "not our problem."
+**Never** proceed with failing tests, merge without verifying, delete work without confirmation, or dismiss failures/findings as "pre-existing" or "not our problem." A bug is a bug regardless of when it was introduced.
 
 ## Learning Loop (Completion Summary)
 

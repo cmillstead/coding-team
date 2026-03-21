@@ -163,7 +163,7 @@ For each attack vector you find, provide:
 Be specific. Show the attack, not just describe the category."
 ```
 
-Present results grouped by severity. P1 findings are blockers.
+Present results grouped by severity. P1 findings are blockers. P2 findings must be addressed before proceeding.
 
 ---
 
@@ -280,3 +280,4 @@ The consensus findings are the highest-confidence issues. The model-specific fin
 - If a Codex revision contradicts the user's explicit requirements, skip that revision and note it
 - Clean up temp files after every invocation
 - Never present Codex's output as Claude's own analysis — always attribute clearly
+- **ALL findings must be addressed before proceeding** — fix, defer with user approval, or explain why it's a false positive. "Pre-existing" is NOT a valid reason to skip a finding. If the code has a bug, it has a bug regardless of when it was introduced. NEVER dismiss findings as "pre-existing, not regressions."

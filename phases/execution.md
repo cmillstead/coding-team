@@ -270,12 +270,19 @@ After all tasks are executed and verified:
 >
 > ---
 
-   - User says "review": run `/second-opinion review` against the diff. Then continue with step 4.
-   - User says "challenge": run `/second-opinion challenge` against the diff. Then continue with step 4.
-   - User says "both": run `/second-opinion review` first, then `/second-opinion challenge`. Then continue with step 4.
+   - User says "review": run `/second-opinion review` against the diff. Then continue with step 3a.
+   - User says "challenge": run `/second-opinion challenge` against the diff. Then continue with step 3a.
+   - User says "both": run `/second-opinion review` first, then `/second-opinion challenge`. Then continue with step 3a.
    - User says "skip" or sends a different message: continue with step 4.
 
-4. **If no risk signals fired OR Codex not available OR Codex review done**, print this VERBATIM:
+   3a. **After Codex review completes — findings gate.** If Codex returned ANY P1 or P2 findings:
+   - List every finding with severity
+   - Do NOT proceed to Phase 6. Do NOT dismiss findings as "pre-existing" or "not regressions"
+   - Every finding must be: fixed (dispatch implementer), deferred (with explicit user approval), or explained as false positive (with reasoning)
+   - After fixes, re-run Codex to verify. Only proceed when findings are resolved.
+   - If no P1/P2 findings (only P3 or clean): continue with step 4.
+
+4. **If no risk signals fired OR Codex not available OR Codex review done with findings resolved**, print this VERBATIM:
 
 > ---
 >
