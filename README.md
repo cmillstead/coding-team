@@ -121,6 +121,8 @@ The plan goes through an automated plan document reviewer (up to 3 iterations) b
 
 ### Phase 5: Execution
 
+The main agent is the **orchestrator** during this phase — it dispatches subagents, reads their results, and decides what to do next. It never writes code, edits files, or runs tests directly. All implementation goes through Agent subagents.
+
 Before the first task, the full test suite runs to establish a **baseline**. If any tests are already failing, the first implementer fixes them before starting task work — no pre-existing failure is dismissed as "not our problem."
 
 Each task gets its own **task team**:
