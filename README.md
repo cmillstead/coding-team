@@ -224,6 +224,27 @@ Clone to your skills directory:
 git clone git@github.com:cmillstead/coding-team.git ~/.claude/skills/coding-team
 ```
 
+### Enable agent teams
+
+Agent teams require an environment variable. Add to your shell profile:
+
+```bash
+# In ~/.zshrc or ~/.bashrc
+export CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1
+```
+
+Or add to `~/.claude/settings.json`:
+
+```json
+{
+  "env": {
+    "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1"
+  }
+}
+```
+
+Without this, all coordination falls back to subagents. The skill detects availability automatically at session start.
+
 ### Full pipeline only
 
 If you only want the `/coding-team` orchestrated pipeline, you're done.
