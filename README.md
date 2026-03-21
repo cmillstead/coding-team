@@ -110,6 +110,7 @@ A Planning Worker (Architect + Senior Coder) produces a detailed implementation 
 - Failure modes table identifying untested/unhandled error paths
 - NOT in scope section preventing scope creep
 - What already exists section for reuse
+- Traceability table (for scan/review-sourced work) mapping every input finding to a disposition: fix, defer with rationale, or false positive — nothing silently dropped
 
 **Model assignment per task:**
 - **haiku** — 1-2 files with complete spec, mechanical changes
@@ -144,6 +145,10 @@ Audit agents are read-only (Explore mode) — they flag issues, they don't fix t
 - **Drift check** — re-read original task description between rounds to prevent scope creep.
 
 The audit loop exits on: clean audit, low-only findings, or 3-round cap.
+
+**Completeness checks** prevent agents from silently dropping work:
+- **Per-task:** after each implementer reports done, every step in the task is checked. Skipped steps trigger re-dispatch.
+- **End-of-execution:** before moving to Phase 6, every plan task must have a corresponding commit. Silently dropped tasks get executed, not ignored.
 
 ### Phase 6: Completion
 
