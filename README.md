@@ -28,7 +28,8 @@ The main SKILL.md is a router that knows the phase sequence, input/output contra
 | `/coding-team` (router decides) | Main SKILL.md | ~302 |
 | `/coding-team` → Phase 4 (planning) | Main + `phases/planning.md` | ~584 |
 | `/coding-team` → Phase 5 (execution) | Main + `phases/execution.md` | ~607 |
-| `/coding-team` → Phase 2 (design) | Main + `phases/design-team.md` | ~483 |
+| `/coding-team` → Phase 2 (design) | Main + `phases/design-team.md` | ~533 |
+| `/coding-team` → Phase 6 (completion) | Main + `phases/completion.md` | ~531 |
 | `/debug` (standalone) | `skills/debug/SKILL.md` only | ~168 |
 | `/verify` (standalone) | `skills/verify/SKILL.md` only | ~55 |
 | `/prompt-craft` (standalone) | `skills/prompt-craft/SKILL.md` only | ~263 |
@@ -110,6 +111,8 @@ Proposes 2-3 approaches with trade-offs: at least one minimal viable approach (s
 
 ### Phase 2: Design team
 
+Before spawning workers, the skill retrieves context from prior sessions: project-local `docs/team-memory.md` (codebase facts and known landmines) and relevant past episodes via QMD `vector_search` (pattern-matched, not keyword-matched). Both are passed as advisory context to all workers.
+
 A Team Leader spawns specialist workers to analyze the problem. Workers run in parallel and are composed dynamically based on what the task needs.
 
 **Specialist roles:**
@@ -178,7 +181,7 @@ Each task gets a **task team**: an implementer (using TDD) plus an audit team of
 
 ### Phase 6: Completion
 
-Full test suite + linter verification, then four options: merge locally, push and create PR, keep branch as-is, or discard (requires typing "discard" to confirm). A learning loop summary captures recurring audit patterns, unresolved low-severity findings, and out-of-scope observations. A decision log prompt asks the user to record any architectural decisions made during the feature to `memory/decisions/`.
+Full test suite + linter verification, then four options: merge locally, push and create PR, keep branch as-is, or discard (requires typing "discard" to confirm). A learning loop summary captures recurring audit patterns, unresolved low-severity findings, and out-of-scope observations. A decision log prompt asks the user to record any architectural decisions made during the feature to `memory/decisions/`. A **Memory Nudge** then extracts session learnings: codebase facts → project-local `docs/team-memory.md` (with archive rotation), cross-project patterns → `memory/patterns.md`, and a structured episode → Obsidian vault (pattern-rich for vector_search retrieval in future Phase 2 sessions).
 
 ## Standalone skills
 
