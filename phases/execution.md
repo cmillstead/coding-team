@@ -58,9 +58,16 @@ For each task in plan:
      - Do NOT make implementer read plan file — provide full text
   3. Handle implementer status (see Implementer Status Protocol below)
 
-  AUDIT TEAM (only if implementer reports DONE or DONE_WITH_CONCERNS)
-  4. Record HEAD_SHA, collect modified files list (git diff --name-only BASE..HEAD)
-  5. Dispatch audit agents IN PARALLEL via Agent tool (all read-only Explore):
+  COMPLETENESS CHECK
+  4. Compare implementer's output against every step in the task.
+     For each step: was it done, skipped, or partially done?
+     If ANY step was skipped or partially done without explanation:
+     → re-dispatch implementer with "you missed steps X, Y — complete them"
+     Do NOT proceed to audit with incomplete work.
+
+  AUDIT TEAM (only if completeness check passes and implementer reports DONE or DONE_WITH_CONCERNS)
+  5. Record HEAD_SHA, collect modified files list (git diff --name-only BASE..HEAD)
+  6. Dispatch audit agents IN PARALLEL via Agent tool (all read-only Explore):
      a. Spec reviewer (see prompts/spec-reviewer.md) — "does it match the spec? was TDD followed?"
      b. Simplify auditor (see prompts/simplify-auditor.md) — "is there a simpler way?"
      c. Harden auditor (see prompts/harden-auditor.md) — "what would an attacker try?"
@@ -68,19 +75,15 @@ For each task in plan:
         (i) Task has PROMPT_CRAFT_ADVISORY annotation, AND
         (ii) Modified files include at least 1 file matching: `phases/*.md`, `prompts/*.md`, `skills/*/SKILL.md`, `SKILL.md`, `CLAUDE.md`, `memory/*.md`
         Both conditions required (belt and suspenders). If either is missing, skip this auditor.
-  6. Triage findings (see Audit Triage below)
-  7. If findings to fix → dispatch new implementer to fix → re-audit (max 3 rounds)
+  7. Triage findings (see Audit Triage below)
+  8. If findings to fix → dispatch new implementer to fix → re-audit (max 3 rounds)
      Fresh audit agents each round — don't reuse.
 
-  COMPLETENESS CHECK
-  8. Compare implementer's output against every step in the task.
-     For each step: was it done, skipped, or partially done?
-     If ANY step was skipped or partially done without explanation:
-     → re-dispatch implementer with "you missed steps X, Y — complete them"
-     Do NOT proceed to audit with incomplete work.
-
   GATE
-  9. VERIFY: run test suite, confirm pass with fresh output
+  9. VERIFY: The implementer ran the test suite as their final step. Read the
+     implementer's reported test output as the gate check. If the orchestrator
+     doubts the output, dispatch a verification subagent via Agent tool
+     (model: haiku) to re-run tests independently.
   10. Mark task complete
   11. Next task
 ```

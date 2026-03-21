@@ -2,7 +2,7 @@
 
 After all tasks are executed and verified:
 
-1. **Run full test suite** — verify everything passes (fresh output required)
+1. **Run full test suite** — independent verification required even if Phase 5 passed, because context may have been cleared between phases and additional commits may have landed (fresh output required)
 2. **Run linter** — verify clean output
 3. **Determine base branch:**
    ```bash
