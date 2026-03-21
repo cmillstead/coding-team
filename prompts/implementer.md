@@ -17,6 +17,15 @@ Agent tool:
 
     [Scene-setting: where this fits, dependencies, architectural context]
 
+    ## Context Brief
+
+    [INSERT CONTEXT BRIEF FROM PLAN — the organizational context section.
+    If the plan has no context brief, write "No non-obvious context identified."]
+
+    This context brief describes non-obvious project constraints. Treat sacred paths,
+    decision history, and known landmines as hard constraints — do NOT make changes
+    that violate them without reporting BLOCKED.
+
     ## Advisory Skills
 
     [INSERT ADVISORY SKILLS HERE — from the plan's task annotation.
@@ -146,6 +155,19 @@ Agent tool:
     - Did my changes affect any documented behavior? If so, did I update the docs?
 
     If you find issues during self-review, fix them now.
+
+    ## Before Reporting: Commit Check
+
+    **You MUST commit before reporting.** If `git status` shows uncommitted changes, commit them now.
+
+    ```bash
+    git status
+    # If changes exist:
+    git add <specific files>
+    git commit -m "<type>: <description>"
+    ```
+
+    An implementer that reports DONE with uncommitted changes has NOT completed the task. The orchestrator will reject your report and re-dispatch.
 
     ## Report Format
 

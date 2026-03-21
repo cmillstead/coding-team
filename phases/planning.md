@@ -73,6 +73,24 @@ Every plan starts with this header:
 ---
 ```
 
+## Context Brief
+
+After the header, every plan includes a context brief. The planning worker fills this from the design doc, project knowledge, and CLAUDE.md.
+
+```markdown
+## Context Brief
+
+> Non-obvious project context that implementers need. Skip any field that doesn't apply.
+
+- **Environment:** [production/staging/greenfield — what data or users are at risk]
+- **Sacred paths:** [files, databases, or infrastructure that must not be modified without explicit confirmation]
+- **Decision history:** [key architectural decisions relevant to this work and why they were made]
+- **External dependencies:** [APIs, services, vendor relationships that constrain this work]
+- **Known landmines:** [areas where technically correct changes have caused problems before]
+```
+
+The planning worker MUST fill this section. If no organizational context is known, write: "No non-obvious context identified. Standard development environment."
+
 ## File Structure
 
 Before defining tasks, map out which files will be created or modified and what each one is responsible for. Design units with clear boundaries and well-defined interfaces. Prefer smaller, focused files.
