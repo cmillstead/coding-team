@@ -14,6 +14,13 @@ If user wants isolation (or task warrants it), follow the `/worktree` skill (`sk
 
 On approval, begin execution. **Agent team per task: implementer + audit team (spec + simplify + harden).** Implementer follows the `/tdd` skill for all implementation work.
 
+**CRITICAL: The main agent is the orchestrator, not the implementer.** You do NOT write code, edit files, or run tests yourself during Phase 5. Your job is to:
+1. Dispatch subagents (implementer, auditors) using the Agent tool
+2. Read their results
+3. Decide what to do next (re-dispatch, proceed, escalate)
+
+If you catch yourself using Edit, Write, or running test commands directly — STOP. You are doing the implementer's job. Spawn an Agent instead.
+
 ## Execution Loop
 
 Each task gets its own **task team** — implementer builds, audit team reviews:

@@ -147,6 +147,7 @@ Each phase reads its detail file on entry. Do not read ahead — load only the a
 - Performatively agree with review feedback without verifying
 - Dismiss pre-existing test failures — fix them or escalate, never ignore
 - Silently drop findings — every scan finding, review comment, or enumerated issue must be planned (fix, defer with rationale, or false positive) and every planned task must be executed
+- Write code directly during Phase 5 — the main agent is the orchestrator, not the implementer. Use Edit/Write only in Phases 1-4 (plans, specs). During execution, dispatch Agent subagents for all code changes.
 
 **Always:**
 - Verify tests before offering completion options
