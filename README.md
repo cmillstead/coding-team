@@ -100,9 +100,7 @@ For fresh tasks (no prior plans), it routes based on what you bring:
 | A bug report or test failure | `/debug` skill |
 | A PR with review feedback | `/review-feedback` skill |
 | Multiple independent failures | `/parallel-fix` skill |
-| A trivial task (rename, typo, single-file fix) | Skip the skill — just do it directly |
-
-The skill matches process weight to task weight. A typo fix doesn't need 5 specialist workers.
+| A trivial task (rename, typo, single-file fix) | Phase 5 with a single haiku-tier task |
 
 ### Phase 1: Dialogue
 
@@ -321,7 +319,7 @@ Add caching to the API response layer with TTL-based invalidation
 
 Or let the session-start hook suggest it automatically.
 
-For simple tasks (typo, rename, single-file fix), skip the skill and just do it directly.
+For simple tasks (typo, rename, single-file fix), the skill skips to Phase 5 with a single haiku-tier task.
 
 ## File structure
 
@@ -370,6 +368,29 @@ The skill writes two artifacts during execution:
 
 - `docs/plans/YYYY-MM-DD-<feature>-design.md` — design doc (after Phase 3 approval)
 - `docs/plans/YYYY-MM-DD-<feature>.md` — implementation plan (after Phase 4)
+
+## Troubleshooting: Claude won't use coding-team
+
+If the main agent keeps writing code directly instead of delegating to `/coding-team`, the problem is almost always **competing instructions in your CLAUDE.md**. The agent finds language that implies it should write code and uses that to rationalize skipping delegation.
+
+Use `/prompt-craft diagnose` to find the conflict:
+
+1. **Describe the symptom** — "the agent uses Edit directly instead of invoking /coding-team"
+2. **prompt-craft traces the instruction** — finds the delegation rule and checks for competing signals
+3. **It checks framing** — is the delegation rule the default path, or is it framed as an exception?
+4. **It finds contradictions** — other lines in CLAUDE.md that assume the agent writes code
+
+**Common culprits in CLAUDE.md:**
+
+| Competing signal | Why it overrides delegation | Fix |
+|---|---|---|
+| "Write tests alongside new code" | Implies the agent writes tests | "Ensure tests exist (coding-team handles this)" |
+| "Read code-style.md when writing Python" | Implies the agent writes Python | "Pass code-style.md to coding-team agents" |
+| Model routing table without "(for coding-team agents)" | Reads as tasks for the main agent | Add "(for coding-team agents, NOT for you)" to the header |
+| "Skip coding-team for simple tasks" | Agent reclassifies everything as "simple" | Remove the escape hatch entirely |
+| Delegation rule buried mid-file | Gets outweighed by surrounding code-writing context | Move to line 1 of CLAUDE.md |
+
+**Key insight:** A single "don't write code" rule loses to five other lines that implicitly assume you DO write code. Every line in CLAUDE.md must be consistent with the delegation model. `/prompt-craft diagnose` finds these inconsistencies.
 
 ## Credits
 
