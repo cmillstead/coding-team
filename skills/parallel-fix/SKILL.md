@@ -127,6 +127,10 @@ Return: summary of root cause and what you fixed.
 - **No constraints** — team might refactor everything outside their scope
 - **Vague output** — "fix it" gives you no insight into what changed
 
+## Red Flags
+
+**The lead NEVER writes code directly.** Dispatch all fixes through Agent tool or Teammate tool. If you catch yourself about to use Edit or Write — STOP and spawn an agent instead. Direct fixes bypass the verification loop and are not trusted.
+
 ## Verification Gate
 
 Before claiming all fixes are complete:
