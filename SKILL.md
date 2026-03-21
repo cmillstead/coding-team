@@ -127,9 +127,9 @@ After finding a matching plan, determine where the user left off:
 | Bug report or test failure | `/debug` skill (`skills/debug/SKILL.md`) |
 | Existing PR with review feedback | `/review-feedback` skill (`skills/review-feedback/SKILL.md`) |
 | Multiple independent failures | `/parallel-fix` skill (`skills/parallel-fix/SKILL.md`) |
-| Simple mechanical task (rename, format, single-file edit) | Skip coding-team — just do it directly |
+| Simple mechanical task (rename, format, single-file edit) | Route through coding-team at Phase 5 with a single haiku-tier task. Do NOT skip the pipeline — the user has mandated all code changes go through coding-team. |
 
-**Don't force the full pipeline for tasks that don't need it.** A typo fix doesn't need 5 specialist workers. Match the process weight to the task weight. But for anything non-trivial, start at the appropriate phase.
+**All code changes go through coding-team.** For trivial tasks (typo, rename), skip to Phase 5 with a single haiku-tier task — but still use the pipeline. Never write code directly.
 
 ---
 
@@ -217,7 +217,7 @@ Each phase reads its detail file on entry. Do not read ahead — load only the a
 - Present exactly 4 structured completion options
 - Get confirmation before discarding work
 - Use the model tier assigned in the plan
-- Match process weight to task weight — don't force full pipeline for trivial tasks
+- Match process weight to task weight — trivial tasks skip to Phase 5 with a single haiku task, but still go through the pipeline
 
 ---
 
