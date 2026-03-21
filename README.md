@@ -25,10 +25,10 @@ The main SKILL.md is a router that knows the phase sequence, input/output contra
 
 | Invocation | Loaded | Lines |
 |---|---|---|
-| `/coding-team` (router decides) | Main SKILL.md | ~268 |
-| `/coding-team` → Phase 4 (planning) | Main + `phases/planning.md` | ~460 |
-| `/coding-team` → Phase 5 (execution) | Main + `phases/execution.md` | ~535 |
-| `/coding-team` → Phase 2 (design) | Main + `phases/design-team.md` | ~448 |
+| `/coding-team` (router decides) | Main SKILL.md | ~273 |
+| `/coding-team` → Phase 4 (planning) | Main + `phases/planning.md` | ~496 |
+| `/coding-team` → Phase 5 (execution) | Main + `phases/execution.md` | ~568 |
+| `/coding-team` → Phase 2 (design) | Main + `phases/design-team.md` | ~453 |
 | `/debug` (standalone) | `skills/debug/SKILL.md` only | ~167 |
 | `/verify` (standalone) | `skills/verify/SKILL.md` only | ~55 |
 | `/prompt-craft` (standalone) | `skills/prompt-craft/SKILL.md` only | ~264 |
@@ -194,7 +194,7 @@ These can be invoked independently with their own slash commands, or used automa
 | Review Feedback | `/review-feedback` | Technical evaluation of code review feedback. Push back when wrong. | ~91 |
 | Worktree | `/worktree` | Isolated git worktree for feature work. | ~88 |
 | Parallel Fix | `/parallel-fix` | Parallel agent dispatch for independent failures. | ~137 |
-| Prompt Craft | `/prompt-craft` | Write, evaluate, and refine skills and agent prompts. Diagnose behavioral issues. | ~175 |
+| Prompt Craft | `/prompt-craft` | Write, evaluate, and refine skills and agent prompts. Diagnose behavioral issues. | ~263 |
 | Second Opinion | `/second-opinion` | Cross-model second opinion via OpenAI Codex CLI. Review, challenge, consult. | ~283 |
 | Scope Lock | `/scope-lock` | Restrict edits to a directory during debugging. | ~50 |
 | Scope Unlock | `/scope-unlock` | Remove scope-lock edit restriction. | ~20 |
@@ -358,6 +358,7 @@ prompts/                          # agent prompt templates (used by execution lo
   spec-reviewer.md                #   spec compliance + TDD verification (read-only)
   simplify-auditor.md             #   simplify auditor — clarity/complexity (read-only)
   harden-auditor.md               #   harden auditor — security/resilience (read-only)
+  prompt-craft-auditor.md         #   prompt-craft auditor — CC instruction quality (read-only)
   quality-reviewer.md             #   legacy combined reviewer (use simplify + harden)
   spec-doc-reviewer.md            #   design doc reviewer
   plan-doc-reviewer.md            #   plan doc reviewer

@@ -252,11 +252,11 @@ Each phase reads its detail file on entry. Do not read ahead — load only the a
 
 | Phase | File | Lines |
 |-------|------|-------|
-| Dialogue | `phases/dialogue.md` | ~36 |
+| Dialogue | `phases/dialogue.md` | ~38 |
 | Design Team | `phases/design-team.md` | ~180 |
 | Spec Review | `phases/spec-review.md` | ~29 |
-| Planning | `phases/planning.md` | ~192 |
-| Execution | `phases/execution.md` | ~267 |
+| Planning | `phases/planning.md` | ~223 |
+| Execution | `phases/execution.md` | ~295 |
 | Completion | `phases/completion.md` | ~77 |
 
 **Agent prompt templates** (used by the execution loop):
