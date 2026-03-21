@@ -1,8 +1,8 @@
 # Phase 4: Planning Worker
 
-Create a **Planning Worker task** with: design doc + full project context.
+Dispatch a **Planning Worker** via Agent tool (model: opus). Pass: design doc + full project context.
 
-Worker is Architect + Senior Coder. Produces implementation plan.
+A single planning worker combining Architect and Senior Coder perspectives. Produces implementation plan.
 
 ## Step 0: Scope Challenge (before planning)
 
