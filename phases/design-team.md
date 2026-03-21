@@ -1,20 +1,38 @@
 # Phase 2: Design Team
 
-Create **one Team Leader task** using `TaskCreate` with: project summary, user's idea, approved approach, and all relevant context from Phase 1.
+**If AGENT_TEAMS_AVAILABLE = true:**
 
-## Team Leader Responsibilities
+1. Create team:
+   `Teammate({ operation: "spawnTeam", team_name: "design-<feature>" })`
 
-1. Decide which specialist workers to spawn, using the sizing heuristics below. Always explain the choice.
-2. **Map skills to workers:**
-   a. Read `~/.claude/skills/skill-taxonomy.yml`
-   b. Identify which categories are relevant to the current task (match task description against category descriptions and skill use-cases)
-   c. For each worker, filter to skills whose category lists that worker's role
-   d. Build an advisory skill block for each worker's prompt (see format below)
-3. Create workers simultaneously via `TaskCreate`. Pass each worker: full context + all sibling task IDs + an explicit **out-of-scope statement** (what this worker should NOT address) + their **skill advisory block**.
-4. Wait for all workers (`TaskList`).
-5. **Quality check** — before synthesizing, evaluate each worker's output. If a worker's output is off-scope, thin, or clearly low quality: respawn it with a more constrained prompt. Don't patch bad output — scrap and rerun.
-6. Cross-review pass (see below).
-7. Synthesize into a design doc. Return it.
+2. Spawn a Team Leader teammate with: project summary, user's idea, approved approach, and all relevant context from Phase 1.
+
+The Team Leader then:
+1. Decides which specialist workers to spawn (see sizing heuristics below). Always explains the choice.
+2. Maps skills to workers (see skill advisory block format below).
+3. Creates tasks for each specialist via `TaskCreate` on the shared task list.
+   - Each teammate gets: full context, sibling task IDs, explicit out-of-scope statement, skill advisory block.
+4. Spawns each specialist as a teammate via the Task tool with `team_name`.
+5. Monitors `TaskList` for completion. Checks inbox for messages.
+6. Quality check — if a worker's output is off-scope, thin, or low quality: respawn with a tighter prompt. Don't patch bad output — scrap and rerun.
+7. Cross-review pass — broadcasts to all teammates to read sibling outputs and flag cross-domain concerns. Workers message each other directly.
+8. Synthesizes findings into a design doc.
+9. Shuts down all teammates, runs cleanup, returns design doc.
+
+**If AGENT_TEAMS_AVAILABLE = false:**
+
+Create **one Team Leader task** using the Agent tool with: project summary, user's idea, approved approach, and all relevant context from Phase 1.
+
+The Team Leader then:
+1. Decides which specialist workers to spawn.
+2. Maps skills to workers.
+3. Creates workers simultaneously via the Agent tool.
+4. Waits for all workers.
+5. Quality check — respawn bad output.
+6. Cross-review pass — creates follow-up tasks where workers read sibling outputs via `TaskOutput(sibling_id)`.
+7. Synthesizes into a design doc. Returns it.
+
+---
 
 ## Skill Advisory Block Format
 
@@ -71,25 +89,6 @@ Start with the smallest team that covers all required dimensions. More workers =
 - Recommendations and alternatives
 - Cross-domain flags after reading sibling outputs
 
-## Cross-Review Pass
-
-**If AGENT_TEAMS_AVAILABLE = true AND team has 4+ workers:**
-
-a. After all workers complete their primary analysis, broadcast a cross-review prompt:
-   ```
-   SendMessage({
-     operation: "broadcast",
-     message: "Cross-review phase. Read your siblings' outputs (available in the shared task list). Flag any cross-domain concerns. Message the relevant sibling directly if you need clarification or see a conflict with your own findings. Report cross-domain flags to team-lead when done."
-   })
-   ```
-b. Workers message each other directly to resolve cross-domain questions.
-c. Team Leader collects final cross-review flags from each worker's messages.
-d. Shutdown workers after collection.
-
-**Otherwise (AGENT_TEAMS_AVAILABLE = false OR team < 4 workers):**
-
-Create follow-up tasks where workers read sibling outputs via `TaskOutput(sibling_id)` and flag cross-domain concerns.
-
 ## Team Leader Synthesis
 
 - Resolve conflicts between workers
@@ -104,13 +103,11 @@ coding-team reads `~/.claude/skills/skill-taxonomy.yml` to map skills to workers
 - **Removing a skill:** Remove its entry from the taxonomy.
 - **The taxonomy is advisory** — workers decide which skills to actually invoke based on the task.
 
-## Agent Teams Routing (Design Phase)
+## Coordination Mode
 
-| Situation | Agent Teams? | Rationale |
-|-----------|-------------|-----------|
-| Design workers (primary analysis) | No | Workers analyze independently, report to leader. Subagents are correct. |
-| Cross-review pass, 4+ workers | **Yes** | Direct peer messaging for cross-domain flags beats leader-mediated routing. |
-| Cross-review pass, <4 workers | No | Small team, leader mediation is fine. |
+When AGENT_TEAMS_AVAILABLE = true: all design work uses agent teams. The Team Leader is a teammate, specialists are teammates, cross-review uses direct messaging.
+
+When AGENT_TEAMS_AVAILABLE = false: all design work uses subagents via the Agent tool.
 
 ## Agent Teams Lifecycle
 

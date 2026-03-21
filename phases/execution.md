@@ -15,15 +15,29 @@ If user wants isolation (or task warrants it), follow the `/worktree` skill (`sk
 On approval, begin execution. **Agent team per task: implementer + audit team (spec + simplify + harden).** Implementer follows the `/tdd` skill for all implementation work.
 
 **CRITICAL: The main agent is the orchestrator, not the implementer.** You do NOT write code, edit files, or run tests yourself during Phase 5. Your job is to:
-1. Dispatch subagents (implementer, auditors) using the Agent tool
-2. Read their results
-3. Decide what to do next (re-dispatch, proceed, escalate)
 
-If you catch yourself using Edit, Write, or running test commands directly — STOP. You are doing the implementer's job. Spawn an Agent instead.
+**If AGENT_TEAMS_AVAILABLE = true:**
+1. Create a team for the execution phase: `Teammate({ operation: "spawnTeam", team_name: "exec-<feature>" })`
+2. For each task: create a task on the shared task list via `TaskCreate`, then spawn an implementer teammate
+3. After implementer completes: spawn audit teammates (spec-reviewer, simplify, harden) — all Explore mode
+4. Read results from inbox and task list
+5. Decide what to do next (re-dispatch, proceed, escalate)
+6. Shutdown and cleanup after all tasks complete
+
+**If AGENT_TEAMS_AVAILABLE = false:**
+1. Dispatch implementer using the Agent tool
+2. Dispatch audit agents in parallel using the Agent tool
+3. Read their results
+4. Decide what to do next
+
+If you catch yourself using Edit, Write, or running test commands directly — STOP. You are doing the implementer's job. Spawn a teammate (or Agent if teams unavailable) instead.
 
 ## Execution Loop
 
-Each task gets its own **task team** — implementer builds, audit team reviews:
+**If AGENT_TEAMS_AVAILABLE = true:**
+
+Create one execution team for the entire phase:
+`Teammate({ operation: "spawnTeam", team_name: "exec-<feature>" })`
 
 ```
 BASELINE (once, before first task)
@@ -44,37 +58,50 @@ For each task in plan:
       treat it as a separate mini-task: investigate root cause, fix, verify, commit
       with "fix: resolve pre-existing test failure in <area>" before proceeding.
 
-  IMPLEMENTER (see prompts/implementer.md)
-  2. Dispatch implementer — use model tier from the plan
-     - Pass: full task text, context, working directory, baseline test state
-     - Do NOT make implementer read plan file — provide full text
-  3. Handle implementer status (see below)
+  IMPLEMENTER
+  2. Create task: TaskCreate({ subject: "Task N: <name>", description: "<full task text + context>", activeForm: "Implementing..." })
+  3. Spawn implementer teammate with: full task text, context, working directory, baseline test state
+     - Use model tier from plan
+     - Do NOT make implementer read plan file — provide full text in spawn prompt
+  4. Monitor for completion or messages. Handle status (see Implementer Status Protocol below).
 
   AUDIT TEAM (only if implementer reports DONE or DONE_WITH_CONCERNS)
-  4. Record HEAD_SHA, collect modified files list (git diff --name-only BASE..HEAD)
-  5. Dispatch audit team IN PARALLEL (all read-only Explore agents):
+  5. Record HEAD_SHA, collect modified files list (git diff --name-only BASE..HEAD)
+  6. Spawn 3 audit teammates IN PARALLEL (all Explore mode):
      a. Spec reviewer (see prompts/spec-reviewer.md) — "does it match the spec? was TDD followed?"
      b. Simplify auditor (see prompts/simplify-auditor.md) — "is there a simpler way?"
      c. Harden auditor (see prompts/harden-auditor.md) — "what would an attacker try?"
-  6. Triage findings (see Audit Triage below)
-  7. If findings to fix -> implementer fixes -> re-audit (max 3 rounds)
+     Each auditor messages team-lead with findings.
+  7. Triage findings from inbox (see Audit Triage below)
+  8. If findings to fix: spawn new implementer teammate to fix → re-audit (max 3 rounds)
+     Fresh audit teammates each round — don't reuse.
 
   COMPLETENESS CHECK
-  8. Compare implementer's output against every step in the task.
+  9. Compare implementer's output against every step in the task.
      For each step: was it done, skipped, or partially done?
      If ANY step was skipped or partially done without explanation:
      → re-dispatch implementer with "you missed steps X, Y — complete them"
      Do NOT proceed to audit with incomplete work.
 
   GATE
-  9. VERIFY: run test suite, confirm pass with fresh output
-  10. Mark task complete
-  11. Next task
+  10. VERIFY: run test suite, confirm pass with fresh output
+  11. Shutdown task teammates (implementer + auditors)
+  12. Next task
+
+After all tasks: shutdown all remaining teammates, cleanup team.
 ```
 
-**Audit agents MUST be read-only (Explore).** This prevents reviewers from silently "fixing" things instead of flagging them. The separation between finding and fixing is the whole point.
+**If AGENT_TEAMS_AVAILABLE = false:**
 
-**Fresh audit agents each round.** Don't reuse auditors — carried context biases toward "already checked" areas.
+Same loop structure, but using Agent tool for dispatch instead of Teammate/TaskCreate:
+- Step 2-3: dispatch implementer via Agent tool with full task text
+- Step 6: dispatch audit agents in parallel via Agent tool (all Explore)
+- Step 8: dispatch new Agent for fixes
+- No shutdown/cleanup needed (agents terminate on completion)
+
+**Audit teammates/agents MUST be read-only (Explore).** This prevents reviewers from silently "fixing" things instead of flagging them. The separation between finding and fixing is the whole point.
+
+**Fresh audit teammates each round.** Don't reuse auditors — carried context biases toward "already checked" areas.
 
 ## Audit Triage
 
@@ -131,18 +158,12 @@ When a task fails during execution, follow the `/debug` skill (`skills/debug/SKI
 
 ## Verification Gates
 
-At every phase transition and before any completion claim, follow the `/verify` skill (`skills/verify/SKILL.md`). No "should pass," no "looks correct," no trusting agent team reports without independent verification.
+At every phase transition and before any completion claim, follow the `/verify` skill (`skills/verify/SKILL.md`). No "should pass," no "looks correct," no trusting agent reports without independent verification.
 
-## Agent Teams Routing (Execution Phase)
+## Coordination Mode
 
-| Situation | Agent Teams? | Rationale |
-|-----------|-------------|-----------|
-| Task implementation | No | One implementer per task. Subagent. |
-| Audit team (spec/simplify/harden) | No | Read-only reviewers report findings to lead. No inter-reviewer coordination needed. |
-| Debugging: simple bug | No | Sequential, single agent. |
-| Debugging: 2 hypotheses | No | Subagents suffice, overhead not justified. |
-| Debugging: 3+ hypotheses with possible cross-cutting evidence | **Yes** | Scientific debate pattern. Investigators disprove each other in real time. |
-| Parallel dispatch: 2 domains, provably independent | No | Subagents. |
-| Parallel dispatch: 3+ domains, possibly shared infrastructure | **Yes** | Cross-domain discovery prevents wasted work on conflicting fixes. |
+When AGENT_TEAMS_AVAILABLE = true: all execution dispatch uses agent teams. One team per execution phase. Implementers and auditors are teammates. The main agent monitors via inbox and task list.
 
-**Default is subagents.** Agent teams are the exception for specific high-value patterns, not the rule.
+When AGENT_TEAMS_AVAILABLE = false: all execution dispatch uses the Agent tool.
+
+In BOTH modes: the main agent never writes code directly.

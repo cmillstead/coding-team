@@ -63,9 +63,11 @@ Also check:
 
 **Complex bugs (multiple plausible causes):** Parallel hypothesis investigation.
 
-**If AGENT_TEAMS_AVAILABLE = true and 3+ competing hypotheses:**
+**Check AGENT_TEAMS_AVAILABLE before dispatching any parallel investigation.**
 
-Use native agent teams instead of independent Explore subagents.
+**If AGENT_TEAMS_AVAILABLE = true and 3+ competing hypotheses (default):**
+
+Use agent teams for parallel investigation.
 
 1. Create team:
    `Teammate({ operation: "spawnTeam", team_name: "debug-<feature>-<timestamp>" })`
@@ -98,12 +100,11 @@ Use native agent teams instead of independent Explore subagents.
    Wait for approvals.
    `Teammate({ operation: "cleanup" })`
 
-**Fall back to subagents when:**
-- `AGENT_TEAMS_AVAILABLE = false`
-- Only 2 hypotheses (overhead not justified — sequential or simple parallel subagents suffice)
-- Hypotheses are trivially independent (e.g., different subsystems with no shared state — no cross-cutting evidence possible)
+**If AGENT_TEAMS_AVAILABLE = false, or 2 hypotheses only:**
 
-**Subagent path (AGENT_TEAMS_AVAILABLE = false, or 2 hypotheses):**
+Fall back to Agent tool when agent teams are unavailable, only 2 hypotheses exist (overhead not justified), or hypotheses are trivially independent (different subsystems with no shared state).
+
+**Fallback path:**
 
 Dispatch a **debug team** — one agent per hypothesis, all investigating in parallel (read-only Explore agents). Each agent:
 - States the hypothesis clearly

@@ -28,7 +28,9 @@ If ALL three are present:
   AGENT_TEAMS_AVAILABLE = true
 ```
 
-Store this flag for the session. Pass it to any protocol that has a teams-vs-subagents decision point.
+**When AGENT_TEAMS_AVAILABLE = true, use agent teams as the primary coordination mechanism for all multi-agent work.** Subagents are the fallback for single-agent tasks (one implementer on one task) or when agent teams tools are unavailable.
+
+**When AGENT_TEAMS_AVAILABLE = false**, fall back to subagents via the Task/Agent tool for all multi-agent work.
 
 **Note:** The `Task` tool (subagent spawner) and the `TaskCreate`/`TaskList`/`TaskUpdate` tools (team task management) are different tools. Agent teams require both — `Task` for spawning agents into teams, and `TaskCreate`/`TaskList` for the shared task list. If only `Task` is available, `AGENT_TEAMS_AVAILABLE` remains false.
 
@@ -147,7 +149,7 @@ Each phase reads its detail file on entry. Do not read ahead — load only the a
 - Performatively agree with review feedback without verifying
 - Dismiss pre-existing test failures — fix them or escalate, never ignore
 - Silently drop findings — every scan finding, review comment, or enumerated issue must be planned (fix, defer with rationale, or false positive) and every planned task must be executed
-- Write code directly during Phase 5 — the main agent is the orchestrator, not the implementer. Use Edit/Write only in Phases 1-4 (plans, specs). During execution, dispatch Agent subagents for all code changes.
+- Write code directly during Phase 5 — the main agent is the orchestrator, not the implementer. Use Edit/Write only in Phases 1-4 (plans, specs). During execution, spawn teammates (or subagents if agent teams unavailable) for all code changes.
 
 **Always:**
 - Verify tests before offering completion options

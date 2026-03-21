@@ -30,12 +30,12 @@ When invoked from /coding-team, the lead provides grouped failures. Skip the abo
 
 ## Choosing Coordination Mode
 
-**Use native agent teams (when AGENT_TEAMS_AVAILABLE = true) if:**
+**Use agent teams (default when AGENT_TEAMS_AVAILABLE = true) if:**
 - 3+ independent domains AND
 - There is ANY chance domains share underlying infrastructure (shared DB, shared config, shared auth, shared state) AND
 - Failures surfaced around the same time (possible common trigger)
 
-**Use subagents (current behavior) if:**
+**Fall back to Agent tool if:**
 - AGENT_TEAMS_AVAILABLE = false, OR
 - Domains are provably independent (different repos, different services, zero shared code), OR
 - 2 domains only (overhead not justified)

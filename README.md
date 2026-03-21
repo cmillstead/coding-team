@@ -121,7 +121,7 @@ The plan goes through an automated plan document reviewer (up to 3 iterations) b
 
 ### Phase 5: Execution
 
-The main agent is the **orchestrator** during this phase — it dispatches subagents, reads their results, and decides what to do next. It never writes code, edits files, or runs tests directly. All implementation goes through Agent subagents.
+The main agent is the **orchestrator** during this phase — it spawns teammates, reads their results, and decides what to do next. It never writes code, edits files, or runs tests directly. All implementation goes through agent teams (teammates), with fallback to the Agent tool when agent teams are unavailable.
 
 Before the first task, the full test suite runs to establish a **baseline**. If any tests are already failing, the first implementer fixes them before starting task work — no pre-existing failure is dismissed as "not our problem."
 
@@ -176,15 +176,13 @@ Protocols are extracted as standalone skills that can be invoked independently o
 | `/parallel-fix` | Parallel agent dispatch for independent failures |
 | `/tdd` | Test-driven development cycle (red-green-refactor) |
 
-### Agent teams (optional)
+### Agent teams (primary coordination)
 
-When Claude Code's experimental agent teams feature is available (`CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`, v2.1.32+, Opus 4.6), the skill automatically upgrades three coordination patterns from subagents to native agent teams with peer-to-peer messaging:
+When Claude Code's agent teams feature is available (`CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`, v2.1.32+, Opus 4.6), it is the **default coordination mechanism** for all multi-agent work — design teams, execution teams, debugging, and parallel dispatch. Agent teams use peer-to-peer messaging (Teammate + SendMessage) and shared task lists.
 
-- **Debugging with 3+ competing hypotheses** — investigators message each other when finding cross-cutting evidence, eliminating dead-end investigations in real time
-- **Design cross-review with 4+ workers** — workers message siblings directly during cross-review instead of routing everything through the leader
-- **Parallel dispatch for 3+ domains with shared infrastructure** — teams flag cross-domain discoveries immediately, preventing conflicting fixes
+When agent teams aren't available, all coordination falls back to the Agent tool. Detection happens automatically at session start.
 
-When agent teams aren't available, all three patterns fall back to the existing subagent behavior. Detection happens automatically at session start.
+Single-agent tasks (spec review, plan review, planning worker) always use the Agent tool directly regardless of agent teams availability.
 
 ### Model routing
 
