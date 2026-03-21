@@ -5,7 +5,7 @@
 1. Create team:
    `Teammate({ operation: "spawnTeam", team_name: "design-<feature>" })`
 
-2. Spawn a Team Leader teammate with: project summary, user's idea, approved approach, and all relevant context from Phase 1.
+2. Spawn a Team Leader teammate with: project summary, user's idea, approved approach, all relevant context from Phase 1, team memory (if found), and episode context (if found).
 
 The Team Leader then:
 1. Decides which specialist workers to spawn (see sizing heuristics below). Always explains the choice.
@@ -21,7 +21,7 @@ The Team Leader then:
 
 **If AGENT_TEAMS_AVAILABLE = false:**
 
-Create **one Team Leader task** using the Agent tool with: project summary, user's idea, approved approach, and all relevant context from Phase 1.
+Create **one Team Leader task** using the Agent tool with: project summary, user's idea, approved approach, all relevant context from Phase 1, team memory (if found), and episode context (if found).
 
 The Team Leader then:
 1. Decides which specialist workers to spawn.
@@ -31,6 +31,56 @@ The Team Leader then:
 5. Quality check — respawn bad output.
 6. Cross-review pass — creates follow-up tasks where workers read sibling outputs via `TaskOutput(sibling_id)`.
 7. Synthesizes into a design doc. Returns it.
+
+---
+
+## Episode & Context Retrieval
+
+Before spawning workers, retrieve relevant context from prior sessions. Two sources: project-local team memory and vault episodes.
+
+### Project team memory
+
+```bash
+REPO_ROOT=$(git rev-parse --show-toplevel)
+```
+
+Check if `$REPO_ROOT/docs/team-memory.md` exists using the Read tool:
+- **If it exists:** Read it using the Read tool. Pass the full contents to the Team Leader as a "## Team Memory" section in the context. The Team Leader passes relevant subsections to each worker.
+- **If it doesn't exist:** Skip. Do NOT create it — the completion phase handles creation.
+
+### Episode retrieval
+
+Use QMD `vector_search` tool (NOT `search`) to find relevant past episodes. Vector search matches by meaning — a query about "adding a REST endpoint" will find episodes about schema drift, auth patterns, or API design even if those episodes never mention "REST."
+
+```
+vector_search({
+  query: "<1-2 sentence description of what this task is trying to accomplish and what areas of the codebase it touches>",
+  collection: "conversations",
+  limit: 3,
+  minScore: 0.4
+})
+```
+
+If episodes are found:
+- Read the top 1-2 results using the Read tool (skip if minScore threshold filters them all out)
+- Extract the "Patterns Discovered" and "What Would Help Next Time" sections
+- Pass these to the Team Leader as an "## Episode Context" section:
+
+```markdown
+## Episode Context
+
+> Patterns from similar past work. Workers should check whether these apply.
+
+**From <episode title> (YYYY-MM-DD):**
+- Pattern: <pattern>
+- Watch out for: <what would help next time>
+```
+
+If no episodes found or scores are below threshold: skip silently. Do NOT fabricate episode context.
+
+### Passing context to workers
+
+The Team Leader includes team memory and episode context in each worker's spawn prompt, after the project context and before the specialist focus areas. Workers treat these as advisory — they inform analysis but don't constrain it.
 
 ---
 
