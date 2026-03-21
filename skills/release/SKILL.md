@@ -46,7 +46,21 @@ Ship the current branch with full verification. More thorough than the manual Ph
    gh pr create --title "<title>" --body "<summary with test plan>"
    ```
 
-7. **Report:** Print PR URL and summary.
+7. **Wait for CI and verify:**
+   ```bash
+   # Get the PR number from the URL
+   PR_NUM=$(gh pr view --json number -q .number)
+   # Wait for checks to complete (timeout 10 minutes)
+   gh pr checks "$PR_NUM" --watch --fail-fast
+   ```
+   - **All checks pass:** Report PR URL and summary. Done.
+   - **Any check fails:** Read the failure output:
+     ```bash
+     gh pr checks "$PR_NUM"
+     gh run view --log-failed
+     ```
+     Diagnose the failure. Fix it via `/coding-team` (delegate — do NOT fix directly). After fix is pushed, re-run step 7.
+     Do NOT leave a PR with failing CI. The release is not done until CI is green.
 
 ## When to Use
 

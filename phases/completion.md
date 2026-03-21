@@ -24,7 +24,7 @@ Which option?
 
 5. **Execute choice:**
    - **Merge locally:** checkout base -> pull -> merge -> verify tests on merged result -> delete feature branch -> cleanup worktree if applicable
-   - **Push and create PR:** push -> create PR with summary and test plan
+   - **Push and create PR:** push -> create PR with summary and test plan -> wait for CI (`gh pr checks --watch --fail-fast`) -> if CI fails, read logs (`gh run view --log-failed`), fix via `/coding-team`, re-push, re-check. Do NOT leave a PR with failing CI.
    - **Keep as-is:** report branch name and worktree path, done
    - **Discard:** require user to type "discard" to confirm -> delete branch -> cleanup worktree
 
@@ -68,7 +68,6 @@ After the user chooses a completion option and it's been executed, print this bl
 > 1. `/retrospective` — engineering retrospective (commit patterns, test health, shipping velocity, what to improve). Use coding-team's `/retrospective`, NOT gstack's `/retro` — they are different skills.
 > 2. `/doc-sync` — update README, ARCHITECTURE, CLAUDE.md to match the shipped code
 > 3. `/prompt-craft audit` — if this feature changed any skills, prompts, or CLAUDE.md, verify they still trigger correctly
-> 4. If PR'd: check CI/CD pipeline status
 >
 > **If you chose "Push and create PR" and want a more automated release:** Run `/release` — it syncs main, runs tests, audits coverage, pushes, and creates the PR with coverage stats.
 >
