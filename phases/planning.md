@@ -34,12 +34,35 @@ Before writing tasks, check if any planned work needs specialized skill involvem
 
 **Annotating tasks:** For each task in the plan, add an `**Advisory skills:**` line after the `**Model:**` line. Reference the advisory by name (e.g., "PROMPT_CRAFT_ADVISORY"). If no detection rule matches, write `**Advisory skills:** None`.
 
+## Pre-Flight: Count Inputs (MANDATORY before dispatching planning worker)
+
+When the plan addresses scan findings, review feedback, or any enumerated list of issues, the **orchestrator** (not the planning worker) must count the inputs BEFORE dispatching:
+
+1. Read the source material (scan report, review comments, issue list).
+2. Count every discrete finding/issue. Write the count down.
+3. List each finding with a one-line summary (ID + description).
+4. Pass BOTH the count AND the numbered list to the planning worker as part of its prompt:
+
+```
+**Input findings: [N]**
+[numbered list of findings]
+
+Your plan MUST account for all [N] findings. Each finding must appear in the
+traceability table as Fix (with task reference), Deferred (with rationale),
+or False positive (with explanation). A plan that covers fewer than [N]
+findings will be rejected by the reviewer.
+```
+
+The orchestrator owns the count. The planning worker cannot silently reduce it because the reviewer independently checks the count from the plan header against the traceability table rows.
+
 ## Plan Document Format
 
 Every plan starts with this header:
 
 ```markdown
 # [Feature Name] Implementation Plan
+
+**Input findings: [N]** ← include ONLY when addressing scan/review findings; omit for feature work
 
 **Goal:** [One sentence describing what this builds]
 
