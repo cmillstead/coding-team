@@ -242,6 +242,11 @@ Each phase reads its detail file on entry. Do not read ahead — load only the a
 | `/tdd` | `skills/tdd/SKILL.md` | Test-driven development cycle |
 | `/prompt-craft` | `skills/prompt-craft/SKILL.md` | Skill & prompt engineering, diagnosis, audit |
 | `/second-opinion` | `skills/second-opinion/SKILL.md` | Cross-model second opinion via OpenAI Codex CLI |
+| `/scope-lock` | `skills/scope-lock/SKILL.md` | Restrict edits to a directory during debugging |
+| `/scope-unlock` | `skills/scope-unlock/SKILL.md` | Remove scope-lock edit restriction |
+| `/release` | `skills/release/SKILL.md` | Automated release: sync, test, push, PR |
+| `/retrospective` | `skills/retrospective/SKILL.md` | Post-ship engineering retrospective |
+| `/doc-sync` | `skills/doc-sync/SKILL.md` | Post-ship documentation update |
 
 **Phase details** (loaded on demand by the active phase):
 

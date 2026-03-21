@@ -195,7 +195,12 @@ These can be invoked independently with their own slash commands, or used automa
 | Worktree | `/worktree` | Isolated git worktree for feature work. | ~88 |
 | Parallel Fix | `/parallel-fix` | Parallel agent dispatch for independent failures. | ~137 |
 | Prompt Craft | `/prompt-craft` | Write, evaluate, and refine skills and agent prompts. Diagnose behavioral issues. | ~175 |
-| Second Opinion | `/second-opinion` | Cross-model second opinion via OpenAI Second Opinion CLI. Review, challenge, consult. | ~283 |
+| Second Opinion | `/second-opinion` | Cross-model second opinion via OpenAI Codex CLI. Review, challenge, consult. | ~283 |
+| Scope Lock | `/scope-lock` | Restrict edits to a directory during debugging. | ~50 |
+| Scope Unlock | `/scope-unlock` | Remove scope-lock edit restriction. | ~20 |
+| Release | `/release` | Automated release: sync base branch, test, push, create PR. | ~75 |
+| Retrospective | `/retrospective` | Post-ship engineering retrospective with metrics. | ~70 |
+| Doc Sync | `/doc-sync` | Post-ship documentation update — sync docs with shipped code. | ~75 |
 
 ## Internalized protocols
 
@@ -265,7 +270,7 @@ Expose individual protocols as standalone slash commands:
 
 ```bash
 # All standalone skills
-for skill in debug verify review-feedback worktree parallel-fix tdd prompt-craft second-opinion; do
+for skill in debug verify review-feedback worktree parallel-fix tdd prompt-craft second-opinion scope-lock scope-unlock release retrospective doc-sync; do
   ln -s ~/.claude/skills/coding-team/skills/$skill ~/.claude/skills/$skill
 done
 ```
@@ -342,7 +347,12 @@ skills/                           # standalone skills (can be invoked independen
   parallel-fix/SKILL.md           #   /parallel-fix — parallel agent dispatch
   tdd/SKILL.md                    #   /tdd — test-driven development cycle
   prompt-craft/SKILL.md           #   /prompt-craft — skill & prompt engineering
-  second-opinion/SKILL.md                  #   /second-opinion — cross-model second opinion
+  second-opinion/SKILL.md         #   /second-opinion — cross-model second opinion
+  scope-lock/SKILL.md             #   /scope-lock — restrict edits to a directory
+  scope-unlock/SKILL.md           #   /scope-unlock — remove edit restriction
+  release/SKILL.md                #   /release — automated release workflow
+  retrospective/SKILL.md          #   /retrospective — engineering retrospective
+  doc-sync/SKILL.md               #   /doc-sync — post-ship documentation update
 prompts/                          # agent prompt templates (used by execution loop)
   implementer.md                  #   implementer agent template
   spec-reviewer.md                #   spec compliance + TDD verification (read-only)
