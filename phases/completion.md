@@ -53,6 +53,43 @@ After all tasks, produce a summary that includes audit findings across all round
 
 Recurring patterns are the signal — if the same finding type appears across multiple tasks or rounds, it indicates a systemic issue worth noting for future work.
 
+## Decision Log
+
+After producing the completion summary, check whether any architectural or design decisions were made during this feature that should be recorded for future sessions.
+
+**Prompt the user:**
+
+> Were any architectural or design decisions made during this feature? (e.g., "chose X over Y because Z", "this API uses polling not webhooks because...", "we keep the old table for backward compat until...")
+>
+> If yes, I'll write a decision record to `memory/decisions/`.
+
+**If the user provides decisions**, write each to `memory/decisions/YYYY-MM-DD-<slug>.md` using the Write tool:
+
+```markdown
+---
+name: [decision title]
+description: [one-line summary]
+type: project
+---
+
+## Context
+[What situation prompted this decision]
+
+## Decision
+[What was chosen]
+
+## Alternatives Considered
+- [Alternative] — rejected because [reason]
+
+## Constraints
+[Organizational, technical, or relationship factors]
+
+## Consequences
+[What would break if reversed without understanding why]
+```
+
+**If the user says no or skips**, proceed to Session Complete. Do NOT generate decisions the user didn't identify — this captures human organizational knowledge, not agent observations.
+
 ---
 
 ## Session Complete
