@@ -13,7 +13,7 @@ Assembles specialist agent teams to collaboratively work through code tasks. The
 5. **Execution** — task teams (implementer + audit team) build and verify
 6. **Completion** — full verification, learning loop, then merge / PR / keep / discard
 
-Each phase loads on demand — the main SKILL.md is a ~200 line router. Standalone skills can be invoked independently outside the pipeline.
+Each phase loads on demand — the main SKILL.md is a ~300 line router. Standalone skills can be invoked independently outside the pipeline.
 
 ## Architecture
 
@@ -25,13 +25,13 @@ The main SKILL.md is a router that knows the phase sequence, input/output contra
 
 | Invocation | Loaded | Lines |
 |---|---|---|
-| `/coding-team` (router decides) | Main SKILL.md | ~273 |
-| `/coding-team` → Phase 4 (planning) | Main + `phases/planning.md` | ~496 |
-| `/coding-team` → Phase 5 (execution) | Main + `phases/execution.md` | ~568 |
-| `/coding-team` → Phase 2 (design) | Main + `phases/design-team.md` | ~453 |
-| `/debug` (standalone) | `skills/debug/SKILL.md` only | ~167 |
+| `/coding-team` (router decides) | Main SKILL.md | ~302 |
+| `/coding-team` → Phase 4 (planning) | Main + `phases/planning.md` | ~584 |
+| `/coding-team` → Phase 5 (execution) | Main + `phases/execution.md` | ~607 |
+| `/coding-team` → Phase 2 (design) | Main + `phases/design-team.md` | ~483 |
+| `/debug` (standalone) | `skills/debug/SKILL.md` only | ~168 |
 | `/verify` (standalone) | `skills/verify/SKILL.md` only | ~55 |
-| `/prompt-craft` (standalone) | `skills/prompt-craft/SKILL.md` only | ~264 |
+| `/prompt-craft` (standalone) | `skills/prompt-craft/SKILL.md` only | ~263 |
 
 Phase files do not reference each other. The main SKILL.md's phase contracts define the input/output handoff between phases.
 
@@ -186,19 +186,19 @@ These can be invoked independently with their own slash commands, or used automa
 
 | Skill | Command | Purpose | Lines |
 |---|---|---|---|
-| Debug | `/debug` | Four-phase root cause investigation. Parallel hypothesis teams for complex bugs. | ~167 |
+| Debug | `/debug` | Four-phase root cause investigation. Parallel hypothesis teams for complex bugs. | ~168 |
 | Verify | `/verify` | Evidence-before-claims gate. Run the command, read the output, then claim the result. | ~55 |
 | TDD | `/tdd` | Red-green-refactor cycle with verification at each step. | ~31 |
 | Review Feedback | `/review-feedback` | Technical evaluation of code review feedback. Push back when wrong. | ~91 |
 | Worktree | `/worktree` | Isolated git worktree for feature work. | ~88 |
-| Parallel Fix | `/parallel-fix` | Parallel agent dispatch for independent failures. | ~137 |
+| Parallel Fix | `/parallel-fix` | Parallel agent dispatch for independent failures. | ~141 |
 | Prompt Craft | `/prompt-craft` | Write, evaluate, and refine skills and agent prompts. Diagnose behavioral issues. | ~263 |
-| Second Opinion | `/second-opinion` | Cross-model second opinion via OpenAI Codex CLI. Review, challenge, consult. | ~283 |
-| Scope Lock | `/scope-lock` | Restrict edits to a directory during debugging. | ~50 |
-| Scope Unlock | `/scope-unlock` | Remove scope-lock edit restriction. | ~20 |
-| Release | `/release` | Automated release: sync base branch, test, push, create PR. | ~75 |
-| Retrospective | `/retrospective` | Post-ship engineering retrospective with metrics. | ~70 |
-| Doc Sync | `/doc-sync` | Post-ship documentation update — sync docs with shipped code. | ~75 |
+| Second Opinion | `/second-opinion` | Cross-model second opinion via OpenAI Codex CLI. Review, challenge, consult. | ~295 |
+| Scope Lock | `/scope-lock` | Restrict edits to a directory during debugging. | ~48 |
+| Scope Unlock | `/scope-unlock` | Remove scope-lock edit restriction. | ~26 |
+| Release | `/release` | Automated release: sync base branch, test, push, create PR. | ~83 |
+| Retrospective | `/retrospective` | Post-ship engineering retrospective with metrics. | ~65 |
+| Doc Sync | `/doc-sync` | Post-ship documentation update — sync docs with shipped code. | ~70 |
 
 ## Internalized protocols
 
