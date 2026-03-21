@@ -1,6 +1,6 @@
 ---
 name: second-opinion
-description: "Use when you want an independent second opinion from a different AI model (OpenAI Codex CLI). Three modes: review (pass/fail gate on a plan or diff), challenge (adversarial — actively tries to break your code), and consult (open-ended question to a different model). Use after /review for cross-model coverage, or during Phase 4 planning for independent plan validation. Requires Codex CLI installed: npm install -g @openai/second-opinion"
+description: "Use when you want an independent second opinion from a different AI model (OpenAI Codex CLI). Three modes: review (pass/fail gate on a plan or diff), challenge (adversarial — actively tries to break your code), and consult (open-ended question to a different model). Use after /review for cross-model coverage, or during Phase 4 planning for independent plan validation. Requires Codex CLI installed: npm install -g @openai/codex"
 ---
 
 # /second-opinion — Cross-Model Second Opinion
@@ -25,7 +25,7 @@ Before any mode, verify Codex CLI is available:
 which codex 2>/dev/null
 ```
 
-If not found: inform the user and suggest `npm install -g @openai/second-opinion`. Do NOT proceed without it.
+If not found: inform the user and suggest `npm install -g @openai/codex`. Do NOT proceed without it.
 
 ---
 
@@ -35,18 +35,15 @@ Independent review of a plan or diff. Codex reads the material, classifies findi
 
 ### For a diff (default)
 
+`codex review` is inherently read-only — it examines code without modifying anything.
+
 ```bash
-# Generate session-scoped ID
+# Generate session-scoped ID for output capture
 REVIEW_ID=$(uuidgen | tr '[:upper:]' '[:lower:]' | head -c 8)
 
-# Capture the diff
-git diff main > /tmp/second-opinion-diff-${REVIEW_ID}.md
-
-codex exec \
-  -m gpt-5.3-codex \
-  -s read-only \
-  -o /tmp/second-opinion-review-${REVIEW_ID}.md \
-  "Review the diff in /tmp/second-opinion-diff-${REVIEW_ID}.md against the codebase. Focus on:
+# Run built-in code review against main branch, capture output
+codex review --base main \
+  "Review this diff. Focus on:
 1. Correctness — will these changes achieve the stated goals?
 2. Bugs — race conditions, null propagation, off-by-ones, stale state
 3. Security — trust boundaries, injection, auth bypass, secrets exposure
@@ -56,22 +53,27 @@ codex exec \
 Classify each finding as P1 (critical), P2 (high), or P3 (medium).
 Any P1 finding = FAIL.
 
-End with exactly: VERDICT: PASS or VERDICT: FAIL"
+End with exactly: VERDICT: PASS or VERDICT: FAIL" \
+  2>&1 | tee /tmp/second-opinion-review-${REVIEW_ID}.txt
 ```
 
-Capture the session ID from stdout for potential follow-up rounds.
+To review uncommitted changes instead of the branch diff:
+
+```bash
+codex review --uncommitted \
+  "Review these uncommitted changes. [same instructions as above]" \
+  2>&1 | tee /tmp/second-opinion-review-${REVIEW_ID}.txt
+```
 
 ### For a plan file
 
+Use `codex exec` to review a plan document. The default model is used unless the user specifies an override with `-m MODEL`.
+
 ```bash
 REVIEW_ID=$(uuidgen | tr '[:upper:]' '[:lower:]' | head -c 8)
-cp <plan-file-path> /tmp/second-opinion-plan-${REVIEW_ID}.md
 
 codex exec \
-  -m gpt-5.3-codex \
-  -s read-only \
-  -o /tmp/second-opinion-review-${REVIEW_ID}.md \
-  "Review the implementation plan in /tmp/second-opinion-plan-${REVIEW_ID}.md. Focus on:
+  "Review the implementation plan at <plan-file-path>. Focus on:
 1. Correctness — will this plan achieve the stated goals?
 2. Risks — what could go wrong? Edge cases? Data loss?
 3. Missing steps — is anything forgotten?
@@ -79,7 +81,8 @@ codex exec \
 5. Security — any security concerns?
 
 Be specific and actionable.
-End with exactly: VERDICT: APPROVED or VERDICT: REVISE"
+End with exactly: VERDICT: APPROVED or VERDICT: REVISE" \
+  2>&1 | tee /tmp/second-opinion-review-${REVIEW_ID}.txt
 ```
 
 ### Iterative revision (plan review only)
@@ -93,9 +96,10 @@ If Codex returns VERDICT: REVISE:
 
 ```bash
 codex exec resume ${CODEX_SESSION_ID} \
-  "I've revised the plan based on your feedback. Updated plan is in /tmp/second-opinion-plan-${REVIEW_ID}.md.
+  "I've revised the plan based on your feedback. Updated plan is at <plan-file-path>.
 Changes made: [list specific changes]
-Please re-review. End with VERDICT: APPROVED or VERDICT: REVISE" 2>&1 | tail -80
+Please re-review. End with VERDICT: APPROVED or VERDICT: REVISE" \
+  2>&1 | tee /tmp/second-opinion-review-${REVIEW_ID}.txt
 ```
 
 Max 5 rounds. If `resume` fails (session expired), fall back to a fresh `codex exec` with prior context in the prompt.
@@ -103,7 +107,7 @@ Max 5 rounds. If `resume` fails (session expired), fall back to a fresh `codex e
 ### Present results
 
 ```
-## Codex Review (model: gpt-5.3-codex)
+## Codex Review
 
 **Verdict:** PASS | FAIL | APPROVED | REVISE
 
@@ -127,26 +131,22 @@ The cross-model analysis is the key output. Overlapping findings are almost cert
 ### Cleanup
 
 ```bash
-rm -f /tmp/second-opinion-diff-${REVIEW_ID}.md /tmp/second-opinion-plan-${REVIEW_ID}.md /tmp/second-opinion-review-${REVIEW_ID}.md
+rm -f /tmp/second-opinion-review-${REVIEW_ID}.txt
 ```
 
 ---
 
 ## Mode 2: Challenge (adversarial)
 
-Codex actively tries to break your code. Maximum reasoning effort.
+Codex actively tries to break your code. Use `codex exec` with an adversarial prompt since there is no built-in challenge mode.
 
 ```bash
 REVIEW_ID=$(uuidgen | tr '[:upper:]' '[:lower:]' | head -c 8)
-git diff main > /tmp/second-opinion-diff-${REVIEW_ID}.md
 
 codex exec \
-  -m gpt-5.3-codex \
-  -s read-only \
-  -o /tmp/second-opinion-challenge-${REVIEW_ID}.md \
   "You are an adversarial code reviewer. Your job is to BREAK this code.
 
-Read the diff in /tmp/second-opinion-diff-${REVIEW_ID}.md and the surrounding codebase.
+Run 'git diff main' to see the changes, then read the surrounding codebase for context.
 
 For each changed file, try to construct:
 1. Inputs that cause crashes, panics, or unhandled exceptions
@@ -160,10 +160,17 @@ For each attack vector you find, provide:
 - What breaks
 - Severity (P1 critical / P2 high / P3 medium)
 
-Be specific. Show the attack, not just describe the category."
+Be specific. Show the attack, not just describe the category." \
+  2>&1 | tee /tmp/second-opinion-challenge-${REVIEW_ID}.txt
 ```
 
 Present results grouped by severity. P1 findings are blockers. P2 findings must be addressed before proceeding.
+
+### Cleanup
+
+```bash
+rm -f /tmp/second-opinion-challenge-${REVIEW_ID}.txt
+```
 
 ---
 
@@ -175,15 +182,19 @@ Ask Codex an open-ended question about the codebase. Useful for getting a differ
 REVIEW_ID=$(uuidgen | tr '[:upper:]' '[:lower:]' | head -c 8)
 
 codex exec \
-  -m gpt-5.3-codex \
-  -s read-only \
-  -o /tmp/second-opinion-consult-${REVIEW_ID}.md \
   "<user's question>
 
-Read the codebase for context. Give a specific, actionable answer."
+Read the codebase for context. Give a specific, actionable answer." \
+  2>&1 | tee /tmp/second-opinion-consult-${REVIEW_ID}.txt
 ```
 
-Present Codex's response. If the user wants to follow up, use `codex exec resume ${CODEX_SESSION_ID}` to maintain conversation context.
+Present Codex's response. If the user wants to follow up, use `codex exec resume ${CODEX_SESSION_ID} "FOLLOW-UP QUESTION"` to maintain conversation context.
+
+### Cleanup
+
+```bash
+rm -f /tmp/second-opinion-consult-${REVIEW_ID}.txt
+```
 
 ---
 
@@ -238,13 +249,13 @@ Do NOT offer on every task. It adds 30-60 seconds per invocation. Match the cost
 
 ## Model Selection
 
-Default: `gpt-5.3-codex` (fast, good for standard review).
+Default: the Codex CLI default model (no `-m` flag needed for standard reviews).
 
-The user can override:
-- `/second-opinion review o4-mini` — cheaper, faster
-- `/second-opinion challenge gpt-5.4` — maximum reasoning for adversarial mode
+The user can override any command with `-m MODEL`:
+- `/second-opinion review o4-mini` — add `-m o4-mini` to the codex command for a cheaper, faster review
+- `/second-opinion challenge o3` — add `-m o3` for maximum reasoning in adversarial mode
 
-If the default model fails or returns low-quality results, suggest upgrading to `gpt-5.4` for the retry.
+If the default model returns low-quality results, suggest retrying with a stronger model via `-m`.
 
 ---
 
@@ -274,9 +285,10 @@ The consensus findings are the highest-confidence issues. The model-specific fin
 
 ## Rules
 
-- Codex runs in **read-only sandbox mode** — it NEVER writes files
+- `codex review` is inherently read-only — it NEVER writes files. `codex exec` in challenge/consult modes has full access but is used only for analysis.
 - Always use session-scoped temp file paths (UUID prefix) to prevent conflicts between concurrent sessions
-- Capture and reuse the Codex session ID for multi-round reviews — do NOT use `--last`
+- Capture output with `2>&1 | tee /tmp/second-opinion-*.txt` — there is no `-o` output flag
+- Capture and reuse the Codex session ID for multi-round reviews — use `codex exec resume SESSION_ID` for follow-ups
 - If a Codex revision contradicts the user's explicit requirements, skip that revision and note it
 - Clean up temp files after every invocation
 - Never present Codex's output as Claude's own analysis — always attribute clearly
