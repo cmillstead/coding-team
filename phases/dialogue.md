@@ -29,8 +29,10 @@ After the user approves an approach, print this block VERBATIM (do not paraphras
 > **Continue now:** "Proceed to Phase 2"
 > **Clear first:** `/clear` then `/coding-team continue` (the router will ask you to restate the approved approach)
 >
-> **After Phase 2:** You'll review a design doc, then optionally run `/codex consult` for an independent architecture perspective before proceeding to planning.
+> **After Phase 2:** You'll review a design doc, then optionally run `/second-opinion consult` for an independent architecture perspective before proceeding to planning.
 >
 > **If this task involves prompt or skill changes:** The Prompt/Skill Specialist will be included in the design team. You can also run `/prompt-craft audit` on any existing skills before proceeding.
+>
+> **If this task involves review feedback:** Use `/review-feedback` to evaluate the feedback technically before designing a solution.
 >
 > ---

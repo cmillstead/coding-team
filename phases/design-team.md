@@ -174,7 +174,7 @@ After the user approves the design doc, print this block VERBATIM (do not paraph
 > **Context check:** If the design discussion was extensive, this is a viable clear point.
 >
 > **Optional before proceeding:**
-> - `/codex consult "Is this architecture sound?"` — independent perspective from a different model
+> - `/second-opinion consult "Is this architecture sound?"` — independent perspective from a different model
 > - `/prompt-craft audit` — if the design involves new agent prompts or skills, audit them now before they're baked into the plan
 >
 > ---

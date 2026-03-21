@@ -1,17 +1,17 @@
 ---
-name: codex
-description: "Use when you want an independent second opinion from a different AI model (OpenAI Codex CLI). Three modes: review (pass/fail gate on a plan or diff), challenge (adversarial — actively tries to break your code), and consult (open-ended question to a different model). Use after /review for cross-model coverage, or during Phase 4 planning for independent plan validation. Requires Codex CLI installed: npm install -g @openai/codex"
+name: second-opinion
+description: "Use when you want an independent second opinion from a different AI model (OpenAI Codex CLI). Three modes: review (pass/fail gate on a plan or diff), challenge (adversarial — actively tries to break your code), and consult (open-ended question to a different model). Use after /review for cross-model coverage, or during Phase 4 planning for independent plan validation. Requires Codex CLI installed: npm install -g @openai/second-opinion"
 ---
 
-# /codex — Cross-Model Second Opinion
+# /second-opinion — Cross-Model Second Opinion
 
 Independent review from OpenAI's Codex CLI. Different model, different training, different blind spots. The overlap tells you what's definitely real. The unique findings from each are where you find the bugs neither would catch alone.
 
 When invoked standalone:
-- If the user says `/codex` with no arguments: check for an active diff (`git diff main --stat`) and review it. If no diff, ask what to review.
-- If the user says `/codex review`: review the current diff or a specified plan file
-- If the user says `/codex challenge`: adversarial mode against the current diff
-- If the user says `/codex consult <question>`: open-ended consultation
+- If the user says `/second-opinion` with no arguments: check for an active diff (`git diff main --stat`) and review it. If no diff, ask what to review.
+- If the user says `/second-opinion review`: review the current diff or a specified plan file
+- If the user says `/second-opinion challenge`: adversarial mode against the current diff
+- If the user says `/second-opinion consult <question>`: open-ended consultation
 
 When invoked from /coding-team pipeline: the lead specifies which mode and what to review.
 
@@ -25,7 +25,7 @@ Before any mode, verify Codex CLI is available:
 which codex 2>/dev/null
 ```
 
-If not found: inform the user and suggest `npm install -g @openai/codex`. Do NOT proceed without it.
+If not found: inform the user and suggest `npm install -g @openai/second-opinion`. Do NOT proceed without it.
 
 ---
 
@@ -40,13 +40,13 @@ Independent review of a plan or diff. Codex reads the material, classifies findi
 REVIEW_ID=$(uuidgen | tr '[:upper:]' '[:lower:]' | head -c 8)
 
 # Capture the diff
-git diff main > /tmp/codex-diff-${REVIEW_ID}.md
+git diff main > /tmp/second-opinion-diff-${REVIEW_ID}.md
 
 codex exec \
   -m gpt-5.3-codex \
   -s read-only \
-  -o /tmp/codex-review-${REVIEW_ID}.md \
-  "Review the diff in /tmp/codex-diff-${REVIEW_ID}.md against the codebase. Focus on:
+  -o /tmp/second-opinion-review-${REVIEW_ID}.md \
+  "Review the diff in /tmp/second-opinion-diff-${REVIEW_ID}.md against the codebase. Focus on:
 1. Correctness — will these changes achieve the stated goals?
 2. Bugs — race conditions, null propagation, off-by-ones, stale state
 3. Security — trust boundaries, injection, auth bypass, secrets exposure
@@ -65,13 +65,13 @@ Capture the session ID from stdout for potential follow-up rounds.
 
 ```bash
 REVIEW_ID=$(uuidgen | tr '[:upper:]' '[:lower:]' | head -c 8)
-cp <plan-file-path> /tmp/codex-plan-${REVIEW_ID}.md
+cp <plan-file-path> /tmp/second-opinion-plan-${REVIEW_ID}.md
 
 codex exec \
   -m gpt-5.3-codex \
   -s read-only \
-  -o /tmp/codex-review-${REVIEW_ID}.md \
-  "Review the implementation plan in /tmp/codex-plan-${REVIEW_ID}.md. Focus on:
+  -o /tmp/second-opinion-review-${REVIEW_ID}.md \
+  "Review the implementation plan in /tmp/second-opinion-plan-${REVIEW_ID}.md. Focus on:
 1. Correctness — will this plan achieve the stated goals?
 2. Risks — what could go wrong? Edge cases? Data loss?
 3. Missing steps — is anything forgotten?
@@ -93,7 +93,7 @@ If Codex returns VERDICT: REVISE:
 
 ```bash
 codex exec resume ${CODEX_SESSION_ID} \
-  "I've revised the plan based on your feedback. Updated plan is in /tmp/codex-plan-${REVIEW_ID}.md.
+  "I've revised the plan based on your feedback. Updated plan is in /tmp/second-opinion-plan-${REVIEW_ID}.md.
 Changes made: [list specific changes]
 Please re-review. End with VERDICT: APPROVED or VERDICT: REVISE" 2>&1 | tail -80
 ```
@@ -127,7 +127,7 @@ The cross-model analysis is the key output. Overlapping findings are almost cert
 ### Cleanup
 
 ```bash
-rm -f /tmp/codex-diff-${REVIEW_ID}.md /tmp/codex-plan-${REVIEW_ID}.md /tmp/codex-review-${REVIEW_ID}.md
+rm -f /tmp/second-opinion-diff-${REVIEW_ID}.md /tmp/second-opinion-plan-${REVIEW_ID}.md /tmp/second-opinion-review-${REVIEW_ID}.md
 ```
 
 ---
@@ -138,15 +138,15 @@ Codex actively tries to break your code. Maximum reasoning effort.
 
 ```bash
 REVIEW_ID=$(uuidgen | tr '[:upper:]' '[:lower:]' | head -c 8)
-git diff main > /tmp/codex-diff-${REVIEW_ID}.md
+git diff main > /tmp/second-opinion-diff-${REVIEW_ID}.md
 
 codex exec \
   -m gpt-5.3-codex \
   -s read-only \
-  -o /tmp/codex-challenge-${REVIEW_ID}.md \
+  -o /tmp/second-opinion-challenge-${REVIEW_ID}.md \
   "You are an adversarial code reviewer. Your job is to BREAK this code.
 
-Read the diff in /tmp/codex-diff-${REVIEW_ID}.md and the surrounding codebase.
+Read the diff in /tmp/second-opinion-diff-${REVIEW_ID}.md and the surrounding codebase.
 
 For each changed file, try to construct:
 1. Inputs that cause crashes, panics, or unhandled exceptions
@@ -177,7 +177,7 @@ REVIEW_ID=$(uuidgen | tr '[:upper:]' '[:lower:]' | head -c 8)
 codex exec \
   -m gpt-5.3-codex \
   -s read-only \
-  -o /tmp/codex-consult-${REVIEW_ID}.md \
+  -o /tmp/second-opinion-consult-${REVIEW_ID}.md \
   "<user's question>
 
 Read the codebase for context. Give a specific, actionable answer."
@@ -241,8 +241,8 @@ Do NOT offer on every task. It adds 30-60 seconds per invocation. Match the cost
 Default: `gpt-5.3-codex` (fast, good for standard review).
 
 The user can override:
-- `/codex review o4-mini` — cheaper, faster
-- `/codex challenge gpt-5.4` — maximum reasoning for adversarial mode
+- `/second-opinion review o4-mini` — cheaper, faster
+- `/second-opinion challenge gpt-5.4` — maximum reasoning for adversarial mode
 
 If the default model fails or returns low-quality results, suggest upgrading to `gpt-5.4` for the retry.
 

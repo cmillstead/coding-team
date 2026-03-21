@@ -176,7 +176,7 @@ Each task gets a **task team**: an implementer (using TDD) plus an audit team of
 
 **Documentation checks** run at three levels: per-task (implementer scans doc files before reporting DONE), end-of-execution (doc drift scan via sonnet agent against the full diff), and spec reviewer backstop (flags possible doc drift when implementer claims "no impact").
 
-**Phase transition reminders** print after every exit gate — guiding you to the next phase, suggesting when to clear context, and recommending relevant skills (`/codex`, `/prompt-craft`, `/freeze`). Mid-execution reminders fire every 3 tasks with progress and context check.
+**Phase transition reminders** print after every exit gate — guiding you to the next phase, suggesting when to clear context, and recommending relevant skills (`/second-opinion`, `/prompt-craft`, `/scope-lock`). Mid-execution reminders fire every 3 tasks with progress and context check.
 
 ### Phase 6: Completion
 
@@ -195,7 +195,7 @@ These can be invoked independently with their own slash commands, or used automa
 | Worktree | `/worktree` | Isolated git worktree for feature work. | ~88 |
 | Parallel Fix | `/parallel-fix` | Parallel agent dispatch for independent failures. | ~137 |
 | Prompt Craft | `/prompt-craft` | Write, evaluate, and refine skills and agent prompts. Diagnose behavioral issues. | ~175 |
-| Codex | `/codex` | Cross-model second opinion via OpenAI Codex CLI. Review, challenge, consult. | ~283 |
+| Second Opinion | `/second-opinion` | Cross-model second opinion via OpenAI Second Opinion CLI. Review, challenge, consult. | ~283 |
 
 ## Internalized protocols
 
@@ -265,7 +265,7 @@ Expose individual protocols as standalone slash commands:
 
 ```bash
 # All standalone skills
-for skill in debug verify review-feedback worktree parallel-fix tdd prompt-craft codex; do
+for skill in debug verify review-feedback worktree parallel-fix tdd prompt-craft second-opinion; do
   ln -s ~/.claude/skills/coding-team/skills/$skill ~/.claude/skills/$skill
 done
 ```
@@ -342,7 +342,7 @@ skills/                           # standalone skills (can be invoked independen
   parallel-fix/SKILL.md           #   /parallel-fix — parallel agent dispatch
   tdd/SKILL.md                    #   /tdd — test-driven development cycle
   prompt-craft/SKILL.md           #   /prompt-craft — skill & prompt engineering
-  codex/SKILL.md                  #   /codex — cross-model second opinion
+  second-opinion/SKILL.md                  #   /second-opinion — cross-model second opinion
 prompts/                          # agent prompt templates (used by execution loop)
   implementer.md                  #   implementer agent template
   spec-reviewer.md                #   spec compliance + TDD verification (read-only)

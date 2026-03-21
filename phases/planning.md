@@ -22,7 +22,7 @@ Before writing tasks, check if any planned work needs specialized skill involvem
 |---|---|---|
 | `phases/*.md`, `prompts/*.md`, `skills/*/SKILL.md`, `SKILL.md`, `CLAUDE.md`, `memory/*.md` | prompt-engineering | **Advisory skills:** PROMPT_CRAFT_ADVISORY |
 | Test files only (`tests/**`, `*_test.*`, `test_*.*`) | testing | **Advisory skills:** `/tdd` — follow red-green-refactor cycle |
-| Auth, payment, encryption, or data-deletion code paths | security-sensitive | **Advisory skills:** `/codex challenge` recommended after implementation |
+| Auth, payment, encryption, or data-deletion code paths | security-sensitive | **Advisory skills:** `/second-opinion challenge` recommended after implementation |
 
 **PROMPT_CRAFT_ADVISORY** (include this text verbatim in annotated tasks):
 
@@ -194,11 +194,11 @@ After the plan passes review and is saved:
 >
 > This plan [touches N files / modifies security surface / has opus-tier tasks / etc.].
 >
-> Run `/codex review` for an independent second opinion on the plan? (Y/n)
+> Run `/second-opinion review` for an independent second opinion on the plan? (Y/n)
 >
 > ---
 
-   - User says yes: run `/codex review` against the plan file. After Codex review completes, continue with step 4.
+   - User says yes: run `/second-opinion review` against the plan file. After Codex review completes, continue with step 4.
    - User says no or sends a different message: continue with step 4.
 
 4. **If no risk signals fire OR Codex is not available OR Codex review is done**, print this VERBATIM (substitute actual values):
@@ -216,8 +216,8 @@ After the plan passes review and is saved:
 >
 > **Clear and resume:** `/clear` then `/coding-team continue`
 >
-> **During execution:** If you hit a bug that requires investigation, `/freeze` will lock edits to the affected directory so debugging can't accidentally change unrelated code. `/debug` auto-suggests this.
+> **During execution:** If you hit a bug that requires investigation, `/scope-lock` will lock edits to the affected directory so debugging can't accidentally change unrelated code. `/debug` auto-suggests this.
 >
 > ---
 
-**User override:** If the user has said "never ask about codex" or "skip codex gates" in this session, skip step 3 entirely for the rest of the session.
+**User override:** If the user has said "never ask about second opinion" or "skip second-opinion gates" in this session, skip step 3 entirely for the rest of the session.

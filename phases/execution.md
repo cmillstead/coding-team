@@ -184,7 +184,7 @@ After plan completeness verification passes and before proceeding to Phase 6, ch
 
 3. **If MUST_FIX findings:** dispatch an implementer via Agent tool to fix the doc issues as a single task.
 
-4. **If only NICE_TO_HAVE or no drift:** proceed to Phase 6. Note NICE_TO_HAVE items in the completion summary for `/document-release` to pick up.
+4. **If only NICE_TO_HAVE or no drift:** proceed to Phase 6. Note NICE_TO_HAVE items in the completion summary for `/doc-sync` to pick up.
 
 ## When Tasks Fail: Debugging Protocol
 
@@ -228,8 +228,9 @@ When the execution loop enters the `/debug` protocol (task failure, unexpected b
 > ---
 > **Entering debug mode** for Task {N}.
 >
-> `/freeze <directory>` — lock edits to the affected module (prevents accidental changes elsewhere)
+> `/scope-lock <directory>` — lock edits to the affected module (prevents accidental changes elsewhere)
 > `/debug` protocol: investigate -> analyze -> hypothesize -> implement
+> `/parallel-fix` — if 3+ independent failures surface, dispatch parallel investigation teams
 >
 > When resolved, the execution loop will resume at the audit stage for this task.
 > ---
@@ -239,7 +240,8 @@ When the debug detour completes and execution resumes, print:
 > ---
 > **Debug resolved.** Resuming execution at Task {N} audit.
 >
-> `/unfreeze` — if you used `/freeze`, remove the edit boundary now
+> `/scope-unlock` — remove the edit boundary
+> `/verify` — run the full test suite to confirm the fix didn't break anything
 > ---
 
 ## Next Steps
@@ -268,9 +270,9 @@ After all tasks are executed and verified:
 >
 > ---
 
-   - User says "review": run `/codex review` against the diff. Then continue with step 4.
-   - User says "challenge": run `/codex challenge` against the diff. Then continue with step 4.
-   - User says "both": run `/codex review` first, then `/codex challenge`. Then continue with step 4.
+   - User says "review": run `/second-opinion review` against the diff. Then continue with step 4.
+   - User says "challenge": run `/second-opinion challenge` against the diff. Then continue with step 4.
+   - User says "both": run `/second-opinion review` first, then `/second-opinion challenge`. Then continue with step 4.
    - User says "skip" or sends a different message: continue with step 4.
 
 4. **If no risk signals fired OR Codex not available OR Codex review done**, print this VERBATIM:
@@ -282,12 +284,12 @@ After all tasks are executed and verified:
 > **Next:** Phase 6 completion. "Proceed to Phase 6"
 >
 > **Preview — offered again in Phase 6:**
-> - `/retro` — engineering retrospective
-> - `/document-release` — update docs to match shipped code
+> - `/retrospective` — engineering retrospective
+> - `/doc-sync` — update docs to match shipped code
 > - `/prompt-craft audit` — if this feature changed any skills or prompts
 >
-> **Shipping shortcut:** `/ship` for automated release instead of manual Phase 6.
+> **Shipping shortcut:** `/release` for automated release instead of manual Phase 6.
 >
 > ---
 
-**User override:** If the user has said "never ask about codex" or "skip codex gates" in this session, skip step 3 entirely for the rest of the session.
+**User override:** If the user has said "never ask about second opinion" or "skip second-opinion gates" in this session, skip step 3 entirely for the rest of the session.
