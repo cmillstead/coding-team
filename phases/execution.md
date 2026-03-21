@@ -15,29 +15,19 @@ If user wants isolation (or task warrants it), follow the `/worktree` skill (`sk
 On approval, begin execution. **Agent team per task: implementer + audit team (spec + simplify + harden).** Implementer follows the `/tdd` skill for all implementation work.
 
 **CRITICAL: The main agent is the orchestrator, not the implementer.** You do NOT write code, edit files, or run tests yourself during Phase 5. Your job is to:
+1. Dispatch agents (implementer, auditors) using the Agent tool
+2. Read their results
+3. Decide what to do next (re-dispatch, proceed, escalate)
 
-**If AGENT_TEAMS_AVAILABLE = true:**
-1. Create a team for the execution phase: `Teammate({ operation: "spawnTeam", team_name: "exec-<feature>" })`
-2. For each task: create a task on the shared task list via `TaskCreate`, then spawn an implementer teammate
-3. After implementer completes: spawn audit teammates (spec-reviewer, simplify, harden) — all Explore mode
-4. Read results from inbox and task list
-5. Decide what to do next (re-dispatch, proceed, escalate)
-6. Shutdown and cleanup after all tasks complete
+If you catch yourself using Edit, Write, or running test commands directly — STOP. You are doing the implementer's job. Dispatch an agent instead.
 
-**If AGENT_TEAMS_AVAILABLE = false:**
-1. Dispatch implementer using the Agent tool
-2. Dispatch audit agents in parallel using the Agent tool
-3. Read their results
-4. Decide what to do next
+**Why subagents for execution:** Evaluate the three signals (see SKILL.md Step 0):
+- **Implementer dispatch:** COORDINATION=no (one implementer per task, owns distinct files per plan), DISCOVERY=no (plan specifies exact changes), COMPLEXITY=varies but independent → **subagents**
+- **Audit dispatch:** COORDINATION=no (read-only reviewers examine same diff independently, report to lead), DISCOVERY=no (scope is the diff), COMPLEXITY=yes but independent → **subagents**
 
-If you catch yourself using Edit, Write, or running test commands directly — STOP. You are doing the implementer's job. Spawn a teammate (or Agent if teams unavailable) instead.
+Execution uses subagents because the plan pre-decomposes work into independent tasks. Each agent works alone and reports back.
 
 ## Execution Loop
-
-**If AGENT_TEAMS_AVAILABLE = true:**
-
-Create one execution team for the entire phase:
-`Teammate({ operation: "spawnTeam", team_name: "exec-<feature>" })`
 
 ```
 BASELINE (once, before first task)
@@ -58,46 +48,34 @@ For each task in plan:
       treat it as a separate mini-task: investigate root cause, fix, verify, commit
       with "fix: resolve pre-existing test failure in <area>" before proceeding.
 
-  IMPLEMENTER
-  2. Create task: TaskCreate({ subject: "Task N: <name>", description: "<full task text + context>", activeForm: "Implementing..." })
-  3. Spawn implementer teammate with: full task text, context, working directory, baseline test state
-     - Use model tier from plan
-     - Do NOT make implementer read plan file — provide full text in spawn prompt
-  4. Monitor for completion or messages. Handle status (see Implementer Status Protocol below).
+  IMPLEMENTER (see prompts/implementer.md)
+  2. Dispatch implementer via Agent tool — use model tier from the plan
+     - Pass: full task text, context, working directory, baseline test state
+     - Do NOT make implementer read plan file — provide full text
+  3. Handle implementer status (see Implementer Status Protocol below)
 
   AUDIT TEAM (only if implementer reports DONE or DONE_WITH_CONCERNS)
-  5. Record HEAD_SHA, collect modified files list (git diff --name-only BASE..HEAD)
-  6. Spawn 3 audit teammates IN PARALLEL (all Explore mode):
+  4. Record HEAD_SHA, collect modified files list (git diff --name-only BASE..HEAD)
+  5. Dispatch 3 audit agents IN PARALLEL via Agent tool (all read-only Explore):
      a. Spec reviewer (see prompts/spec-reviewer.md) — "does it match the spec? was TDD followed?"
      b. Simplify auditor (see prompts/simplify-auditor.md) — "is there a simpler way?"
      c. Harden auditor (see prompts/harden-auditor.md) — "what would an attacker try?"
-     Each auditor messages team-lead with findings.
-  7. Triage findings from inbox (see Audit Triage below)
-  8. If findings to fix: spawn new implementer teammate to fix → re-audit (max 3 rounds)
-     Fresh audit teammates each round — don't reuse.
+  6. Triage findings (see Audit Triage below)
+  7. If findings to fix → dispatch new implementer to fix → re-audit (max 3 rounds)
+     Fresh audit agents each round — don't reuse.
 
   COMPLETENESS CHECK
-  9. Compare implementer's output against every step in the task.
+  8. Compare implementer's output against every step in the task.
      For each step: was it done, skipped, or partially done?
      If ANY step was skipped or partially done without explanation:
      → re-dispatch implementer with "you missed steps X, Y — complete them"
      Do NOT proceed to audit with incomplete work.
 
   GATE
-  10. VERIFY: run test suite, confirm pass with fresh output
-  11. Shutdown task teammates (implementer + auditors)
-  12. Next task
-
-After all tasks: shutdown all remaining teammates, cleanup team.
+  9. VERIFY: run test suite, confirm pass with fresh output
+  10. Mark task complete
+  11. Next task
 ```
-
-**If AGENT_TEAMS_AVAILABLE = false:**
-
-Same loop structure, but using Agent tool for dispatch instead of Teammate/TaskCreate:
-- Step 2-3: dispatch implementer via Agent tool with full task text
-- Step 6: dispatch audit agents in parallel via Agent tool (all Explore)
-- Step 8: dispatch new Agent for fixes
-- No shutdown/cleanup needed (agents terminate on completion)
 
 **Audit teammates/agents MUST be read-only (Explore).** This prevents reviewers from silently "fixing" things instead of flagging them. The separation between finding and fixing is the whole point.
 
@@ -162,8 +140,8 @@ At every phase transition and before any completion claim, follow the `/verify` 
 
 ## Coordination Mode
 
-When AGENT_TEAMS_AVAILABLE = true: all execution dispatch uses agent teams. One team per execution phase. Implementers and auditors are teammates. The main agent monitors via inbox and task list.
+Execution uses **subagents** (Agent tool) for implementer and audit dispatch — these are independent, pre-decomposed tasks where COORDINATION=no.
 
-When AGENT_TEAMS_AVAILABLE = false: all execution dispatch uses the Agent tool.
+**Exception:** If debugging reveals 3+ competing hypotheses with cross-cutting evidence potential (COORDINATION=yes), the `/debug` skill may escalate to agent teams. See `skills/debug/SKILL.md`.
 
-In BOTH modes: the main agent never writes code directly.
+In ALL modes: the main agent never writes code directly.

@@ -28,9 +28,27 @@ If ALL three are present:
   AGENT_TEAMS_AVAILABLE = true
 ```
 
-**When AGENT_TEAMS_AVAILABLE = true, use agent teams as the primary coordination mechanism for all multi-agent work.** Subagents are the fallback for single-agent tasks (one implementer on one task) or when agent teams tools are unavailable.
+`AGENT_TEAMS_AVAILABLE` gates **capability** — whether agent teams tools exist. Task characteristics gate **preference** — whether to use them. At every multi-agent dispatch point, evaluate:
 
-**When AGENT_TEAMS_AVAILABLE = false**, fall back to subagents via the Task/Agent tool for all multi-agent work.
+```
+1. COORDINATION: Will agents need to talk to each other during execution?
+   - Shared files/state between agents → yes
+   - One agent's findings could change another's approach → yes
+   - Agents working on provably independent scope → no
+
+2. DISCOVERY: Is the task decomposition known upfront?
+   - Clear, independent pieces already defined → no
+   - Agents may discover unexpected dependencies → yes
+
+3. COMPLEXITY: Does the work require judgment or just execution?
+   - Mechanical changes with complete spec → no
+   - Design decisions, architectural trade-offs → yes
+
+If COORDINATION = yes AND AGENT_TEAMS_AVAILABLE = true → agent teams
+If COORDINATION = no → subagents regardless of AGENT_TEAMS_AVAILABLE
+```
+
+**COORDINATION is the dominant signal.** Simplified: will one agent's work affect another agent's work in real time? Yes → agent teams. No → subagents.
 
 **Note:** The `Task` tool (subagent spawner) and the `TaskCreate`/`TaskList`/`TaskUpdate` tools (team task management) are different tools. Agent teams require both — `Task` for spawning agents into teams, and `TaskCreate`/`TaskList` for the shared task list. If only `Task` is available, `AGENT_TEAMS_AVAILABLE` remains false.
 

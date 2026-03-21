@@ -105,7 +105,12 @@ coding-team reads `~/.claude/skills/skill-taxonomy.yml` to map skills to workers
 
 ## Coordination Mode
 
-When AGENT_TEAMS_AVAILABLE = true: all design work uses agent teams. The Team Leader is a teammate, specialists are teammates, cross-review uses direct messaging.
+**Evaluate the three signals** (see SKILL.md Step 0):
+- COORDINATION: **Yes** — specialists analyze cross-domain concerns, one worker's findings affect another's approach
+- DISCOVERY: **Yes** — analyzing unknown codebase, scope of findings unknown upfront
+- COMPLEXITY: **Yes** — design decisions, architectural trade-offs
+
+Design work almost always routes to agent teams when available. The Team Leader is a teammate, specialists are teammates, cross-review uses direct messaging.
 
 When AGENT_TEAMS_AVAILABLE = false: all design work uses subagents via the Agent tool.
 

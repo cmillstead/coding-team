@@ -121,7 +121,7 @@ The plan goes through an automated plan document reviewer (up to 3 iterations) b
 
 ### Phase 5: Execution
 
-The main agent is the **orchestrator** during this phase — it spawns teammates, reads their results, and decides what to do next. It never writes code, edits files, or runs tests directly. All implementation goes through agent teams (teammates), with fallback to the Agent tool when agent teams are unavailable.
+The main agent is the **orchestrator** during this phase — it dispatches agents, reads their results, and decides what to do next. It never writes code, edits files, or runs tests directly. Execution uses **subagents** (Agent tool) because the plan pre-decomposes work into independent tasks (COORDINATION=no). Agent teams are only used during execution if debugging escalates to 3+ competing hypotheses with cross-cutting evidence.
 
 Before the first task, the full test suite runs to establish a **baseline**. If any tests are already failing, the first implementer fixes them before starting task work — no pre-existing failure is dismissed as "not our problem."
 
@@ -176,13 +176,20 @@ Protocols are extracted as standalone skills that can be invoked independently o
 | `/parallel-fix` | Parallel agent dispatch for independent failures |
 | `/tdd` | Test-driven development cycle (red-green-refactor) |
 
-### Agent teams (primary coordination)
+### Agent teams vs subagents
 
-When Claude Code's agent teams feature is available (`CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`, v2.1.32+, Opus 4.6), it is the **default coordination mechanism** for all multi-agent work — design teams, execution teams, debugging, and parallel dispatch. Agent teams use peer-to-peer messaging (Teammate + SendMessage) and shared task lists.
+At every multi-agent dispatch point, the skill evaluates three signals: **COORDINATION** (will agents need to talk to each other?), **DISCOVERY** (is decomposition known?), and **COMPLEXITY** (judgment vs execution?). COORDINATION is the dominant signal.
 
-When agent teams aren't available, all coordination falls back to the Agent tool. Detection happens automatically at session start.
+| Dispatch site | Route | Why |
+|---|---|---|
+| Design team (Phase 2) | **Agent teams** | Specialists' findings affect each other |
+| Execution — implementer | **Subagents** | One agent per task, distinct files, pre-decomposed |
+| Execution — audit | **Subagents** | Read-only, report independently |
+| Debugging 3+ hypotheses | **Agent teams** | Evidence can refute peers |
+| Parallel fix, shared infra | **Agent teams** | Cross-domain discovery |
+| Single-agent (spec review, planning) | **Subagents** | No multi-agent coordination |
 
-Single-agent tasks (spec review, plan review, planning worker) always use the Agent tool directly regardless of agent teams availability.
+Agent teams require `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`, Claude Code v2.1.32+, Opus 4.6. When unavailable, everything falls back to subagents. Detection happens automatically at session start.
 
 ### Model routing
 
