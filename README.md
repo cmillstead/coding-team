@@ -25,12 +25,13 @@ The main SKILL.md is a router that knows the phase sequence, input/output contra
 
 | Invocation | Loaded | Lines |
 |---|---|---|
-| `/coding-team` (router decides) | Main SKILL.md | ~200 |
-| `/coding-team` → Phase 2 (heaviest) | Main + `phases/design-team.md` | ~355 |
-| `/coding-team` → Phase 5 (typical) | Main + `phases/execution.md` | ~350 |
+| `/coding-team` (router decides) | Main SKILL.md | ~268 |
+| `/coding-team` → Phase 4 (planning) | Main + `phases/planning.md` | ~460 |
+| `/coding-team` → Phase 5 (execution) | Main + `phases/execution.md` | ~535 |
+| `/coding-team` → Phase 2 (design) | Main + `phases/design-team.md` | ~448 |
 | `/debug` (standalone) | `skills/debug/SKILL.md` only | ~167 |
 | `/verify` (standalone) | `skills/verify/SKILL.md` only | ~55 |
-| `/tdd` (standalone) | `skills/tdd/SKILL.md` only | ~31 |
+| `/prompt-craft` (standalone) | `skills/prompt-craft/SKILL.md` only | ~264 |
 
 Phase files do not reference each other. The main SKILL.md's phase contracts define the input/output handoff between phases.
 
@@ -90,6 +91,9 @@ For fresh tasks (no prior plans), it routes based on what you bring:
 
 | You have... | Entry point |
 |---|---|
+| Task modifying CC instruction files (phases, prompts, skills, CLAUDE.md) + vague request | Phase 2 with Prompt/Skill Specialist |
+| Task modifying CC instruction files + complete spec | Phase 4 with prompt-craft advisory |
+| CC behavioral issue ("CC keeps doing X", "CC ignores instructions") | `/prompt-craft diagnose` |
 | A vague idea or new feature request | Phase 1 — dialogue to clarify |
 | A design or spec, needs a plan | Phase 4 — planning worker |
 | A plan file, ready to build | Phase 5 — execution |
@@ -156,18 +160,23 @@ The main agent is the **orchestrator** — it dispatches agents, reads results, 
 
 Before the first task, the full test suite runs to establish a **baseline**. Pre-existing failures are fixed before new work begins.
 
-Each task gets a **task team**: an implementer (using TDD) plus an audit team of three read-only reviewers dispatched in parallel after the implementer reports done.
+Each task gets a **task team**: an implementer (using TDD) plus an audit team of 3-4 read-only reviewers dispatched in parallel after the implementer reports done.
 
 **Implementer** reports one of: DONE, DONE_WITH_CONCERNS, NEEDS_CONTEXT, or BLOCKED. Blocked tasks are assessed and escalated — never ignored or retried without changes.
 
 **Audit team** (read-only, fresh agents each round):
-- **Spec reviewer** — does the code match the spec? Was TDD followed?
+- **Spec reviewer** — does the code match the spec? Was TDD followed? Flags possible doc drift.
 - **Simplify auditor** — dead code, naming, over-abstraction. Only flags things "clearly wrong, not just imperfect."
 - **Harden auditor** — input validation, injection vectors, auth, race conditions. Exploitable issues, not theoretical risks.
+- **Prompt-craft auditor** (conditional) — only for tasks modifying CC instruction files. Checks framing, tool names, prohibitions, thresholds.
 
 **Audit triage** applies a refactor gate ("would a senior engineer say this is clearly wrong?"), routes by severity, checks budget (30%+ diff growth → tighten scope), and checks for drift against the original task. The loop exits on clean audit, low-only findings, or 3-round cap.
 
 **Completeness checks** run at two levels: per-task (every step accounted for before audit) and end-of-execution (every plan task has a commit before Phase 6).
+
+**Documentation checks** run at three levels: per-task (implementer scans doc files before reporting DONE), end-of-execution (doc drift scan via sonnet agent against the full diff), and spec reviewer backstop (flags possible doc drift when implementer claims "no impact").
+
+**Phase transition reminders** print after every exit gate — guiding you to the next phase, suggesting when to clear context, and recommending relevant skills (`/codex`, `/prompt-craft`, `/freeze`). Mid-execution reminders fire every 3 tasks with progress and context check.
 
 ### Phase 6: Completion
 
