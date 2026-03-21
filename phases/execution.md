@@ -209,12 +209,12 @@ In ALL modes: the main agent never writes code directly.
 During execution, after every 3 completed tasks, print a context check VERBATIM (substitute actual values):
 
 > ---
-> **Context check:** Completed {N} of {total} tasks.
+> **Progress:** Completed {N} of {total} tasks. Tasks 1-{N} committed and verified.
 >
-> **Continue:** next task is Task {N+1}: {name}
-> **Clear and resume:** `/clear` then `/coding-team continue` — the router will find the plan and resume at Task {N+1}
+> **Next:** Task {N+1}: {name}
 >
-> Progress so far: Tasks 1-{N} committed and verified.
+> [Only if context `used_percentage` is above 60%:]
+> **Context at N%.** Clear and resume: `/clear` then `/coding-team continue`
 > ---
 
 Also print on each mid-phase reminder:

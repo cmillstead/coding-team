@@ -23,11 +23,10 @@ After the user approves an approach, print this block VERBATIM (do not paraphras
 >
 > **Approach approved.**
 >
-> **Context check:** Phase 2 (Design Team) will spawn multiple specialist workers.
-> If this conversation is already long, consider clearing context first.
->
 > **Continue now:** "Proceed to Phase 2"
-> **Clear first:** `/clear` then `/coding-team continue` (the router will ask you to restate the approved approach)
+>
+> [Only if context `used_percentage` is above 60%:]
+> **Context at N%.** Clear first: `/clear` then `/coding-team continue`
 >
 > **After Phase 2:** You'll review a design doc, then optionally run `/second-opinion consult` for an independent architecture perspective before proceeding to planning.
 >

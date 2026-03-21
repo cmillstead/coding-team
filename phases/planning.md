@@ -235,9 +235,10 @@ After the plan passes review and is saved:
 > **Recommended before execution:**
 > - `/worktree` — set up an isolated workspace (offered automatically)
 >
-> **Context check:** Phase 5 typically uses 60-80% of the context window. Clearing here preserves capacity for execution. The plan is on disk.
+> **Context check:** Check `used_percentage` from the context window. Only suggest clearing if above 60%. The plan is on disk — clearing is safe but not always necessary.
 >
-> **Clear and resume:** `/clear` then `/coding-team continue`
+> **If above 60%:** "Context is at N%. Recommend clearing before execution: `/clear` then `/coding-team continue`"
+> **If below 60%:** Do NOT suggest clearing. Just proceed.
 >
 > **During execution:** If you hit a bug that requires investigation, `/scope-lock` will lock edits to the affected directory so debugging can't accidentally change unrelated code. `/debug` auto-suggests this.
 >

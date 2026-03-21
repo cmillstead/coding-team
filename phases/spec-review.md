@@ -22,8 +22,7 @@ After the user confirms the spec, print this block VERBATIM (substitute the actu
 >
 > **Next:** Phase 4 will produce the implementation plan. "Proceed to Phase 4"
 >
-> **Context check:** If context is getting heavy from the design discussion, this is a good clear point. The spec is saved to disk — nothing is lost.
->
-> **Clear first:** `/clear` then `/coding-team continue`
+> [Only if context `used_percentage` is above 60%:]
+> **Context at N%.** Clear first: `/clear` then `/coding-team continue`
 >
 > ---

@@ -171,7 +171,8 @@ After the user approves the design doc, print this block VERBATIM (do not paraph
 >
 > **After Phase 3:** The spec gets written to `docs/plans/`. Then Phase 4 produces the implementation plan.
 >
-> **Context check:** If the design discussion was extensive, this is a viable clear point.
+> [Only if context `used_percentage` is above 60%:]
+> **Context at N%.** Consider clearing: `/clear` then `/coding-team continue`
 >
 > **Optional before proceeding:**
 > - `/second-opinion consult "Is this architecture sound?"` — independent perspective from a different model
