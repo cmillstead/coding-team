@@ -284,7 +284,7 @@ After all tasks are executed and verified:
 > **Next:** Phase 6 completion. "Proceed to Phase 6"
 >
 > **Preview — offered again in Phase 6:**
-> - `/retrospective` — engineering retrospective
+> - `/retrospective` — engineering retrospective (coding-team's, not gstack's `/retro`)
 > - `/doc-sync` — update docs to match shipped code
 > - `/prompt-craft audit` — if this feature changed any skills or prompts
 >

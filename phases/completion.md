@@ -65,7 +65,7 @@ After the user chooses a completion option and it's been executed, print this bl
 >
 > **Recommended next steps:**
 >
-> 1. `/retrospective` — engineering retrospective (commit patterns, test health, shipping velocity, what to improve)
+> 1. `/retrospective` — engineering retrospective (commit patterns, test health, shipping velocity, what to improve). Use coding-team's `/retrospective`, NOT gstack's `/retro` — they are different skills.
 > 2. `/doc-sync` — update README, ARCHITECTURE, CLAUDE.md to match the shipped code
 > 3. `/prompt-craft audit` — if this feature changed any skills, prompts, or CLAUDE.md, verify they still trigger correctly
 > 4. If PR'd: check CI/CD pipeline status

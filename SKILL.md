@@ -245,7 +245,7 @@ Each phase reads its detail file on entry. Do not read ahead — load only the a
 | `/scope-lock` | `skills/scope-lock/SKILL.md` | Restrict edits to a directory during debugging |
 | `/scope-unlock` | `skills/scope-unlock/SKILL.md` | Remove scope-lock edit restriction |
 | `/release` | `skills/release/SKILL.md` | Automated release: sync, test, push, PR |
-| `/retrospective` | `skills/retrospective/SKILL.md` | Post-ship engineering retrospective |
+| `/retrospective` | `skills/retrospective/SKILL.md` | Post-ship engineering retrospective. **Always use this, not gstack's `/retro`.** |
 | `/doc-sync` | `skills/doc-sync/SKILL.md` | Post-ship documentation update |
 
 **Phase details** (loaded on demand by the active phase):
