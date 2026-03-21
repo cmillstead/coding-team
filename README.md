@@ -186,6 +186,7 @@ These can be invoked independently with their own slash commands, or used automa
 | Worktree | `/worktree` | Isolated git worktree for feature work. | ~88 |
 | Parallel Fix | `/parallel-fix` | Parallel agent dispatch for independent failures. | ~137 |
 | Prompt Craft | `/prompt-craft` | Write, evaluate, and refine skills and agent prompts. Diagnose behavioral issues. | ~175 |
+| Codex | `/codex` | Cross-model second opinion via OpenAI Codex CLI. Review, challenge, consult. | ~283 |
 
 ## Internalized protocols
 
@@ -255,7 +256,7 @@ Expose individual protocols as standalone slash commands:
 
 ```bash
 # All standalone skills
-for skill in debug verify review-feedback worktree parallel-fix tdd prompt-craft; do
+for skill in debug verify review-feedback worktree parallel-fix tdd prompt-craft codex; do
   ln -s ~/.claude/skills/coding-team/skills/$skill ~/.claude/skills/$skill
 done
 ```
@@ -332,6 +333,7 @@ skills/                           # standalone skills (can be invoked independen
   parallel-fix/SKILL.md           #   /parallel-fix — parallel agent dispatch
   tdd/SKILL.md                    #   /tdd — test-driven development cycle
   prompt-craft/SKILL.md           #   /prompt-craft — skill & prompt engineering
+  codex/SKILL.md                  #   /codex — cross-model second opinion
 prompts/                          # agent prompt templates (used by execution loop)
   implementer.md                  #   implementer agent template
   spec-reviewer.md                #   spec compliance + TDD verification (read-only)

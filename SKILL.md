@@ -198,6 +198,7 @@ Each phase reads its detail file on entry. Do not read ahead — load only the a
 | `/parallel-fix` | `skills/parallel-fix/SKILL.md` | Parallel agent dispatch for independent failures |
 | `/tdd` | `skills/tdd/SKILL.md` | Test-driven development cycle |
 | `/prompt-craft` | `skills/prompt-craft/SKILL.md` | Skill & prompt engineering, diagnosis, audit |
+| `/codex` | `skills/codex/SKILL.md` | Cross-model second opinion via OpenAI Codex CLI |
 
 **Phase details** (loaded on demand by the active phase):
 
