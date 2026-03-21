@@ -52,10 +52,17 @@ For each task in plan:
   6. Triage findings (see Audit Triage below)
   7. If findings to fix -> implementer fixes -> re-audit (max 3 rounds)
 
+  COMPLETENESS CHECK
+  8. Compare implementer's output against every step in the task.
+     For each step: was it done, skipped, or partially done?
+     If ANY step was skipped or partially done without explanation:
+     → re-dispatch implementer with "you missed steps X, Y — complete them"
+     Do NOT proceed to audit with incomplete work.
+
   GATE
-  8. VERIFY: run test suite, confirm pass with fresh output
-  9. Mark task complete
-  10. Next task
+  9. VERIFY: run test suite, confirm pass with fresh output
+  10. Mark task complete
+  11. Next task
 ```
 
 **Audit agents MUST be read-only (Explore).** This prevents reviewers from silently "fixing" things instead of flagging them. The separation between finding and fixing is the whole point.
@@ -101,6 +108,15 @@ The implementer on each task team reports one of four statuses:
 4. Plan itself is wrong -> escalate to user
 
 **Never** ignore an escalation or retry the same model without changes.
+
+## Plan Completeness Verification (after all tasks)
+
+Before declaring execution complete, verify the full plan was executed:
+
+1. List every task from the plan.
+2. For each task, confirm it was completed (has a commit) or explicitly skipped (with user approval).
+3. If the plan has a traceability table (scan findings), verify every "Fix" row has a corresponding commit.
+4. If any tasks were silently dropped, execute them now — do not proceed to Phase 6.
 
 ## When Tasks Fail: Debugging Protocol
 

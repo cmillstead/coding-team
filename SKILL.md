@@ -146,6 +146,7 @@ Each phase reads its detail file on entry. Do not read ahead — load only the a
 - Retry the same failed approach more than 3 times
 - Performatively agree with review feedback without verifying
 - Dismiss pre-existing test failures — fix them or escalate, never ignore
+- Silently drop findings — every scan finding, review comment, or enumerated issue must be planned (fix, defer with rationale, or false positive) and every planned task must be executed
 
 **Always:**
 - Verify tests before offering completion options

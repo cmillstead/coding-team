@@ -106,6 +106,25 @@ Any row with tested=no AND error handling=no AND user sees=silent → **critical
 
 **What already exists** — existing code/flows that partially solve sub-problems and whether the plan reuses them.
 
+## Completeness Gate — Nothing Silently Dropped
+
+When the plan addresses scan findings, review feedback, or any enumerated list of issues:
+
+1. **Count the inputs.** List every finding/issue from the source material with its ID or description.
+2. **Map each to a disposition.** Every single item must appear in the plan as one of:
+   - **Task N** — planned fix with task reference
+   - **Deferred** — listed in "NOT in scope" with one-line rationale
+   - **False positive** — listed with explanation of why it doesn't apply
+3. **Produce a traceability table** at the end of the plan:
+
+| # | Finding | Disposition | Task/Rationale |
+|---|---------|-------------|----------------|
+| 1 | SQL injection in /api/users | Fix | Task 3 |
+| 2 | Missing CSRF token | Fix | Task 5 |
+| 3 | Outdated dependency (low) | Deferred | No known exploit, update in next cycle |
+
+If `count(inputs) != count(fix) + count(deferred) + count(false positive)`, the plan is incomplete. Do not return it.
+
 ## Quality Gate — Self-Review Before Returning
 
 1. Pick 3 tasks at random — could a developer implement each without asking a single question?
@@ -114,6 +133,7 @@ Any row with tested=no AND error handling=no AND user sees=silent → **critical
 4. Are there security implications not addressed?
 5. Is there any step that silently assumes context the implementer won't have?
 6. Does the failure modes table have any critical gaps (no test + no handling + silent)?
+7. **Does the traceability table account for every input finding?** (If sourced from a scan or review)
 
 ## Plan Review Loop
 
