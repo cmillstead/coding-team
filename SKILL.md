@@ -279,14 +279,14 @@ Each phase reads its detail file on entry. Do not read ahead — load only the a
 
 **Phase details** (loaded on demand by the active phase):
 
-| Phase | File | Lines |
-|-------|------|-------|
-| Dialogue | `phases/dialogue.md` | ~38 |
-| Design Team | `phases/design-team.md` | ~180 |
-| Spec Review | `phases/spec-review.md` | ~29 |
-| Planning | `phases/planning.md` | ~223 |
-| Execution | `phases/execution.md` | ~295 |
-| Completion | `phases/completion.md` | ~77 |
+| Phase | File |
+|-------|------|
+| Dialogue | `phases/dialogue.md` |
+| Design Team | `phases/design-team.md` |
+| Spec Review | `phases/spec-review.md` |
+| Planning | `phases/planning.md` |
+| Execution | `phases/execution.md` |
+| Completion | `phases/completion.md` |
 
 **Agent prompt templates** (used by the execution loop):
 
