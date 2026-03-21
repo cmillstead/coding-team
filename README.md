@@ -85,7 +85,7 @@ If a cheaper model fails or returns low-quality results, the task is re-dispatch
 
 ### Session routing
 
-When invoked, the skill detects available coordination tools (agent teams vs subagents only), then checks whether you're continuing prior work. If you mention a phase, task number, feature name, or "continue" — it finds the **main repo root** (not a worktree), lists `docs/plans/*.md` to discover existing plans (never guesses filenames), reads headers to match your request, checks git log for progress, and resumes at the next incomplete task.
+When invoked, the skill detects available coordination tools (agent teams vs subagents only), then checks whether you're continuing prior work. If you mention a phase, task number, feature name, or "continue" — it finds the **main repo root** (not a worktree), lists `docs/plans/*.md` to discover existing plans (never guesses filenames), reads headers to match your request, checks git log for progress, and for sessions idle 24+ hours checks what changed on main and surfaces a context refresh before resuming at the next incomplete task.
 
 For fresh tasks (no prior plans), it routes based on what you bring:
 
@@ -148,7 +148,7 @@ The design doc is written to `docs/plans/YYYY-MM-DD-<feature>-design.md` and pas
 
 A Planning Worker (Architect + Senior Coder) produces a detailed implementation plan. Before writing tasks, it challenges scope: what existing code already solves sub-problems, what is the minimum set of changes, and if 8+ files or 2+ new classes are needed, can it be simpler?
 
-**Plan structure:** header with goal/architecture/tech stack, file structure mapping, tasks with exact file paths, line ranges, complete code, exact commands with expected output. Each step is one action (2-5 minutes) with no ambiguity. Includes a failure modes table, NOT in scope section, what already exists section, and a traceability table when sourced from scan findings or review feedback — every input item mapped to fix, defer, or false positive. Nothing silently dropped.
+**Plan structure:** header with goal/architecture/tech stack, context brief (environment, sacred paths, decision history, external dependencies, known landmines), optional project-specific eval criteria for auditors, file structure mapping, tasks with exact file paths, line ranges, complete code, exact commands with expected output. Each step is one action (2-5 minutes) with no ambiguity. Includes a failure modes table, NOT in scope section, what already exists section, and a traceability table when sourced from scan findings or review feedback — every input item mapped to fix, defer, or false positive. Nothing silently dropped.
 
 The plan goes through an automated plan reviewer (up to 3 iterations) before being saved to `docs/plans/YYYY-MM-DD-<feature>.md`.
 
@@ -178,7 +178,7 @@ Each task gets a **task team**: an implementer (using TDD) plus an audit team of
 
 ### Phase 6: Completion
 
-Full test suite + linter verification, then four options: merge locally, push and create PR, keep branch as-is, or discard (requires typing "discard" to confirm). A learning loop summary captures recurring audit patterns, unresolved low-severity findings, and out-of-scope observations.
+Full test suite + linter verification, then four options: merge locally, push and create PR, keep branch as-is, or discard (requires typing "discard" to confirm). A learning loop summary captures recurring audit patterns, unresolved low-severity findings, and out-of-scope observations. A decision log prompt asks the user to record any architectural decisions made during the feature to `memory/decisions/`.
 
 ## Standalone skills
 
