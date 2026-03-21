@@ -12,3 +12,25 @@
 Do NOT create the Team Leader until the user has approved an approach.
 
 **Scope check:** If the request describes multiple independent subsystems, flag this immediately. Help decompose into sub-projects before detailed design. Each sub-project gets its own design -> plan -> execution cycle.
+
+---
+
+## Next Steps
+
+After the user approves an approach, print this block VERBATIM (do not paraphrase, reorder, or omit lines). Substitute actual feature name where applicable:
+
+> ---
+>
+> **Approach approved.**
+>
+> **Context check:** Phase 2 (Design Team) will spawn multiple specialist workers.
+> If this conversation is already long, consider clearing context first.
+>
+> **Continue now:** "Proceed to Phase 2"
+> **Clear first:** `/clear` then `/coding-team continue` (the router will ask you to restate the approved approach)
+>
+> **After Phase 2:** You'll review a design doc, then optionally run `/codex consult` for an independent architecture perspective before proceeding to planning.
+>
+> **If this task involves prompt or skill changes:** The Prompt/Skill Specialist will be included in the design team. You can also run `/prompt-craft audit` on any existing skills before proceeding.
+>
+> ---

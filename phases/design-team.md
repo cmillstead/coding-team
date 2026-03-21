@@ -156,3 +156,25 @@ All agent team usage follows this lifecycle:
 - Skip shutdown and go straight to cleanup (check for active teammates first)
 - Spawn teammates without the team existing (spawnTeam first)
 - Forget to include task-specific context in spawn prompts (teammates have no conversation history)
+
+---
+
+## Next Steps
+
+After the user approves the design doc, print this block VERBATIM (do not paraphrase, reorder, or omit lines):
+
+> ---
+>
+> **Design doc approved.**
+>
+> **Next:** Phase 3 will write the spec and run automated review. "Proceed to Phase 3"
+>
+> **After Phase 3:** The spec gets written to `docs/plans/`. Then Phase 4 produces the implementation plan.
+>
+> **Context check:** If the design discussion was extensive, this is a viable clear point.
+>
+> **Optional before proceeding:**
+> - `/codex consult "Is this architecture sound?"` — independent perspective from a different model
+> - `/prompt-craft audit` — if the design involves new agent prompts or skills, audit them now before they're baked into the plan
+>
+> ---

@@ -145,3 +145,63 @@ Execution uses **subagents** (Agent tool) for implementer and audit dispatch —
 **Exception:** If debugging reveals 3+ competing hypotheses with cross-cutting evidence potential (COORDINATION=yes), the `/debug` skill may escalate to agent teams. See `skills/debug/SKILL.md`.
 
 In ALL modes: the main agent never writes code directly.
+
+---
+
+## Mid-Phase Reminders
+
+During execution, after every 3 completed tasks, print a context check VERBATIM (substitute actual values):
+
+> ---
+> **Context check:** Completed {N} of {total} tasks.
+>
+> **Continue:** next task is Task {N+1}: {name}
+> **Clear and resume:** `/clear` then `/coding-team continue` — the router will find the plan and resume at Task {N+1}
+>
+> Progress so far: Tasks 1-{N} committed and verified.
+> ---
+
+## Debugging Detour Reminders
+
+When the execution loop enters the `/debug` protocol (task failure, unexpected behavior), print:
+
+> ---
+> **Entering debug mode** for Task {N}.
+>
+> `/freeze <directory>` — lock edits to the affected module (prevents accidental changes elsewhere)
+> `/debug` protocol: investigate -> analyze -> hypothesize -> implement
+>
+> When resolved, the execution loop will resume at the audit stage for this task.
+> ---
+
+When the debug detour completes and execution resumes, print:
+
+> ---
+> **Debug resolved.** Resuming execution at Task {N} audit.
+>
+> `/unfreeze` — if you used `/freeze`, remove the edit boundary now
+> ---
+
+## Next Steps
+
+After all tasks are executed and verified, print this block VERBATIM:
+
+> ---
+>
+> **All tasks executed and verified.**
+>
+> **Next:** Phase 6 completion. "Proceed to Phase 6"
+>
+> **Recommended before completion:**
+> - `/codex review` — cross-model review of the full diff (findings overlap with Claude's audit = high confidence)
+> - `/codex challenge` — adversarial review (recommended for auth, payment, encryption, data deletion changes)
+> - `/verify` — if you want to independently re-run the full test suite before proceeding
+>
+> **Preview — offered again in Phase 6:**
+> - `/retro` — engineering retrospective
+> - `/document-release` — update docs to match shipped code
+> - `/prompt-craft audit` — if this feature changed any skills or prompts
+>
+> **Shipping shortcut:** `/ship` for a fully automated release instead of the manual Phase 6 flow.
+>
+> ---

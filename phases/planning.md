@@ -144,3 +144,27 @@ After writing the plan:
 3. If Approved: save plan and proceed
 
 Save plan to: `docs/plans/YYYY-MM-DD-<feature>.md` (always in the **main repo root**, not a worktree)
+
+---
+
+## Next Steps
+
+After the plan passes review and is saved, print this block VERBATIM (substitute the actual plan path):
+
+> ---
+>
+> **Plan saved to `docs/plans/<actual-path>`.**
+>
+> **Next:** Phase 5 execution. "Proceed to Phase 5"
+>
+> **Recommended before execution:**
+> - `/codex review` — get a Codex second opinion on the plan (iterative — Codex reviews, Claude revises, up to 5 rounds)
+> - `/worktree` — set up an isolated workspace (offered automatically)
+>
+> **Context check:** Phase 5 typically uses 60-80% of the context window. Clearing here preserves capacity for execution. The plan is on disk.
+>
+> **Clear and resume:** `/clear` then `/coding-team continue`
+>
+> **During execution:** If you hit a bug that requires investigation, `/freeze` will lock edits to the affected directory so debugging can't accidentally change unrelated code. `/debug` auto-suggests this.
+>
+> ---

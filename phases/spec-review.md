@@ -9,3 +9,21 @@ Main Claude presents the synthesized design doc. Get explicit approval. Revise i
 3. If Issues Found: fix, re-dispatch, repeat (max 3 iterations, then surface to user)
 4. If Approved: present spec to user for final review before proceeding
 5. Only proceed to Phase 4 after user confirms the written spec
+
+---
+
+## Next Steps
+
+After the user confirms the spec, print this block VERBATIM (substitute the actual date and feature name for the path):
+
+> ---
+>
+> **Spec confirmed and saved to `docs/plans/<actual-path>`.**
+>
+> **Next:** Phase 4 will produce the implementation plan. "Proceed to Phase 4"
+>
+> **Context check:** If context is getting heavy from the design discussion, this is a good clear point. The spec is saved to disk — nothing is lost.
+>
+> **Clear first:** `/clear` then `/coding-team continue`
+>
+> ---

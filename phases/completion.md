@@ -52,3 +52,26 @@ After all tasks, produce a summary that includes audit findings across all round
 ```
 
 Recurring patterns are the signal — if the same finding type appears across multiple tasks or rounds, it indicates a systemic issue worth noting for future work.
+
+---
+
+## Session Complete
+
+After the user chooses a completion option and it's been executed, print this block VERBATIM (substitute actual branch name and chosen option):
+
+> ---
+>
+> **Feature complete.** Branch: `<branch>` | Option: `<chosen option>`
+>
+> **Recommended next steps:**
+>
+> 1. `/retro` — engineering retrospective (commit patterns, test health, shipping velocity, what to improve)
+> 2. `/document-release` — update README, ARCHITECTURE, CLAUDE.md to match the shipped code
+> 3. `/prompt-craft audit` — if this feature changed any skills, prompts, or CLAUDE.md, verify they still trigger correctly
+> 4. If PR'd: check CI/CD pipeline status
+>
+> **If you chose "Push and create PR" and want a more automated release:** Run `/ship` — it syncs main, runs tests, audits coverage, pushes, and creates the PR with coverage stats.
+>
+> **Starting something new?** `/clear` then `/coding-team` with your next task.
+>
+> ---
