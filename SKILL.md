@@ -114,6 +114,35 @@ After finding a matching plan, determine where the user left off:
 | Plan file + all tasks committed | Resume at Phase 6 (completion) |
 | Plan file + merged/PR'd branch | Feature looks done — inform user |
 
+**Step 2.5: Context Refresh (continuation sessions only)**
+
+When resuming a session (detected in Step 1), check what changed since the last activity:
+
+1. Check time since last commit on the feature branch:
+   ```bash
+   git log -1 --format="%ci" HEAD
+   ```
+
+2. If more than 24 hours since last activity:
+   a. Check for commits on the base branch since the branch diverged:
+      ```bash
+      git log --oneline $(git merge-base HEAD main)..origin/main
+      ```
+   b. If commits found, print this context refresh:
+      > **Context refresh:** N commits landed on main since your last session.
+      > [one-line summary of key changes]
+      >
+      > Any of these affect our work? (If unsure, I'll proceed.)
+   c. Wait for user response before routing to Step 3.
+
+3. If 24 hours or less since last activity, skip this step — proceed directly to Step 3.
+
+4. If the project has a `memory/decisions/` directory, check for new decision entries on main since the branch point:
+   ```bash
+   git log --diff-filter=A --name-only --format="" $(git merge-base HEAD main)..origin/main -- "memory/decisions/"
+   ```
+   If new decisions found, read them and include in the context refresh report.
+
 **Step 3: Route.** For fresh tasks (no prior plans), or after plan discovery:
 
 | User's situation | Entry point |
