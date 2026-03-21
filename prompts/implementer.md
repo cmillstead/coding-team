@@ -26,6 +26,9 @@ Agent tool:
     decision history, and known landmines as hard constraints — do NOT make changes
     that violate them without reporting BLOCKED.
 
+    Do NOT silently skip this section. Do NOT modify sacred paths or contradict
+    decision history without reporting BLOCKED with an explanation of the conflict.
+
     ## Advisory Skills
 
     [INSERT ADVISORY SKILLS HERE — from the plan's task annotation.

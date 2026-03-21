@@ -90,6 +90,7 @@ After the header, every plan includes a context brief. The planning worker fills
 ```
 
 The planning worker MUST fill this section. If no organizational context is known, write: "No non-obvious context identified. Standard development environment."
+Do NOT invent context you do not have evidence for. If a field's answer is unknown, omit the field entirely. Fabricated context is worse than no context — it causes implementers to work around constraints that don't exist.
 
 ## File Structure
 
