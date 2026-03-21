@@ -47,6 +47,12 @@ Agent tool:
     3. Prohibitions must be explicit — CC does not infer what it should NOT do; state every prohibition directly
     4. Quantify thresholds — write "3 files", "5 minutes", "2 rounds", not "large", "many", "several"
 
+    ## Code Style
+
+    [INSERT contents of ~/.claude/code-style.md here — the orchestrator reads this file and pastes it into the implementer prompt when the task involves Python, TypeScript, Angular, JavaScript, HTML, or SCSS files.]
+
+    If code-style rules are included above, follow them for all code you write. These are the user's cross-project style rules.
+
     ## Before You Begin
 
     If you have questions about:

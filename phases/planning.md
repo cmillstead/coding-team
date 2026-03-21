@@ -55,6 +55,19 @@ findings will be rejected by the reviewer.
 
 The orchestrator owns the count. The planning worker cannot silently reduce it because the reviewer independently checks the count from the plan header against the traceability table rows.
 
+## Context Inheritance
+
+Before dispatching the planning worker, pass these additional context files alongside the design doc and project context:
+
+1. **Golden principles:** Read `~/.claude/golden-principles.md` using the Read tool. The planning worker checks scope challenges and architecture decisions against these.
+2. **Code style:** Read `~/.claude/code-style.md` using the Read tool. The planning worker follows these rules when writing code snippets in tasks.
+3. **Team memory:** Read `docs/team-memory.md` using the Read tool (if it exists). The planning worker checks Known Landmines before finalizing the plan.
+4. **Episode context:** If episodes were retrieved during Phase 2, pass the extracted patterns to the planning worker.
+
+If any file doesn't exist, skip it. Do NOT fabricate context.
+
+---
+
 ## Plan Document Format
 
 Every plan starts with this header:

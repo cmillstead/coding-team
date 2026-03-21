@@ -78,6 +78,12 @@ If episodes are found:
 
 If no episodes found or scores are below threshold: skip silently. Do NOT fabricate episode context.
 
+### Golden principles
+
+Read `~/.claude/golden-principles.md` using the Read tool. Pass the full contents to the Team Leader as a "## Golden Principles" section in the context. Design workers making architecture recommendations MUST check their proposals against these principles.
+
+If the file doesn't exist, skip silently.
+
 ### Passing context to workers
 
 The Team Leader includes team memory and episode context in each worker's spawn prompt, after the project context and before the specialist focus areas. Workers treat these as advisory — they inform analysis but don't constrain it.

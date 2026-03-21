@@ -55,6 +55,7 @@ For each task in plan:
   2. Dispatch implementer via Agent tool — use model tier from the plan
      - Pass: full task text, context, working directory, baseline test state
      - If the task has advisory skills: include the advisory block in the implementer prompt's Advisory Skills section. The implementer applies these rules throughout implementation.
+     - If the task involves Python, TypeScript, Angular, JavaScript, HTML, or SCSS files, read `~/.claude/code-style.md` using the Read tool and include its contents in the implementer prompt's Code Style section.
      - Do NOT make implementer read plan file — provide full text
   3. Handle implementer status (see Implementer Status Protocol below)
 
