@@ -80,3 +80,4 @@ Ship the current branch with full verification. More thorough than the manual Ph
 - NEVER create a PR with failing tests
 - NEVER force-push without explicit user consent
 - ALWAYS include a test plan in the PR body
+- NEVER fix CI failures directly — always delegate via `/coding-team`

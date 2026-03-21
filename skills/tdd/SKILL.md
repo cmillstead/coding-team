@@ -1,6 +1,6 @@
 ---
 name: tdd
-description: "Use when implementing any feature or fix using test-driven development. Red-green-refactor cycle with verification at each step. If code is written before a test, delete it and start over. Use as the default implementation approach for all code tasks."
+description: "Use when implementing any feature or fix using test-driven development. Red-green-refactor cycle with verification at each step. Do NOT use for config-only changes, documentation, CI/CD pipelines, or non-testable code."
 ---
 
 # /tdd — Test-Driven Development

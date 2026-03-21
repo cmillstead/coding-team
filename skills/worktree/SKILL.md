@@ -1,6 +1,6 @@
 ---
 name: worktree
-description: "Use when you need an isolated git worktree for feature work. Handles directory selection, gitignore safety, branch creation, project setup, and baseline verification. Use before starting any non-trivial implementation to avoid polluting the main workspace."
+description: "Use when the user requests an isolated workspace, or when the task modifies 5+ files across 3+ directories. Do NOT suggest for single-file changes, typo fixes, or when the user says to work in-place."
 ---
 
 # /worktree — Isolated Feature Workspace
