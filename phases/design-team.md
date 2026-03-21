@@ -60,6 +60,7 @@ If no skills match a worker's role + the task's categories, omit the block for t
 | Data Engineer | Schema design, migrations, query performance, data modeling, pipelines | No data layer changes |
 | Performance Engineer | Profiling, benchmarks, latency budgets, memory, algorithmic complexity | No performance-sensitive paths touched |
 | Technical Writer | API docs, user guides, changelog, developer experience of documentation | No public-facing or doc surface |
+| Prompt/Skill Specialist | Prompt quality, skill coverage, agent coordination patterns, instruction clarity | No prompt/skill changes in scope |
 
 ## Team Sizing Heuristics
 

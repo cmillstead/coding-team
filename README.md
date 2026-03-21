@@ -4,7 +4,7 @@ Self-contained agent team skill for [Claude Code](https://claude.com/claude-code
 
 ## What it does
 
-Assembles specialist agent teams to collaboratively work through code tasks. The skill routes your request to the right phase, assembles the right team, and manages the full lifecycle:
+Assembles specialist agent teams to collaboratively work through code tasks. The skill routes your request to the right phase, assembles the right team, picks the right coordination mode, and manages the full lifecycle:
 
 1. **Dialogue** — clarify requirements, explore approaches, get alignment
 2. **Design team** — specialist workers analyze the problem from multiple angles
@@ -13,27 +13,78 @@ Assembles specialist agent teams to collaboratively work through code tasks. The
 5. **Execution** — task teams (implementer + audit team) build and verify
 6. **Completion** — full verification, learning loop, then merge / PR / keep / discard
 
-## Architecture: composable phases
+Each phase loads on demand — the main SKILL.md is a ~200 line router. Standalone skills can be invoked independently outside the pipeline.
 
-The main SKILL.md is a slim router (~165 lines) that knows the phase sequence, input/output contracts, and which file to read for details. When Claude enters a phase, it reads only that phase's file. Standalone skills load independently when invoked directly.
+## Architecture
+
+### Composable phases
+
+The main SKILL.md is a router that knows the phase sequence, input/output contracts, and which file to read for details. Phase files load on demand. Standalone skills load independently.
 
 **Context window budget:**
 
 | Invocation | Loaded | Lines |
 |---|---|---|
-| `/coding-team` (router decides) | Main SKILL.md | ~165 |
-| `/coding-team` → Phase 2 (heaviest) | Main + `phases/design-team.md` | ~315 |
-| `/coding-team` → Phase 5 (typical) | Main + `phases/execution.md` | ~280 |
-| `/debug` (standalone) | `skills/debug/SKILL.md` only | ~110 |
-| `/verify` (standalone) | `skills/verify/SKILL.md` only | ~50 |
+| `/coding-team` (router decides) | Main SKILL.md | ~200 |
+| `/coding-team` → Phase 2 (heaviest) | Main + `phases/design-team.md` | ~355 |
+| `/coding-team` → Phase 5 (typical) | Main + `phases/execution.md` | ~350 |
+| `/debug` (standalone) | `skills/debug/SKILL.md` only | ~167 |
+| `/verify` (standalone) | `skills/verify/SKILL.md` only | ~55 |
+| `/tdd` (standalone) | `skills/tdd/SKILL.md` only | ~31 |
 
 Phase files do not reference each other. The main SKILL.md's phase contracts define the input/output handoff between phases.
+
+### Agent teams vs subagents
+
+The skill uses two coordination modes and picks between them at every dispatch point using a three-signal heuristic:
+
+**Agent teams** (native Claude Code agent teams with `Teammate`, `SendMessage`, shared task list) — used when agents need to coordinate in real time. Requires `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`, v2.1.32+, Opus 4.6.
+
+**Subagents** (Task/Agent tool, fire-and-forget) — used when work is pre-decomposed, independent, and agents just need to execute and report back.
+
+The deciding question: **will one agent's work affect another agent's work in real time?** Yes → agent teams. No → subagents.
+
+Three signals evaluated at each dispatch point:
+
+| Signal | Yes → leans agent teams | No → leans subagents |
+|---|---|---|
+| **COORDINATION** — will agents need to talk? | Shared files/state, one agent's findings change another's approach | Provably independent scope, no overlap |
+| **DISCOVERY** — is decomposition known upfront? | Unknown root cause, uncertain task boundaries | Pre-partitioned by user or plan |
+| **COMPLEXITY** — does the work require judgment? | Design decisions, architectural trade-offs, ambiguous requirements | Mechanical changes, pattern-apply, copy-paste from spec |
+
+COORDINATION is the dominant signal. If agents don't need to talk to each other, subagents are almost always right — even for complex tasks.
+
+**Typical routing by phase:**
+
+| Phase | Typical mode | Why |
+|---|---|---|
+| Design team (primary analysis) | Agent teams | Workers analyze unknown codebase from different angles, cross-domain concerns |
+| Design team (cross-review) | Agent teams | Workers challenge each other's findings directly |
+| Execution (implementer per task) | Subagents | Plan pre-decomposes into independent tasks with distinct files |
+| Execution (audit team) | Subagents | Read-only reviewers report independently to lead |
+| Debugging (3+ competing hypotheses) | Agent teams | Investigators disprove each other in real time |
+| Parallel fix (independent domains) | Subagents | Pre-triaged, no coordination needed |
+| Parallel fix (shared infrastructure) | Agent teams | Cross-domain discovery prevents conflicting fixes |
+
+When agent teams aren't available, all patterns fall back to subagents.
+
+### Model routing
+
+Uses the cheapest model that can handle each task:
+
+| Task type | Model | Examples |
+|---|---|---|
+| Mechanical | haiku | Single file edits, formatting, simple rewrites |
+| Implementation | sonnet | Feature implementation, test writing, multi-file refactoring |
+| Architecture/review | opus | Planning, design, spec review, complex debugging |
+
+If a cheaper model fails or returns low-quality results, the task is re-dispatched with the next tier up.
 
 ## How it works
 
 ### Session routing
 
-When invoked, the skill first checks whether you're continuing prior work. If you mention a phase, task number, feature name, or "continue" — it finds the **main repo root** (not a worktree), lists `docs/plans/*.md` there to discover existing plans (never guesses filenames), reads headers to match your request, checks git log for progress, and resumes at the next incomplete task.
+When invoked, the skill detects available coordination tools (agent teams vs subagents only), then checks whether you're continuing prior work. If you mention a phase, task number, feature name, or "continue" — it finds the **main repo root** (not a worktree), lists `docs/plans/*.md` to discover existing plans (never guesses filenames), reads headers to match your request, checks git log for progress, and resumes at the next incomplete task.
 
 For fresh tasks (no prior plans), it routes based on what you bring:
 
@@ -51,23 +102,18 @@ The skill matches process weight to task weight. A typo fix doesn't need 5 speci
 
 ### Phase 1: Dialogue
 
-The skill reads project context (files, docs, recent commits, CLAUDE.md), then asks clarifying questions one at a time — multiple choice preferred, open-ended when needed. For UI-related work, a visual companion is offered before continuing.
+Reads project context, then asks clarifying questions one at a time — multiple choice preferred, open-ended when needed. For UI-related work, a visual companion is offered.
 
-Once requirements are clear, 2-3 approaches are proposed with trade-offs:
-- At least one **minimal viable** approach (smallest diff)
-- At least one **ideal architecture** approach (best long-term trajectory)
-- For complex features, a **dream state** sketch: current state -> this plan -> 12-month ideal
-
-No work begins until you approve an approach.
+Proposes 2-3 approaches with trade-offs: at least one minimal viable approach (smallest diff), at least one ideal architecture approach (best long-term trajectory), and for complex features a dream state sketch (current → this plan → 12-month ideal). No work begins until you approve.
 
 ### Phase 2: Design team
 
-A Team Leader spawns specialist workers to analyze the problem from different angles. Workers run in parallel and are composed dynamically based on what the task needs.
+A Team Leader spawns specialist workers to analyze the problem. Workers run in parallel and are composed dynamically based on what the task needs.
 
 **Specialist roles:**
 
 | Role | Focus | Skip when |
-|------|-------|-----------|
+|---|---|---|
 | Architect | System design, composability, data flow | Trivial bug fixes |
 | Senior Coder | Implementation approach, patterns, idiomatic code | Never |
 | UX/UI Designer | First-run UX, error messages, discoverability | Pure backend / no user-facing surface |
@@ -77,6 +123,7 @@ A Team Leader spawns specialist workers to analyze the problem from different an
 | Data Engineer | Schema design, migrations, query performance | No data layer changes |
 | Performance Engineer | Profiling, benchmarks, latency budgets | No performance-sensitive paths |
 | Technical Writer | API docs, user guides, changelog | No public-facing or doc surface |
+| Prompt/Skill Specialist | Prompt quality, skill coverage, instruction clarity | No prompt/skill changes in scope |
 
 **Team sizing:**
 
@@ -87,122 +134,87 @@ A Team Leader spawns specialist workers to analyze the problem from different an
 | Complex (10-30 files) | 4-6 | Cross-cutting concerns, large features |
 | Very complex (30+ files) | 6-9 | Full-stack features, systemic changes |
 
-Workers produce findings, concerns, and recommendations from their specialist lens. A cross-review pass lets workers read sibling outputs and flag cross-domain issues. The Team Leader synthesizes everything into a design doc, resolving conflicts and flagging unresolved trade-offs for your decision.
+Workers produce findings from their specialist lens, then a cross-review pass lets workers flag cross-domain issues (via direct messaging with agent teams, or leader-mediated with subagents). The Team Leader synthesizes everything into a design doc.
 
-**Quality check:** If a worker's output is thin, off-scope, or low quality, the Team Leader respawns it with a tighter prompt rather than patching around bad output.
+If a worker's output is thin, off-scope, or low quality, the Team Leader respawns it with a tighter prompt rather than patching around bad output.
 
 ### Phase 3: Spec review
 
-After you approve the design, it's written to `docs/plans/YYYY-MM-DD-<feature>-design.md` and passed through an automated spec document reviewer that checks for completeness, consistency, clarity, scope, and YAGNI violations. Up to 3 review iterations before surfacing issues to you. You get a final review before proceeding.
+The design doc is written to `docs/plans/YYYY-MM-DD-<feature>-design.md` and passed through an automated spec reviewer that checks for completeness, consistency, clarity, scope, and YAGNI violations. Up to 3 review iterations before surfacing issues to you. You get a final review before proceeding.
 
 ### Phase 4: Planning
 
-A Planning Worker (Architect + Senior Coder) produces a detailed implementation plan. Before writing tasks, it challenges scope:
-- What existing code already solves sub-problems?
-- What is the minimum set of changes?
-- If 8+ files or 2+ new classes — can it be simpler?
+A Planning Worker (Architect + Senior Coder) produces a detailed implementation plan. Before writing tasks, it challenges scope: what existing code already solves sub-problems, what is the minimum set of changes, and if 8+ files or 2+ new classes are needed, can it be simpler?
 
-**Plan structure:**
-- Header with goal, architecture, tech stack
-- File structure mapping (which files created/modified and why)
-- Tasks with exact file paths, line ranges, complete code, exact commands with expected output
-- Each step is one action (2-5 minutes) — no ambiguity
-- Failure modes table identifying untested/unhandled error paths
-- NOT in scope section preventing scope creep
-- What already exists section for reuse
-- Traceability table (for scan/review-sourced work) mapping every input finding to a disposition: fix, defer with rationale, or false positive — nothing silently dropped
+**Plan structure:** header with goal/architecture/tech stack, file structure mapping, tasks with exact file paths, line ranges, complete code, exact commands with expected output. Each step is one action (2-5 minutes) with no ambiguity. Includes a failure modes table, NOT in scope section, what already exists section, and a traceability table when sourced from scan findings or review feedback — every input item mapped to fix, defer, or false positive. Nothing silently dropped.
 
-**Model assignment per task:**
-- **haiku** — 1-2 files with complete spec, mechanical changes
-- **sonnet** — multiple files, needs judgment, integration work
-- **opus** — design decisions, broad codebase understanding
-
-The plan goes through an automated plan document reviewer (up to 3 iterations) before being saved to `docs/plans/YYYY-MM-DD-<feature>.md`.
+The plan goes through an automated plan reviewer (up to 3 iterations) before being saved to `docs/plans/YYYY-MM-DD-<feature>.md`.
 
 ### Phase 5: Execution
 
-The main agent is the **orchestrator** during this phase — it dispatches agents, reads their results, and decides what to do next. It never writes code, edits files, or runs tests directly. Execution uses **subagents** (Agent tool) because the plan pre-decomposes work into independent tasks (COORDINATION=no). Agent teams are only used during execution if debugging escalates to 3+ competing hypotheses with cross-cutting evidence.
+The main agent is the **orchestrator** — it dispatches agents, reads results, and decides what to do next. It never writes code, edits files, or runs tests directly during this phase.
 
-Before the first task, the full test suite runs to establish a **baseline**. If any tests are already failing, the first implementer fixes them before starting task work — no pre-existing failure is dismissed as "not our problem."
+Before the first task, the full test suite runs to establish a **baseline**. Pre-existing failures are fixed before new work begins.
 
-Each task gets its own **task team**:
+Each task gets a **task team**: an implementer (using TDD) plus an audit team of three read-only reviewers dispatched in parallel after the implementer reports done.
 
-**Implementer** builds using TDD (red-green-refactor), then reports one of four statuses:
-- **DONE** — proceed to audit
-- **DONE_WITH_CONCERNS** — concerns assessed before audit
-- **NEEDS_CONTEXT** — missing info provided, re-dispatched
-- **BLOCKED** — assessed and escalated (more context, stronger model, smaller tasks, or user escalation)
+**Implementer** reports one of: DONE, DONE_WITH_CONCERNS, NEEDS_CONTEXT, or BLOCKED. Blocked tasks are assessed and escalated — never ignored or retried without changes.
 
-**Audit team** (all read-only, dispatched in parallel after implementer reports DONE):
-- **Spec reviewer** — does the code match the spec? Was TDD actually followed? Independently verifies by reading code, not trusting the implementer's report.
-- **Simplify auditor** — dead code, naming, over-abstraction, control flow. Only flags things that are "clearly wrong, not just imperfect."
-- **Harden auditor** — input validation, injection vectors, auth, race conditions, secrets, resource exhaustion. Focuses on exploitable issues, not theoretical risks.
+**Audit team** (read-only, fresh agents each round):
+- **Spec reviewer** — does the code match the spec? Was TDD followed?
+- **Simplify auditor** — dead code, naming, over-abstraction. Only flags things "clearly wrong, not just imperfect."
+- **Harden auditor** — input validation, injection vectors, auth, race conditions. Exploitable issues, not theoretical risks.
 
-Audit agents are read-only (Explore mode) — they flag issues, they don't fix them. Fresh agents each round to avoid context bias.
+**Audit triage** applies a refactor gate ("would a senior engineer say this is clearly wrong?"), routes by severity, checks budget (30%+ diff growth → tighten scope), and checks for drift against the original task. The loop exits on clean audit, low-only findings, or 3-round cap.
 
-**Audit triage:**
-- **Refactor gate** — "Would a senior engineer say this is clearly wrong, not just imperfect?" Rejects style preferences and marginal improvements.
-- **Severity routing** — critical/high fixed immediately, medium in next round, low/cosmetic fixed inline if trivial or noted and skipped.
-- **Budget check** — if fix rounds add 30%+ to the original diff, tighten scope.
-- **Drift check** — re-read original task description between rounds to prevent scope creep.
-
-The audit loop exits on: clean audit, low-only findings, or 3-round cap.
-
-**Completeness checks** prevent agents from silently dropping work:
-- **Per-task:** after each implementer reports done, every step in the task is checked. Skipped steps trigger re-dispatch.
-- **End-of-execution:** before moving to Phase 6, every plan task must have a corresponding commit. Silently dropped tasks get executed, not ignored.
+**Completeness checks** run at two levels: per-task (every step accounted for before audit) and end-of-execution (every plan task has a commit before Phase 6).
 
 ### Phase 6: Completion
 
-After all tasks pass verification (fresh test output required), four options are presented:
-
-1. **Merge locally** — checkout base, pull, merge, verify tests on merged result, delete feature branch, cleanup worktree
-2. **Push and create PR** — push, create PR with summary and test plan
-3. **Keep as-is** — report branch name and worktree path
-4. **Discard** — requires typing "discard" to confirm
-
-A **learning loop summary** captures recurring audit patterns across all rounds, unresolved low-severity findings, and out-of-scope observations.
+Full test suite + linter verification, then four options: merge locally, push and create PR, keep branch as-is, or discard (requires typing "discard" to confirm). A learning loop summary captures recurring audit patterns, unresolved low-severity findings, and out-of-scope observations.
 
 ## Standalone skills
 
-Protocols are extracted as standalone skills that can be invoked independently or from the pipeline. Each loads only when needed, keeping the main skill's context footprint small.
+These can be invoked independently with their own slash commands, or used automatically by the pipeline:
 
-| Skill | Purpose |
-|-------|---------|
-| `/debug` | Four-phase root cause investigation with parallel hypothesis teams |
-| `/verify` | Evidence-before-claims gates for every completion claim |
-| `/review-feedback` | Technical evaluation of code review feedback |
-| `/worktree` | Git worktree setup, safety checks, and cleanup |
-| `/parallel-fix` | Parallel agent dispatch for independent failures |
-| `/tdd` | Test-driven development cycle (red-green-refactor) |
-| `/prompt-craft` | Skill & prompt engineering — create, diagnose, audit, taxonomy |
+| Skill | Command | Purpose | Lines |
+|---|---|---|---|
+| Debug | `/debug` | Four-phase root cause investigation. Parallel hypothesis teams for complex bugs. | ~167 |
+| Verify | `/verify` | Evidence-before-claims gate. Run the command, read the output, then claim the result. | ~55 |
+| TDD | `/tdd` | Red-green-refactor cycle with verification at each step. | ~31 |
+| Review Feedback | `/review-feedback` | Technical evaluation of code review feedback. Push back when wrong. | ~91 |
+| Worktree | `/worktree` | Isolated git worktree for feature work. | ~88 |
+| Parallel Fix | `/parallel-fix` | Parallel agent dispatch for independent failures. | ~137 |
+| Prompt Craft | `/prompt-craft` | Write, evaluate, and refine skills and agent prompts. Diagnose behavioral issues. | ~175 |
 
-### Agent teams vs subagents
+## Internalized protocols
 
-At every multi-agent dispatch point, the skill evaluates three signals: **COORDINATION** (will agents need to talk to each other?), **DISCOVERY** (is decomposition known?), and **COMPLEXITY** (judgment vs execution?). COORDINATION is the dominant signal.
+### TDD
 
-| Dispatch site | Route | Why |
-|---|---|---|
-| Design team (Phase 2) | **Agent teams** | Specialists' findings affect each other |
-| Execution — implementer | **Subagents** | One agent per task, distinct files, pre-decomposed |
-| Execution — audit | **Subagents** | Read-only, report independently |
-| Debugging 3+ hypotheses | **Agent teams** | Evidence can refute peers |
-| Parallel fix, shared infra | **Agent teams** | Cross-domain discovery |
-| Single-agent (spec review, planning) | **Subagents** | No multi-agent coordination |
+All implementation follows test-driven development: RED (write failing test) → verify RED → GREEN (minimal code to pass) → verify GREEN → REFACTOR → repeat. If code is written before a test, delete it and start over.
 
-Agent teams require `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`, Claude Code v2.1.32+, Opus 4.6. When unavailable, everything falls back to subagents. Detection happens automatically at session start.
+### Verification
 
-### Model routing
+Evidence-before-claims at every phase transition: identify the command, run it fresh, read full output, verify it confirms the claim, only then make the claim. No "should pass." No trusting agent reports without independent verification.
 
-Uses the cheapest model that can handle each task:
+### Debugging
 
-| Task type | Model | Examples |
-|-----------|-------|---------|
-| Mechanical | haiku | Single file edits, formatting, simple rewrites |
-| Implementation | sonnet | Feature implementation, test writing, multi-file refactoring |
-| Architecture/review | opus | Planning, design, spec review, complex debugging |
+Four-phase root cause investigation: investigate (read errors, reproduce, trace data flow), analyze (match against known patterns), hypothesize (single theory for simple bugs, parallel teams for complex), implement (failing test, single fix, verify). No fixes without root cause investigation. 3-strike escalation to user.
 
-If a cheaper model fails or returns low-quality results, the task is re-dispatched with the next tier up.
+### Review reception
+
+Technical evaluation, not performative agreement. Read, understand, verify against codebase, evaluate technically, then respond or push back with reasoning. No "Great point!" — just fix it or discuss technically.
+
+## Guiding principles
+
+- **Scrap, don't fix** — if a worker's output is thin or off-scope, respawn it rather than patching around it
+- **Never mock what you can use for real** — only mock external systems genuinely unavailable in the test environment
+- **Quality gates before handoff** — no agent passes work until tests pass and linting is clean
+- **Focused agents produce correct agents** — one worker, one lens, one scope
+- **No ambiguity in specs** — exact file paths, exact line ranges, complete code, exact commands
+- **Evidence before claims** — no completion claims without fresh verification output
+- **Right-size the model** — use the cheapest model that can handle the task
+- **Right-size the coordination** — agent teams when agents need to talk, subagents when they don't
 
 ## Installation
 
@@ -216,9 +228,9 @@ git clone git@github.com:cmillstead/coding-team.git ~/.claude/skills/coding-team
 
 If you only want the `/coding-team` orchestrated pipeline, you're done.
 
-### Standalone skills (optional)
+### Standalone skills (recommended)
 
-To also expose individual protocols as standalone slash commands:
+Expose individual protocols as standalone slash commands:
 
 ```bash
 # All standalone skills
@@ -275,45 +287,38 @@ Or let the session-start hook suggest it automatically.
 
 For simple tasks (typo, rename, single-file fix), skip the skill and just do it directly.
 
-## Guiding principles
-
-- **Scrap, don't fix** — if a worker's output is thin or off-scope, respawn it rather than patching around it
-- **Never mock what you can use for real** — only mock external systems genuinely unavailable in the test environment
-- **Quality gates before handoff** — no agent passes work until tests pass and linting is clean
-- **Focused agents produce correct agents** — one worker, one lens, one scope
-- **No ambiguity in specs** — exact file paths, exact line ranges, complete code, exact commands
-- **Evidence before claims** — no completion claims without fresh verification output
-- **Right-size the model** — use the cheapest model that can handle the task
-
 ## File structure
 
 ```
-SKILL.md                          # router + phase contracts (~165 lines)
-README.md                         # this file (user guide)
+SKILL.md                          # router + phase contracts (~200 lines)
+README.md                         # this file
 coding-team-router.py             # session-start hook
+memory/                           # behavioral feedback (persists across sessions)
+  MEMORY.md                       #   index of feedback files
+  feedback-*.md                   #   individual feedback entries
 phases/                           # pipeline phase details (loaded on demand)
-  dialogue.md                     # Phase 1 — clarify, propose, approve
-  design-team.md                  # Phase 2 — specialist workers + synthesis
-  spec-review.md                  # Phase 3 — write and validate design spec
-  planning.md                     # Phase 4 — detailed TDD implementation plan
-  execution.md                    # Phase 5 — task teams + audit loops
-  completion.md                   # Phase 6 — verify, merge/PR, learning loop
+  dialogue.md                     #   Phase 1 — clarify, propose, approve
+  design-team.md                  #   Phase 2 — specialist workers + synthesis
+  spec-review.md                  #   Phase 3 — write and validate design spec
+  planning.md                     #   Phase 4 — detailed TDD implementation plan
+  execution.md                    #   Phase 5 — task teams + audit loops
+  completion.md                   #   Phase 6 — verify, merge/PR, learning loop
 skills/                           # standalone skills (can be invoked independently)
-  debug/SKILL.md                  # /debug — root cause investigation
-  verify/SKILL.md                 # /verify — evidence-before-claims gates
-  review-feedback/SKILL.md        # /review-feedback — handling review feedback
-  worktree/SKILL.md               # /worktree — git worktree setup/cleanup
-  parallel-fix/SKILL.md           # /parallel-fix — parallel agent dispatch
-  tdd/SKILL.md                    # /tdd — test-driven development cycle
-  prompt-craft/SKILL.md           # /prompt-craft — skill & prompt engineering
+  debug/SKILL.md                  #   /debug — root cause investigation
+  verify/SKILL.md                 #   /verify — evidence-before-claims gates
+  review-feedback/SKILL.md        #   /review-feedback — handling review feedback
+  worktree/SKILL.md               #   /worktree — git worktree setup/cleanup
+  parallel-fix/SKILL.md           #   /parallel-fix — parallel agent dispatch
+  tdd/SKILL.md                    #   /tdd — test-driven development cycle
+  prompt-craft/SKILL.md           #   /prompt-craft — skill & prompt engineering
 prompts/                          # agent prompt templates (used by execution loop)
-  implementer.md                  # implementer agent template
-  spec-reviewer.md                # spec compliance + TDD verification (read-only)
-  simplify-auditor.md             # simplify auditor — clarity/complexity (read-only)
-  harden-auditor.md               # harden auditor — security/resilience (read-only)
-  quality-reviewer.md             # legacy combined reviewer (use simplify + harden)
-  spec-doc-reviewer.md            # design doc reviewer
-  plan-doc-reviewer.md            # plan doc reviewer
+  implementer.md                  #   implementer agent template
+  spec-reviewer.md                #   spec compliance + TDD verification (read-only)
+  simplify-auditor.md             #   simplify auditor — clarity/complexity (read-only)
+  harden-auditor.md               #   harden auditor — security/resilience (read-only)
+  quality-reviewer.md             #   legacy combined reviewer (use simplify + harden)
+  spec-doc-reviewer.md            #   design doc reviewer
+  plan-doc-reviewer.md            #   plan doc reviewer
 ```
 
 ## Output files
