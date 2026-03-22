@@ -137,6 +137,7 @@ Agent tool:
        - Write failing test first
        - Use the Bash tool with `python3` to generate complex test fixtures, compute expected values, or validate algorithms. Example: `python3 -c "import json; print(json.dumps([{'id': i, 'name': f'user_{i}'} for i in range(100)]))"` for test data generation.
        - Run it, confirm it fails for the right reason
+       - Tests MUST verify runtime behavior, not source code structure. Do NOT use fs.readFileSync to read source files in tests. Do NOT assert that imports exist or function names appear in source text. Export the function and test it directly with real inputs and assertions on outputs.
        - Write minimal code to pass
        - Run it, confirm it passes
        - Refactor if needed, keep tests green
