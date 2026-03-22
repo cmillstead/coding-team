@@ -1,5 +1,26 @@
 **Step 1: Check if this is a continuation.** If the user mentions a phase number, task number, feature name, "continue", "pick up where I left off", or any reference to prior work — this is a **resumed session**. Go to Step 2 before routing.
 
+**Step 1.5: Check for orphan PRs.**
+
+Before plan discovery, check for open PRs with failing CI from this repo:
+
+```bash
+gh pr list --state open --author @me --json number,title,statusCheckRollup 2>/dev/null | jq -r '.[] | select(.statusCheckRollup != null) | select([.statusCheckRollup[].conclusion // empty] | any(. == "FAILURE")) | "#\(.number): \(.title)"'
+```
+
+If any found, print:
+
+> **Open PRs with failing CI:**
+> - [list each]
+>
+> Clean up? **close** (close PR + delete branch) / **fix** (investigate and fix) / **ignore** (proceed, you handle it)
+
+- close: run `gh pr close N --delete-branch` for each
+- fix: route to `/coding-team` to investigate CI failures before resuming the original task
+- ignore: proceed with the user's original request
+
+If none found or `gh` is not available, proceed silently.
+
 **Step 2: Discover existing plans and detect progress.** You have NO memory of prior conversations. Do NOT guess filenames.
 
 Plans live in the **main repo**, not in worktrees. Find the repo root first:
