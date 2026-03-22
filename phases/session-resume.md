@@ -88,3 +88,5 @@ When resuming a session (detected in Step 1), check what changed since the last 
       If new decisions found, read them and include in the context refresh report.
 
 3. If `HOURS_SINCE` is 24 or less, skip this step — proceed directly to Step 3.
+
+After completing these steps, return to SKILL.md and proceed to **Step 3: Route.**

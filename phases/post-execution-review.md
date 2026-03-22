@@ -1,5 +1,7 @@
 # Post-Execution Review
 
+> Loaded by the orchestrator from `phases/execution.md` after all Phase 5 tasks are complete. After following these instructions, proceed to Phase 6 (read `phases/completion.md`).
+
 After all tasks are executed and verified:
 
 1. Evaluate risk signals against the completed diff. Run these commands:
