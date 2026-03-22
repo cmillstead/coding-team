@@ -81,6 +81,11 @@ Agent tool:
 
     **Ask them now.** Raise any concerns before starting work.
 
+    **Branch check (MANDATORY before any changes):** Run `git branch --show-current`.
+    If you are on `main` or `master`, STOP — do NOT make any changes. Report as
+    BLOCKED: "Currently on main branch. The orchestrator must create a feature branch
+    before dispatching implementers." If you are on a feature branch, proceed.
+
     **Understand what you're changing:**
     - For each file you're about to modify, run `git log --oneline -5 -- <file>` to see recent changes.
     - For specific sections being modified, run `git blame -L <start>,<end> <file>` to understand why the code is the way it is.
