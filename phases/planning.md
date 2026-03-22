@@ -42,6 +42,8 @@ Use codesight-mcp tools to understand the codebase structure before decomposing 
 - Use `mcp__codesight-mcp__get_repo_outline` to see key symbols across the codebase — understand the architecture before planning changes.
 - Use `mcp__codesight-mcp__analyze_complexity` on files the plan will modify — high-complexity files (cyclomatic complexity above 15) may need to be split or refactored as part of the task.
 - Use `mcp__codesight-mcp__search_symbols` to find existing utilities that sub-tasks could reuse instead of rebuilding.
+- Use `mcp__codesight-mcp__get_dependencies` to check for circular dependency risks in files the plan will modify — circular imports block clean task decomposition.
+- Use `mcp__codesight-mcp__get_type_hierarchy` when the plan involves class hierarchies or inheritance — understand the full tree before planning changes to base classes.
 
 If codesight-mcp tools are not available (MCP server not running), fall back to Glob and Grep tools. Do NOT skip codebase analysis — use whichever tools are available.
 

@@ -55,6 +55,8 @@ Also check:
 
 ## Phase 3: Hypothesis and Testing
 
+**Frontend/UI bugs:** When investigating bugs that affect the user interface (HTML, JSX, TSX, CSS, SCSS, templates, React components), use the Browse tool to screenshot the current state of the affected page BEFORE making changes. Include screenshots as evidence in your hypothesis. After applying a fix, screenshot again to show the before/after difference.
+
 **Simple bugs (single plausible cause):** Sequential approach.
 1. **Form single hypothesis** — "I think X is the root cause because Y." Be specific.
 2. **Test minimally** — smallest possible change, one variable at a time.

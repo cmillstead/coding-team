@@ -42,6 +42,9 @@ Agent tool:
     - Use `mcp__codesight-mcp__search_symbols` to check if newly created utilities duplicate existing ones elsewhere in the codebase.
     - Use `mcp__codesight-mcp__analyze_complexity` on each modified file to quantify complexity — flag functions with cyclomatic complexity above 10.
     - Use the LSP tool with `find-references` to verify that renamed or moved symbols are updated at all call sites.
+    - Use `mcp__codesight-mcp__get_changes` with `include_impact: true` to get a symbol-level view of what changed and its downstream dependents.
+    - Use `mcp__codesight-mcp__get_imports` on modified files to flag unnecessary or circular import chains.
+    - Use `mcp__codesight-mcp__get_type_hierarchy` on classes in the diff to check inheritance depth — flag trees deeper than 4 levels as over-abstraction.
 
     If codesight-mcp tools are not available, fall back to Grep for symbol searches. Do NOT skip duplicate detection.
 

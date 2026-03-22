@@ -67,8 +67,9 @@ For each task in plan:
      Do NOT proceed to audit with incomplete work.
 
   AUDIT TEAM (only if completeness check passes and implementer reports DONE or DONE_WITH_CONCERNS)
-  5. Record HEAD_SHA, collect modified files list (git diff --name-only BASE..HEAD)
-  6. Dispatch audit agents IN PARALLEL via Agent tool (all read-only Explore):
+  5. Record HEAD_SHA, collect modified files list (git diff --name-only BASE..HEAD).
+     Also run `mcp__codesight-mcp__get_changes` with `repo_path` set to the working directory, `git_ref: "BASE..HEAD"`, and `include_impact: true` to get a symbol-level diff with downstream impact analysis. Pass BOTH the file list AND the symbol-level changes to each auditor.
+  6. Dispatch audit agents IN PARALLEL via Agent tool (spec reviewer and simplify auditor as read-only Explore; harden auditor as general-purpose to allow Bash tool access for dependency vulnerability checks):
      a. Spec reviewer (see prompts/spec-reviewer.md) — "does it match the spec? was TDD followed?"
      b. Simplify auditor (see prompts/simplify-auditor.md) — "is there a simpler way?"
      c. Harden auditor (see prompts/harden-auditor.md) — "what would an attacker try?"
@@ -79,6 +80,16 @@ For each task in plan:
   7. Triage findings (see Audit Triage below)
   8. If findings to fix → dispatch new implementer to fix → re-audit (max 3 rounds)
      Fresh audit agents each round — don't reuse.
+
+  SECURITY ESCALATION (after audit loop, before gate)
+  8.5. Check if the task touches security-sensitive files:
+       ```bash
+       git diff --name-only BASE..HEAD | grep -iE "auth|payment|encrypt|session|token|cors|csp|secret|credential|permission"
+       ```
+       - If 1-2 matches: note in completion summary for user awareness.
+       - If 3+ matches OR any harden auditor finding is CRITICAL: dispatch `/scan-security` (`skills/scan-security`) as an additional review gate via Agent tool (model: sonnet). Pass the full diff and harden auditor findings.
+       - If 5+ matches OR 2+ CRITICAL harden findings: recommend `/scan-adversarial` to the user before proceeding.
+       - If zero matches: skip silently.
 
   GATE
   9. VERIFY: The implementer ran the test suite as their final step. Read the

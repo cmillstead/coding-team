@@ -55,8 +55,26 @@ Agent tool:
     - Use `mcp__codesight-mcp__get_impact` on modified symbols to assess blast radius — what other code is affected by these changes?
     - Use `mcp__codesight-mcp__get_callers` on security-sensitive functions (auth checks, permission gates, input validators) to verify ALL call sites pass through the security boundary.
     - Use the LSP tool to check for type-safety violations in modified files — type confusion can be a security vector.
+    - Use `mcp__codesight-mcp__get_changes` with `include_impact: true` to get a symbol-level view of what changed and its downstream dependents — assess full blast radius.
 
     If codesight-mcp tools are not available, fall back to Grep for call-site analysis. Do NOT skip data flow tracing on security-sensitive code.
+
+    ## Dependency Vulnerability Check
+
+    When the diff adds or updates dependencies (check `git diff` on lock files), run the appropriate audit command via the Bash tool:
+
+    | Lock file | Audit command |
+    |-----------|---------------|
+    | package-lock.json, yarn.lock, pnpm-lock.yaml | `npm audit --json 2>/dev/null \| head -100` |
+    | Cargo.lock | `cargo audit 2>/dev/null \| head -50` |
+    | poetry.lock, requirements.txt | `pip audit 2>/dev/null \| head -50` |
+    | Gemfile.lock | `bundle audit check 2>/dev/null \| head -50` |
+    | go.sum | `govulncheck ./... 2>/dev/null \| head -50` |
+
+    Report any HIGH or CRITICAL vulnerabilities as findings with category `patch` and severity `high` or `critical`.
+
+    If no lock files changed in the diff, skip this check.
+    If the audit command is not installed, note "dependency audit skipped — <tool> not available" and continue.
 
     ## Calibration
 
