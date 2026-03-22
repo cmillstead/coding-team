@@ -161,6 +161,25 @@ Related:         [prior bugs in same area, architectural notes]
 Status:          DONE | DONE_WITH_CONCERNS | BLOCKED
 ```
 
+**Save debug report to disk:**
+- Determine `$REPO_ROOT` via `git rev-parse --show-toplevel`.
+- Create directory `$REPO_ROOT/docs/debug/` if it does not exist using Bash tool: `mkdir -p "$REPO_ROOT/docs/debug/"`.
+- Write the debug report to `$REPO_ROOT/docs/debug/YYYY-MM-DD-<symptom-slug>.md` using the Write tool. Use today's date and a kebab-case slug derived from the symptom (e.g., `2026-03-22-null-ref-in-auth-handler.md`).
+- **Architectural note trigger:** If the fix touches more than 5 files (blast radius > 5) OR the "Related" field mentions prior bugs in the same area, append an `## Architectural Note` section to the saved report. The note must describe the structural pattern that makes this area bug-prone and what architectural change would prevent recurrence.
+- **Eval feed-forward:** If the architectural note identifies a check that auditors should verify in future sessions, append it to `$REPO_ROOT/docs/project-evals.md` as a checklist item.
+  - If `$REPO_ROOT/docs/project-evals.md` does not exist, create it using the Write tool with this exact template:
+
+    ```markdown
+    # Project-Specific Eval Criteria
+
+    > Accumulated from retrospectives and debug sessions. The planning worker loads these as seed criteria for auditors.
+    > Each item is a check that agents missed in a prior session.
+
+    - [ ] [criterion]
+    ```
+
+  - Before appending, read the existing file and check for duplicates. Do NOT add a criterion that is already present.
+
 ## After 3+ Failed Fixes: Question Architecture
 
 Pattern indicating an architectural problem:
