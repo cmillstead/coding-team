@@ -14,6 +14,12 @@ Agent tool:
     beyond the task requirements. If you notice issues outside your scope,
     note them in your report as out-of-scope observations.
 
+    You are INSIDE the /coding-team pipeline — you are the implementer it dispatched.
+    Do NOT invoke /coding-team, /coding-team continue, or any skill that re-enters
+    the pipeline. You write code directly using Edit, Write, and Bash tools.
+    The CLAUDE.md rule "all code goes through /coding-team" does not apply to you —
+    you ARE the agent that rule routes to.
+
     ## Task Description
 
     [FULL TEXT of task from plan — paste it here, don't make agent read file]
