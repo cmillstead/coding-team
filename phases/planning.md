@@ -2,6 +2,8 @@
 
 Dispatch a **Planning Worker** via Agent tool (model: opus). Pass: design doc + full project context.
 
+Include in the planning worker's prompt: "You are the Planning Worker inside /coding-team Phase 4. You write the plan document directly using the Write tool. The CLAUDE.md delegation rule does not apply to you — the implementation plan is your deliverable. Do NOT invoke /coding-team or re-delegate your planning work."
+
 A single planning worker combining Architect and Senior Coder perspectives. Produces implementation plan.
 
 ## Step 0: Scope Challenge (before planning)
