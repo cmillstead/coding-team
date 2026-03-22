@@ -59,8 +59,13 @@ Ship the current branch with full verification. More thorough than the manual Ph
      gh pr checks "$PR_NUM"
      gh run view --log-failed
      ```
-     Diagnose the failure. Fix it via `/coding-team` (delegate — do NOT fix directly). After fix is pushed, re-run step 7.
-     Do NOT leave a PR with failing CI. The release is not done until CI is green.
+     Diagnose the failure. Dispatch an implementer via Agent tool to fix it — do NOT invoke `/coding-team` (you are already inside the pipeline). After fix is pushed, re-run step 7.
+     **Max 3 CI fix attempts.** If CI still fails after 3 attempts, present the user with:
+     > CI still failing after 3 attempts. Options:
+     > 1. Close PR and delete branch (`gh pr close --delete-branch`)
+     > 2. Keep PR open (you handle it manually)
+     > 3. Let me try a different approach
+     Do NOT leave a failing-CI PR open without user choice. An orphan PR generates email noise indefinitely.
 
 ## When to Use
 
@@ -80,4 +85,5 @@ Ship the current branch with full verification. More thorough than the manual Ph
 - NEVER create a PR with failing tests
 - NEVER force-push without explicit user consent
 - ALWAYS include a test plan in the PR body
-- NEVER fix CI failures directly — always delegate via `/coding-team`
+- NEVER fix CI failures directly in the orchestrator — dispatch an implementer via Agent tool. Do NOT invoke `/coding-team` from within `/release` (recursive invocation).
+- NEVER leave a PR with failing CI without explicit user choice — close it after 3 failed fix attempts

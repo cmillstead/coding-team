@@ -24,7 +24,12 @@ Which option?
 
 5. **Execute choice:**
    - **Merge locally:** checkout base -> pull -> merge -> verify tests on merged result -> delete feature branch -> cleanup worktree if applicable
-   - **Push and create PR:** push -> create PR with summary and test plan -> wait for CI (`gh pr checks --watch --fail-fast`) -> if CI fails, read logs (`gh run view --log-failed`), fix via `/coding-team`, re-push, re-check. Do NOT leave a PR with failing CI.
+   - **Push and create PR:** push -> create PR with summary and test plan -> wait for CI (`gh pr checks --watch --fail-fast`) -> if CI fails, read logs (`gh run view --log-failed`), diagnose the failure, dispatch an implementer via Agent tool to fix, re-push, re-check. **Max 3 CI fix attempts.** If CI still fails after 3 attempts, present the user with:
+     > CI still failing after 3 fix attempts. Options:
+     > 1. Close PR and delete branch (`gh pr close --delete-branch`)
+     > 2. Keep PR open (you handle it manually)
+     > 3. Let me try a different approach
+     Do NOT leave a failing-CI PR open without explicit user choice. If the user does not respond (session ending, context above 80%), close the PR and delete the branch: `gh pr close --delete-branch`. An orphan PR with failing CI generates email noise indefinitely.
    - **Keep as-is:** report branch name and worktree path, done
    - **Discard:** require user to type "discard" to confirm -> delete branch -> cleanup worktree
 
@@ -131,7 +136,7 @@ Do NOT delete rotated entries. Archived facts may become relevant again.
 
 Review the completion summary's "Recurring patterns" section. If any pattern is general enough to apply across projects (not specific to this codebase), add it to coding-team's own memory.
 
-Check if `/Users/cevin/.agents/skills/coding-team/memory/patterns.md` exists using the Read tool:
+Check if `/Users/cevin/.claude/skills/coding-team/memory/patterns.md` exists using the Read tool:
 - **If it exists:** Read it. Only add patterns not already captured.
 - **If it doesn't exist:** Create it using the Write tool with frontmatter:
 

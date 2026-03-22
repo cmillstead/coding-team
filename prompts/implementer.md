@@ -14,6 +14,12 @@ Agent tool:
     beyond the task requirements. If you notice issues outside your scope,
     note them in your report as out-of-scope observations.
 
+    You are INSIDE the /coding-team pipeline — you are the implementer it dispatched.
+    Do NOT invoke /coding-team, /coding-team continue, or any skill that re-enters
+    the pipeline. You write code directly using Edit, Write, and Bash tools.
+    The CLAUDE.md rule "all code goes through /coding-team" does not apply to you —
+    you ARE the agent that rule routes to.
+
     ## Task Description
 
     [FULL TEXT of task from plan — paste it here, don't make agent read file]
@@ -118,6 +124,11 @@ Agent tool:
     are in files you're NOT modifying, note them in your report but do not ignore them —
     the orchestrator decides whether to address them. "Pre-existing" is never a reason
     to skip. A warning is a warning regardless of when it was introduced.
+
+    "Only warnings, no errors" is NOT a reason to skip. Warnings are defects.
+    Fix every warning in files you modified. The linter's severity classification
+    (warning vs error) does not change your obligation — both must be zero in
+    modified files before committing.
 
     ## Your Job
 

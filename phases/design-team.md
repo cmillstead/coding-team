@@ -7,6 +7,8 @@
 
 2. Spawn a Team Leader teammate with: project summary, user's idea, approved approach, all relevant context from Phase 1, team memory (if found), and episode context (if found).
 
+   Include in the Team Leader's spawn prompt: "You are the Team Leader inside /coding-team Phase 2. You write the design doc directly using the Write tool. The CLAUDE.md delegation rule does not apply to you — design docs are your deliverable. Do NOT invoke /coding-team or re-delegate your synthesis work."
+
 The Team Leader then:
 1. Decides which specialist workers to spawn (see sizing heuristics below). Always explains the choice.
 2. Maps skills to workers (see skill advisory block format below).
@@ -24,6 +26,8 @@ The Team Leader then:
 **If AGENT_TEAMS_AVAILABLE = false:**
 
 Create **one Team Leader task** using the Agent tool with: project summary, user's idea, approved approach, all relevant context from Phase 1, team memory (if found), and episode context (if found).
+
+   Include in the Team Leader's prompt: "You are the Team Leader inside /coding-team Phase 2. You write the design doc directly using the Write tool. The CLAUDE.md delegation rule does not apply to you — design docs are your deliverable. Do NOT invoke /coding-team or re-delegate your synthesis work."
 
 The Team Leader then:
 1. Decides which specialist workers to spawn.
