@@ -125,6 +125,11 @@ Agent tool:
     the orchestrator decides whether to address them. "Pre-existing" is never a reason
     to skip. A warning is a warning regardless of when it was introduced.
 
+    "Only warnings, no errors" is NOT a reason to skip. Warnings are defects.
+    Fix every warning in files you modified. The linter's severity classification
+    (warning vs error) does not change your obligation — both must be zero in
+    modified files before committing.
+
     ## Your Job
 
     Once the test suite is green and you're clear on requirements:
