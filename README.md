@@ -13,7 +13,7 @@ Assembles specialist agent teams to collaboratively work through code tasks. The
 5. **Execution** — task teams (implementer + audit team) build and verify
 6. **Completion** — full verification, learning loop, then merge / PR / keep / discard
 
-Each phase loads on demand — the main SKILL.md is a ~300 line router. Standalone skills can be invoked independently outside the pipeline.
+Each phase loads on demand — the main SKILL.md is a ~220 line router. Session resume logic and post-execution review load conditionally. Standalone skills can be invoked independently outside the pipeline.
 
 ## Architecture
 
@@ -25,11 +25,13 @@ The main SKILL.md is a router that knows the phase sequence, input/output contra
 
 | Invocation | Loaded | Lines |
 |---|---|---|
-| `/coding-team` (router decides) | Main SKILL.md | ~302 |
-| `/coding-team` → Phase 4 (planning) | Main + `phases/planning.md` | ~584 |
-| `/coding-team` → Phase 5 (execution) | Main + `phases/execution.md` | ~607 |
-| `/coding-team` → Phase 2 (design) | Main + `phases/design-team.md` | ~533 |
-| `/coding-team` → Phase 6 (completion) | Main + `phases/completion.md` | ~531 |
+| `/coding-team` (router decides) | Main SKILL.md | ~219 |
+| `/coding-team` → resume session | Main + `phases/session-resume.md` | ~332 |
+| `/coding-team` → Phase 4 (planning) | Main + `phases/planning.md` | ~536 |
+| `/coding-team` → Phase 5 (execution) | Main + `phases/execution.md` | ~495 |
+| `/coding-team` → Phase 5 post-exec | Main + execution + `phases/post-execution-review.md` | ~553 |
+| `/coding-team` → Phase 2 (design) | Main + `phases/design-team.md` | ~462 |
+| `/coding-team` → Phase 6 (completion) | Main + `phases/completion.md` | ~455 |
 | `/debug` (standalone) | `skills/debug/SKILL.md` only | ~168 |
 | `/verify` (standalone) | `skills/verify/SKILL.md` only | ~55 |
 | `/prompt-craft` (standalone) | `skills/prompt-craft/SKILL.md` only | ~263 |
@@ -199,7 +201,7 @@ These can be invoked independently with their own slash commands, or used automa
 | Second Opinion | `/second-opinion` | Cross-model second opinion via OpenAI Codex CLI. Review, challenge, consult. | ~295 |
 | Scope Lock | `/scope-lock` | Restrict edits to a directory during debugging. | ~48 |
 | Scope Unlock | `/scope-unlock` | Remove scope-lock edit restriction. | ~26 |
-| Release | `/release` | Automated release: sync base branch, test, push, create PR. | ~83 |
+| Release | `/release` | Automated release: sync base branch, test, push, create PR. CI retry cap + orphan cleanup. | ~89 |
 | Retrospective | `/retrospective` | Post-ship engineering retrospective with metrics. | ~65 |
 | Doc Sync | `/doc-sync` | Post-ship documentation update — sync docs with shipped code. | ~70 |
 
@@ -231,6 +233,7 @@ Technical evaluation, not performative agreement. Read, understand, verify again
 - **Evidence before claims** — no completion claims without fresh verification output
 - **Right-size the model** — use the cheapest model that can handle the task
 - **Right-size the coordination** — agent teams when agents need to talk, subagents when they don't
+- **Dispatch first, self-execute second** — start long-running agent work before doing lightweight self-tasks
 
 ## Installation
 
@@ -327,18 +330,21 @@ For simple tasks (typo, rename, single-file fix), the skill skips to Phase 5 wit
 ## File structure
 
 ```
-SKILL.md                          # router + phase contracts (~200 lines)
+SKILL.md                          # router + phase contracts (~219 lines)
 README.md                         # this file
 coding-team-router.py             # session-start hook
 memory/                           # behavioral feedback (persists across sessions)
-  MEMORY.md                       #   index of feedback files
-  feedback-*.md                   #   individual feedback entries
+  MEMORY.md                       #   index — points to consolidated file
+  consolidated-feedback.md        #   distilled rules from all feedback (loaded by default)
+  feedback-*.md                   #   individual feedback entries (history, not loaded)
 phases/                           # pipeline phase details (loaded on demand)
+  session-resume.md               #   continuation detection + plan discovery
   dialogue.md                     #   Phase 1 — clarify, propose, approve
   design-team.md                  #   Phase 2 — specialist workers + synthesis
   spec-review.md                  #   Phase 3 — write and validate design spec
   planning.md                     #   Phase 4 — detailed TDD implementation plan
   execution.md                    #   Phase 5 — task teams + audit loops
+  post-execution-review.md        #   risk signals + Codex review (loaded after execution)
   completion.md                   #   Phase 6 — verify, merge/PR, learning loop
 skills/                           # standalone skills (can be invoked independently)
   debug/SKILL.md                  #   /debug — root cause investigation
