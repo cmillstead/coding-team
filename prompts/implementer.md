@@ -69,7 +69,7 @@ Agent tool:
 
     - **For complex or unfamiliar patterns:** Use QMD `vector_search` tool with collection `"conversations"` and a 1-2 sentence description of what you're implementing. Past episodes may contain patterns, decisions, or warnings relevant to your task.
 
-    If codesight-mcp tools are not available (MCP server not running), fall back to Grep and Read tools. Do NOT skip code exploration — use whichever tools are available.
+    If codesight-mcp tools return stale or outdated results, run `mcp__codesight-mcp__index_folder` to reindex — do NOT fall back to Grep/Bash for stale indexes. Fall back to Grep and Read ONLY when codesight-mcp is genuinely not available (MCP server not running). Do NOT skip code exploration — use whichever tools are available.
 
     ## Before You Begin
 

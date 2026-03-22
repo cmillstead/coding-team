@@ -38,7 +38,7 @@ BASELINE (once, before first task)
   -1. Verify the repo is indexed for codesight-mcp:
       Run `mcp__codesight-mcp__list_repos` to see indexed repos.
       If the working directory's repo is NOT listed, run `mcp__codesight-mcp__index_folder` with the working directory path.
-      If the repo IS listed, run `mcp__codesight-mcp__get_status` to verify the index is current.
+      If the repo IS listed, run `mcp__codesight-mcp__get_status` to verify the index is current. If the index is stale (status shows outdated or files changed since last index), run `mcp__codesight-mcp__index_folder` to reindex. Do NOT fall back to Grep/Bash when the index is stale — reindex instead.
       If codesight-mcp tools are not available (MCP server not running), skip — agents will fall back to Grep/Read.
 
   0. Run full test suite and record results as BASELINE_FAILURES
