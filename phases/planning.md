@@ -182,6 +182,7 @@ git commit -m "feat: add specific feature"
 - Only mock external systems genuinely unavailable in test environment
 - Never mock the thing being tested
 - Every task batch ends with: run tests -> run linter -> confirm both pass -> commit
+- Every status/error mapping table must include a catch-all row ("all other cases → ..."). Design specs that leave the "else" path undefined cause health() / observe() style bugs where unexpected inputs fall through to success paths.
 
 ## Required Plan Sections
 
@@ -227,6 +228,7 @@ If `count(inputs) != count(fix) + count(deferred) + count(false positive)`, the 
 5. Is there any step that silently assumes context the implementer won't have?
 6. Does the failure modes table have any critical gaps (no test + no handling + silent)?
 7. **Does the traceability table account for every input finding?** (If sourced from a scan or review)
+8. If the plan includes a build step, does it verify output filenames match package.json exports? (tsup .js vs .mjs mismatch caught in awareness-sdk)
 
 ## Plan Review Loop
 
