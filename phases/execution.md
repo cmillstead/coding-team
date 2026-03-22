@@ -127,6 +127,8 @@ After collecting findings from all auditors:
 
 **Drift check (between audit rounds):** Before spawning the next audit round, re-read the original task description. If findings are pulling into unrelated areas or scope has expanded beyond the task, re-scope or exit the audit loop.
 
+**BLOCKED auditors:** If any auditor reports Status: BLOCKED, do NOT proceed to the fix round. Investigate the blocker — usually missing files, empty file list, or insufficient context. Re-dispatch the blocked auditor with additional context (e.g., read the missing files and include their contents). If the blocker persists after 2 retries, surface to the user with the BLOCKED reason.
+
 ## Audit Loop Exit
 
 Exit when ANY are true:
