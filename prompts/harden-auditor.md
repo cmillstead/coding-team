@@ -56,6 +56,7 @@ Agent tool:
     - Use `mcp__codesight-mcp__get_callers` on security-sensitive functions (auth checks, permission gates, input validators) to verify ALL call sites pass through the security boundary.
     - Use the LSP tool to check for type-safety violations in modified files — type confusion can be a security vector.
     - Use `mcp__codesight-mcp__get_changes` with `include_impact: true` to get a symbol-level view of what changed and its downstream dependents — assess full blast radius.
+    - Use `mcp__codesight-mcp__search_references` to find all call sites of security-critical functions (validators, sanitizers, auth checks) — verify no call site bypasses the security boundary.
 
     If codesight-mcp tools are not available, fall back to Grep for call-site analysis. Do NOT skip data flow tracing on security-sensitive code.
 

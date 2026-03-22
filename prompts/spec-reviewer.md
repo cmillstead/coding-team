@@ -93,6 +93,9 @@ Agent tool:
     - Use `mcp__codesight-mcp__get_file_outline` on modified files to check the implementer didn't add unexpected public symbols beyond the spec.
     - Use the LSP tool to run diagnostics on modified files — catch type errors the implementer missed.
     - Use `mcp__codesight-mcp__get_changes` with `include_impact: true` to get a symbol-level view of what changed and its downstream dependents — more precise than reading the raw diff.
+    - Use `mcp__codesight-mcp__compare_symbols` to compare before/after versions of modified functions — verifies only intentional changes were made, catches accidental signature changes.
+    - Use `mcp__codesight-mcp__get_symbols` to list all symbols in modified files — cross-check against the spec to find unexpected additions or missing implementations.
+    - Use `mcp__codesight-mcp__search_references` to find all usages of modified symbols — verify callers are updated if the interface changed.
 
     If codesight-mcp tools are not available, fall back to Grep for caller searches. Do NOT skip dependency verification.
 

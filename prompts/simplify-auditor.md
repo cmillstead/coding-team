@@ -45,6 +45,8 @@ Agent tool:
     - Use `mcp__codesight-mcp__get_changes` with `include_impact: true` to get a symbol-level view of what changed and its downstream dependents.
     - Use `mcp__codesight-mcp__get_imports` on modified files to flag unnecessary or circular import chains.
     - Use `mcp__codesight-mcp__get_type_hierarchy` on classes in the diff to check inheritance depth — flag trees deeper than 4 levels as over-abstraction.
+    - Use `mcp__codesight-mcp__get_symbols` to list all symbols in modified files — cross-check against the spec to find bloat or unexpected additions.
+    - Use `mcp__codesight-mcp__search_references` to count references for each symbol — low reference counts may indicate over-abstraction or dead code.
 
     If codesight-mcp tools are not available, fall back to Grep for symbol searches. Do NOT skip duplicate detection.
 

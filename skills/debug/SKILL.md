@@ -36,7 +36,13 @@ If you haven't completed Phase 1, you cannot propose fixes.
 
 **Recent change analysis:** Use `mcp__plugin_github_github__list_commits` to see recent commits. For regressions, narrow the window with `git log --oneline --since="3 days ago"`. Use `mcp__plugin_github_github__get_commit` to inspect suspicious commits in detail. Recent changes are the most likely cause of new bugs.
 
+**Trace downstream:** Use `mcp__codesight-mcp__get_callees` on failing functions to understand what they call — the bug may be in a downstream dependency, not the function itself.
+
 **Prior bug search:** Use QMD `vector_search` tool with collection `"conversations"` and a description of the bug symptoms to find similar past bugs. Past episodes often contain root causes and fix patterns that apply to the current investigation.
+
+**Find entry points:** Use `mcp__codesight-mcp__get_key_symbols` to identify the most significant symbols in the affected module — helps orient investigation in unfamiliar code.
+
+**Full-text code search:** Use `mcp__codesight-mcp__search_text` for fast full-text search across indexed code — faster than grep for searching error strings, magic values, or configuration keys across large repos.
 
 **After forming a hypothesis, lock scope:** Identify the narrowest directory containing the affected files. Restrict edits to that directory for the rest of the debug session. This prevents accidentally "fixing" unrelated code while investigating.
 

@@ -34,6 +34,13 @@ Execution uses subagents because the plan pre-decomposes work into independent t
 
 ```
 BASELINE (once, before first task)
+  CODESIGHT INDEX CHECK (once, before first task)
+  -1. Verify the repo is indexed for codesight-mcp:
+      Run `mcp__codesight-mcp__list_repos` to see indexed repos.
+      If the working directory's repo is NOT listed, run `mcp__codesight-mcp__index_folder` with the working directory path.
+      If the repo IS listed, run `mcp__codesight-mcp__get_status` to verify the index is current.
+      If codesight-mcp tools are not available (MCP server not running), skip — agents will fall back to Grep/Read.
+
   0. Run full test suite and record results as BASELINE_FAILURES
      - If all tests pass: baseline is clean
      - If tests fail: these are PRE-EXISTING failures that must be fixed
@@ -69,6 +76,7 @@ For each task in plan:
   AUDIT TEAM (only if completeness check passes and implementer reports DONE or DONE_WITH_CONCERNS)
   5. Record HEAD_SHA, collect modified files list (git diff --name-only BASE..HEAD).
      Also run `mcp__codesight-mcp__get_changes` with `repo_path` set to the working directory, `git_ref: "BASE..HEAD"`, and `include_impact: true` to get a symbol-level diff with downstream impact analysis. Pass BOTH the file list AND the symbol-level changes to each auditor.
+     After recording changes, run `mcp__codesight-mcp__invalidate_cache` for the repo so auditors see fresh symbol data reflecting the implementer's commits.
   6. Dispatch audit agents IN PARALLEL via Agent tool (spec reviewer and simplify auditor as read-only Explore; harden auditor as general-purpose to allow Bash tool access for dependency vulnerability checks):
      a. Spec reviewer (see prompts/spec-reviewer.md) — "does it match the spec? was TDD followed?"
      b. Simplify auditor (see prompts/simplify-auditor.md) — "is there a simpler way?"
@@ -235,6 +243,8 @@ During execution, after every 3 completed tasks, print a context check VERBATIM 
 Also print on each mid-phase reminder:
 
 > **Orchestrator check:** You are the orchestrator. If you have been writing code directly, stop and re-dispatch through Agent tool or Teammate tool. Direct edits bypass the audit loop.
+
+Optionally run `mcp__codesight-mcp__get_usage_stats` with `session: "current"` to check which codesight tools agents are using. If key tools (get_callers, search_symbols, get_changes) show zero calls after 3+ tasks, agents may not be using code intelligence — consider including explicit tool reminders in subsequent implementer prompts.
 
 ## Debugging Detour Reminders
 

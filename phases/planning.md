@@ -47,6 +47,8 @@ Use codesight-mcp tools to understand the codebase structure before decomposing 
 - Use `mcp__plugin_github_github__search_issues` to find related issues in the repository — prior discussion often contains requirements or edge cases not in the spec.
 - Use `mcp__plugin_github_github__search_pull_requests` to check if similar work was previously attempted — learn from prior approaches and their outcomes.
 - Use `mcp__context-keep__search_memories` to find relevant prior architectural decisions — avoid contradicting established patterns without explicit rationale.
+- Use `mcp__codesight-mcp__get_key_symbols` to identify the most architecturally significant symbols — focuses planning on high-impact areas and key entry points.
+- Use `mcp__codesight-mcp__get_diagram` to generate architecture diagrams — include in the plan document to help implementers understand the system structure.
 
 If codesight-mcp tools are not available (MCP server not running), fall back to Glob and Grep tools. Do NOT skip codebase analysis — use whichever tools are available.
 

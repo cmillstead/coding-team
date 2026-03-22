@@ -62,6 +62,10 @@ Agent tool:
     - **To understand file structure:** Use `mcp__codesight-mcp__get_file_outline` to see all symbols in a file before reading it fully.
     - **To trace execution flow:** Use `mcp__codesight-mcp__get_call_chain` to understand how data flows through a codepath you're modifying.
     - **To read symbol source:** Use `mcp__codesight-mcp__get_symbol` to read a specific function/class without loading the full file.
+    - **To understand downstream calls:** Use `mcp__codesight-mcp__get_callees` to see what a function calls before modifying it — know the downstream impact before changing the upstream.
+    - **Before renaming or changing an interface:** Use `mcp__codesight-mcp__search_references` to find all usages of a symbol — more precise than grep, catches re-exports and type references.
+    - **To understand surrounding context:** Use `mcp__codesight-mcp__get_symbol_context` to see a symbol's imports, class membership, and adjacent methods — richer than `get_symbol` alone.
+    - **Full-text search:** Use `mcp__codesight-mcp__search_text` for fast full-text search across indexed code — use instead of Grep when the repo is indexed.
 
     - **For complex or unfamiliar patterns:** Use QMD `vector_search` tool with collection `"conversations"` and a 1-2 sentence description of what you're implementing. Past episodes may contain patterns, decisions, or warnings relevant to your task.
 
