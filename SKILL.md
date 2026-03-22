@@ -196,11 +196,13 @@ Each phase reads its detail file on entry. Do not read ahead — load only the a
 
 | Phase | File |
 |-------|------|
+| Session Resume | `phases/session-resume.md` |
 | Dialogue | `phases/dialogue.md` |
 | Design Team | `phases/design-team.md` |
 | Spec Review | `phases/spec-review.md` |
 | Planning | `phases/planning.md` |
 | Execution | `phases/execution.md` |
+| Post-Execution Review | `phases/post-execution-review.md` |
 | Completion | `phases/completion.md` |
 
 **Agent prompt templates** (used by the execution loop):
