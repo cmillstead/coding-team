@@ -108,6 +108,12 @@ Agent tool:
     If a pre-existing failure requires architectural changes beyond your scope,
     report as BLOCKED with details — don't skip it.
 
+    Pre-existing lint warnings follow the same rule. If the linter reports warnings
+    in files you're modifying, fix them in the same commit as your changes. If warnings
+    are in files you're NOT modifying, note them in your report but do not ignore them —
+    the orchestrator decides whether to address them. "Pre-existing" is never a reason
+    to skip. A warning is a warning regardless of when it was introduced.
+
     ## Your Job
 
     Once the test suite is green and you're clear on requirements:
