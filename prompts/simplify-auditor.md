@@ -34,6 +34,17 @@ Agent tool:
     - **Consolidation** — duplicate logic that should be extracted
     - **API surface** — public methods/exports that should be private
 
+    ## Code Intelligence
+
+    Use codesight-mcp tools for deeper simplification analysis:
+
+    - Use `mcp__codesight-mcp__get_dead_code` on the repository to find unused functions or symbols introduced by this task.
+    - Use `mcp__codesight-mcp__search_symbols` to check if newly created utilities duplicate existing ones elsewhere in the codebase.
+    - Use `mcp__codesight-mcp__analyze_complexity` on each modified file to quantify complexity — flag functions with cyclomatic complexity above 10.
+    - Use the LSP tool with `find-references` to verify that renamed or moved symbols are updated at all call sites.
+
+    If codesight-mcp tools are not available, fall back to Grep for symbol searches. Do NOT skip duplicate detection.
+
     ## Project-Specific Criteria
 
     [INSERT PROJECT-SPECIFIC EVAL CRITERIA FROM PLAN — if the plan has a

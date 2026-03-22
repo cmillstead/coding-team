@@ -34,6 +34,17 @@ Before writing tasks, check if any planned work needs specialized skill involvem
 
 **Annotating tasks:** For each task in the plan, add an `**Advisory skills:**` line after the `**Model:**` line. Reference the advisory by name (e.g., "PROMPT_CRAFT_ADVISORY"). If no detection rule matches, write `**Advisory skills:** None`.
 
+## Step 0.75: Code Intelligence (before writing tasks)
+
+Use codesight-mcp tools to understand the codebase structure before decomposing tasks:
+
+- Use `mcp__codesight-mcp__get_file_tree` to understand the repository layout and identify where new code should live.
+- Use `mcp__codesight-mcp__get_repo_outline` to see key symbols across the codebase — understand the architecture before planning changes.
+- Use `mcp__codesight-mcp__analyze_complexity` on files the plan will modify — high-complexity files (cyclomatic complexity above 15) may need to be split or refactored as part of the task.
+- Use `mcp__codesight-mcp__search_symbols` to find existing utilities that sub-tasks could reuse instead of rebuilding.
+
+If codesight-mcp tools are not available (MCP server not running), fall back to Glob and Grep tools. Do NOT skip codebase analysis — use whichever tools are available.
+
 ## Pre-Flight: Count Inputs (MANDATORY before dispatching planning worker)
 
 When the plan addresses scan findings, review feedback, or any enumerated list of issues, the **orchestrator** (not the planning worker) must count the inputs BEFORE dispatching:

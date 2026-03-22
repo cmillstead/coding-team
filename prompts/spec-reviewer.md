@@ -85,6 +85,16 @@ Agent tool:
     - If any match, flag as POSSIBLE_DOC_DRIFT — the orchestrator will assess whether the doc is actually stale
     - Do NOT assess doc staleness yourself — just flag the path match
 
+    ## Code Intelligence
+
+    Use codesight-mcp tools to verify the implementation hasn't broken dependencies:
+
+    - Use `mcp__codesight-mcp__get_callers` on each modified function to verify callers still work with the new signature/behavior.
+    - Use `mcp__codesight-mcp__get_file_outline` on modified files to check the implementer didn't add unexpected public symbols beyond the spec.
+    - Use the LSP tool to run diagnostics on modified files — catch type errors the implementer missed.
+
+    If codesight-mcp tools are not available, fall back to Grep for caller searches. Do NOT skip dependency verification.
+
     ## Project-Specific Criteria
 
     [INSERT PROJECT-SPECIFIC EVAL CRITERIA FROM PLAN — if the plan has a

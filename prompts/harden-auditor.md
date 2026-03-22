@@ -47,6 +47,17 @@ Agent tool:
     - **Race conditions** — shared mutable state, TOCTOU, concurrent access
     - **Resource exhaustion** — unbounded allocations, missing timeouts
 
+    ## Code Intelligence
+
+    Use codesight-mcp tools for deeper security analysis:
+
+    - Use `mcp__codesight-mcp__get_call_chain` to trace data flow through modified codepaths — follow untrusted input from entry to sink.
+    - Use `mcp__codesight-mcp__get_impact` on modified symbols to assess blast radius — what other code is affected by these changes?
+    - Use `mcp__codesight-mcp__get_callers` on security-sensitive functions (auth checks, permission gates, input validators) to verify ALL call sites pass through the security boundary.
+    - Use the LSP tool to check for type-safety violations in modified files — type confusion can be a security vector.
+
+    If codesight-mcp tools are not available, fall back to Grep for call-site analysis. Do NOT skip data flow tracing on security-sensitive code.
+
     ## Calibration
 
     Focus on exploitable issues, not theoretical risks.

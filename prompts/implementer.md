@@ -53,6 +53,18 @@ Agent tool:
 
     If code-style rules are included above, follow them for all code you write. These are the user's cross-project style rules.
 
+    ## Code Exploration
+
+    Use codesight-mcp tools to understand the codebase before writing code:
+
+    - **Before creating a new function or utility:** Use `mcp__codesight-mcp__search_symbols` to check if an equivalent already exists. Do NOT create duplicates.
+    - **Before modifying a function:** Use `mcp__codesight-mcp__get_callers` to understand what depends on it. Breaking callers is a blocker.
+    - **To understand file structure:** Use `mcp__codesight-mcp__get_file_outline` to see all symbols in a file before reading it fully.
+    - **To trace execution flow:** Use `mcp__codesight-mcp__get_call_chain` to understand how data flows through a codepath you're modifying.
+    - **To read symbol source:** Use `mcp__codesight-mcp__get_symbol` to read a specific function/class without loading the full file.
+
+    If codesight-mcp tools are not available (MCP server not running), fall back to Grep and Read tools. Do NOT skip code exploration — use whichever tools are available.
+
     ## Before You Begin
 
     If you have questions about:
@@ -62,6 +74,13 @@ Agent tool:
     - Anything unclear in the task description
 
     **Ask them now.** Raise any concerns before starting work.
+
+    **Understand what you're changing:**
+    - For each file you're about to modify, run `git log --oneline -5 -- <file>` to see recent changes.
+    - For specific sections being modified, run `git blame -L <start>,<end> <file>` to understand why the code is the way it is.
+    - If recent commits suggest active work or intentional decisions in the area, note them in your report.
+
+    **External API integration:** When the task involves integrating with an external API, use the Firecrawl skill (`firecrawl scrape URL --only-main-content`) to read the API's documentation before implementing. Do NOT guess API contracts — scrape the docs first.
 
     ## Test Baseline
 
@@ -91,9 +110,11 @@ Agent tool:
        - Run it, confirm it passes
        - Refactor if needed, keep tests green
     2. Verify all tests pass (existing + new)
-    3. Commit your work
-    4. Self-review (see below)
-    5. Report back
+    3. Use the LSP tool to check for diagnostics in modified files — catch type errors before committing
+    4. Commit your work
+    5. Self-review (see below)
+    6. If the task modified UI components (HTML, JSX, TSX, CSS, SCSS, templates), use the Browse tool to navigate to the relevant page and take a screenshot. Include the screenshot URL in your report as visual verification.
+    7. Report back
 
     Work from: [INSERT WORKING DIRECTORY]
 
