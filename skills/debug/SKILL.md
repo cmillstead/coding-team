@@ -34,6 +34,10 @@ If you haven't completed Phase 1, you cannot propose fixes.
 
 5. **Trace data flow** — where does the bad value originate? What called this with the bad value? Keep tracing up until you find the source. Fix at source, not at symptom.
 
+**Recent change analysis:** Use `mcp__plugin_github_github__list_commits` to see recent commits. For regressions, narrow the window with `git log --oneline --since="3 days ago"`. Use `mcp__plugin_github_github__get_commit` to inspect suspicious commits in detail. Recent changes are the most likely cause of new bugs.
+
+**Prior bug search:** Use QMD `vector_search` tool with collection `"conversations"` and a description of the bug symptoms to find similar past bugs. Past episodes often contain root causes and fix patterns that apply to the current investigation.
+
 **After forming a hypothesis, lock scope:** Identify the narrowest directory containing the affected files. Restrict edits to that directory for the rest of the debug session. This prevents accidentally "fixing" unrelated code while investigating.
 
 ## Phase 2: Pattern Analysis
@@ -48,6 +52,8 @@ Check if this bug matches a known pattern:
 | Integration failure | Timeout, unexpected response | External API calls, service boundaries |
 | Configuration drift | Works locally, fails in CI/staging | Env vars, feature flags, DB state |
 | Stale cache | Shows old data, fixes on cache clear | Redis, CDN, in-memory caches |
+
+**Error research:** Use the `WebSearch` tool to search for exact error messages, stack traces, or unfamiliar error codes. Library documentation, GitHub issues, and Stack Overflow often have the root cause. Search BEFORE forming hypotheses — external knowledge prevents wasted investigation.
 
 Also check:
 - **Git log** for prior fixes in the same area — recurring bugs in the same files are an architectural smell, not coincidence

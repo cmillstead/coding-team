@@ -63,6 +63,8 @@ Agent tool:
     - **To trace execution flow:** Use `mcp__codesight-mcp__get_call_chain` to understand how data flows through a codepath you're modifying.
     - **To read symbol source:** Use `mcp__codesight-mcp__get_symbol` to read a specific function/class without loading the full file.
 
+    - **For complex or unfamiliar patterns:** Use QMD `vector_search` tool with collection `"conversations"` and a 1-2 sentence description of what you're implementing. Past episodes may contain patterns, decisions, or warnings relevant to your task.
+
     If codesight-mcp tools are not available (MCP server not running), fall back to Grep and Read tools. Do NOT skip code exploration — use whichever tools are available.
 
     ## Before You Begin
@@ -79,6 +81,8 @@ Agent tool:
     - For each file you're about to modify, run `git log --oneline -5 -- <file>` to see recent changes.
     - For specific sections being modified, run `git blame -L <start>,<end> <file>` to understand why the code is the way it is.
     - If recent commits suggest active work or intentional decisions in the area, note them in your report.
+
+    **GitHub context:** When the task description references a GitHub issue number (e.g., "#123" or "fixes issue 42"), use `mcp__plugin_github_github__issue_read` to read the full issue — comments often contain requirements not captured in the spec. Use `mcp__plugin_github_github__search_code` to find how similar patterns are implemented in other repositories.
 
     **External API integration:** When the task involves integrating with an external API, use the Firecrawl skill (`firecrawl scrape URL --only-main-content`) to read the API's documentation before implementing. Do NOT guess API contracts — scrape the docs first.
 
@@ -105,6 +109,7 @@ Agent tool:
     Once the test suite is green and you're clear on requirements:
     1. Implement exactly what the task specifies using TDD:
        - Write failing test first
+       - Use the Bash tool with `python3` to generate complex test fixtures, compute expected values, or validate algorithms. Example: `python3 -c "import json; print(json.dumps([{'id': i, 'name': f'user_{i}'} for i in range(100)]))"` for test data generation.
        - Run it, confirm it fails for the right reason
        - Write minimal code to pass
        - Run it, confirm it passes
@@ -128,6 +133,7 @@ Agent tool:
     - If a file you're creating grows beyond the plan's intent, stop and report
       as DONE_WITH_CONCERNS
     - In existing codebases, follow established patterns
+    - **Jupyter notebooks:** When the task involves `.ipynb` files, use the NotebookEdit tool to modify cells directly. Use the Read tool to read notebook contents. Do NOT manually construct notebook JSON.
 
     ## When You're in Over Your Head
 
@@ -140,6 +146,8 @@ Agent tool:
     - You feel uncertain about whether your approach is correct
     - The task involves restructuring code the plan didn't anticipate
     - You've been reading file after file without progress
+
+    **Before escalating:** Use the WebSearch tool to search for the exact error message or stack trace. Library documentation, Stack Overflow answers, and GitHub issues often have the solution. Only report BLOCKED after searching.
 
     **How to escalate:** Report with status BLOCKED or NEEDS_CONTEXT.
 

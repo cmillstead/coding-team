@@ -88,6 +88,8 @@ type: project
 [What would break if reversed without understanding why]
 ```
 
+**Also persist to ContextKeep:** After writing the decision file, use `mcp__context-keep__store_memory` to store the decision with key `decision-<slug>` and the decision content as the value. This makes decisions searchable by the planning worker via `mcp__context-keep__search_memories` in future sessions. If ContextKeep is not available (MCP server not running), skip silently — the file-based approach is the primary record.
+
 **If the user says no or skips**, proceed to Session Complete. Do NOT generate decisions the user didn't identify — this captures human organizational knowledge, not agent observations.
 
 ## Memory Nudge

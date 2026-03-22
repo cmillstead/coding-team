@@ -44,6 +44,9 @@ Use codesight-mcp tools to understand the codebase structure before decomposing 
 - Use `mcp__codesight-mcp__search_symbols` to find existing utilities that sub-tasks could reuse instead of rebuilding.
 - Use `mcp__codesight-mcp__get_dependencies` to check for circular dependency risks in files the plan will modify — circular imports block clean task decomposition.
 - Use `mcp__codesight-mcp__get_type_hierarchy` when the plan involves class hierarchies or inheritance — understand the full tree before planning changes to base classes.
+- Use `mcp__plugin_github_github__search_issues` to find related issues in the repository — prior discussion often contains requirements or edge cases not in the spec.
+- Use `mcp__plugin_github_github__search_pull_requests` to check if similar work was previously attempted — learn from prior approaches and their outcomes.
+- Use `mcp__context-keep__search_memories` to find relevant prior architectural decisions — avoid contradicting established patterns without explicit rationale.
 
 If codesight-mcp tools are not available (MCP server not running), fall back to Glob and Grep tools. Do NOT skip codebase analysis — use whichever tools are available.
 

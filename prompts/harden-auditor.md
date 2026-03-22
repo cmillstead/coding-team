@@ -41,7 +41,7 @@ Agent tool:
     - **Error handling** — swallowed errors, missing error paths, panics
     - **Injection vectors** — SQL, command, path traversal, template injection
     - **Auth/authz** — missing permission checks, privilege escalation paths
-    - **Secrets** — hardcoded credentials, tokens, API keys in code
+    - **Secrets** — hardcoded credentials, tokens, API keys in code. Use `mcp__plugin_github_github__run_secret_scanning` on the repository for automated detection — more reliable than grep patterns.
     - **Data exposure** — sensitive data in logs, error messages, responses
     - **Dependency risk** — new dependencies with known vulnerabilities
     - **Race conditions** — shared mutable state, TOCTOU, concurrent access
