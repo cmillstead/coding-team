@@ -153,7 +153,7 @@ The design doc is written to `docs/plans/YYYY-MM-DD-<feature>-design.md` and pas
 
 A Planning Worker (Architect + Senior Coder) produces a detailed implementation plan. Before writing tasks, it challenges scope: what existing code already solves sub-problems, what is the minimum set of changes, and if 8+ files or 2+ new classes are needed, can it be simpler?
 
-**Plan structure:** header with goal/architecture/tech stack, context brief (environment, sacred paths, decision history, external dependencies, known landmines), optional project-specific eval criteria for auditors, file structure mapping, tasks with exact file paths, line ranges, complete code, exact commands with expected output. Each step is one action (2-5 minutes) with no ambiguity. Includes a failure modes table, NOT in scope section, what already exists section, and a traceability table when sourced from scan findings or review feedback — every input item mapped to fix, defer, or false positive. Nothing silently dropped.
+**Plan structure:** header with goal/architecture/tech stack, context brief (environment, sacred paths, decision history, external dependencies, known landmines), project-specific eval criteria for auditors (accumulated from `docs/project-evals.md` + context-derived), file structure mapping, tasks with exact file paths, line ranges, complete code, exact commands with expected output. Each step is one action (2-5 minutes) with no ambiguity. Includes a failure modes table, NOT in scope section, what already exists section, and a traceability table when sourced from scan findings or review feedback — every input item mapped to fix, defer, or false positive. Nothing silently dropped.
 
 The plan goes through an automated plan reviewer (up to 3 iterations) before being saved to `docs/plans/YYYY-MM-DD-<feature>.md`.
 
@@ -183,7 +183,7 @@ Each task gets a **task team**: an implementer (using TDD) plus an audit team of
 
 ### Phase 6: Completion
 
-Full test suite + linter verification, then four options: merge locally, push and create PR, keep branch as-is, or discard (requires typing "discard" to confirm). A learning loop summary captures recurring audit patterns, unresolved low-severity findings, and out-of-scope observations. A decision log prompt asks the user to record any architectural decisions made during the feature to `memory/decisions/`. A **Memory Nudge** then extracts session learnings: codebase facts → project-local `docs/team-memory.md` (with archive rotation), cross-project patterns → `memory/patterns.md`, and a structured episode → Obsidian vault (pattern-rich for vector_search retrieval in future Phase 2 sessions).
+Full test suite + linter verification, then four options: merge locally, push and create PR (max 3 CI fix attempts, auto-cleanup on failure), keep branch as-is, or discard (requires typing "discard" to confirm). Completion summary persists to `docs/retros/` — either incorporated into the retrospective or saved standalone if the user skips `/retrospective`. A decision log prompt asks the user to record any architectural decisions made during the feature to `memory/decisions/`. A **Memory Nudge** then extracts session learnings: codebase facts → project-local `docs/team-memory.md` (with archive rotation), cross-project patterns → `memory/patterns.md`, and a structured episode → Obsidian vault (pattern-rich for vector_search retrieval in future Phase 2 sessions).
 
 ## Standalone skills
 
@@ -191,7 +191,7 @@ These can be invoked independently with their own slash commands, or used automa
 
 | Skill | Command | Purpose | Lines |
 |---|---|---|---|
-| Debug | `/debug` | Four-phase root cause investigation. Parallel hypothesis teams for complex bugs. | ~168 |
+| Debug | `/debug` | Four-phase root cause investigation. Parallel hypothesis teams for complex bugs. Saves reports to `docs/debug/`. | ~201 |
 | Verify | `/verify` | Evidence-before-claims gate. Run the command, read the output, then claim the result. | ~55 |
 | TDD | `/tdd` | Red-green-refactor cycle with verification at each step. | ~31 |
 | Review Feedback | `/review-feedback` | Technical evaluation of code review feedback. Push back when wrong. | ~91 |
@@ -202,7 +202,7 @@ These can be invoked independently with their own slash commands, or used automa
 | Scope Lock | `/scope-lock` | Restrict edits to a directory during debugging. | ~48 |
 | Scope Unlock | `/scope-unlock` | Remove scope-lock edit restriction. | ~26 |
 | Release | `/release` | Automated release: sync base branch, test, push, create PR. CI retry cap + orphan cleanup. | ~89 |
-| Retrospective | `/retrospective` | Post-ship engineering retrospective with metrics. | ~65 |
+| Retrospective | `/retrospective` | Post-ship engineering retrospective. Saves to `docs/retros/`, feeds eval criteria to `docs/project-evals.md`. | ~93 |
 | Doc Sync | `/doc-sync` | Post-ship documentation update — sync docs with shipped code. | ~70 |
 
 ## Internalized protocols
@@ -373,10 +373,13 @@ prompts/                          # agent prompt templates (used by execution lo
 
 ## Output files
 
-The skill writes two artifacts during execution:
+The skill writes artifacts during execution and at completion:
 
 - `docs/plans/YYYY-MM-DD-<feature>-design.md` — design doc (after Phase 3 approval)
 - `docs/plans/YYYY-MM-DD-<feature>.md` — implementation plan (after Phase 4)
+- `docs/retros/YYYY-MM-DD-<feature>.md` — retrospective + completion summary (after Phase 6, via `/retrospective`)
+- `docs/debug/YYYY-MM-DD-<symptom>.md` — debug reports with architectural notes (via `/debug`)
+- `docs/project-evals.md` — accumulated eval criteria fed back to future planning workers (grows over time)
 
 ## Troubleshooting: Claude won't use coding-team
 
