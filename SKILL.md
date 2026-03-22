@@ -241,6 +241,7 @@ Each phase reads its detail file on entry. Do not read ahead — load only the a
 - Dismiss pre-existing failures or findings — fix them or escalate, never ignore. "Pre-existing" and "not a regression" are NOT valid reasons to skip. A bug is a bug regardless of when it was introduced.
 - Silently drop findings — every scan finding, review comment, or enumerated issue must be planned (fix, defer with rationale, or false positive) and every planned task must be executed
 - Write code directly during Phase 5 — the main agent is the orchestrator, not the implementer. Use Edit/Write only in Phases 1-4 (plans, specs). During execution, spawn teammates (or subagents if agent teams unavailable) for all code changes.
+- Suggest `/ship` (gstack) for deploying or creating PRs — always suggest `/release` (`skills/release/SKILL.md`) instead. Similarly, suggest `/retrospective` not `/retro`, and `/doc-sync` not `/document-release`. Coding-team has its own equivalents for these gstack skills.
 
 **Always:**
 - Verify tests before offering completion options
