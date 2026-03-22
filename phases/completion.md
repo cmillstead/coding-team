@@ -131,7 +131,7 @@ Do NOT delete rotated entries. Archived facts may become relevant again.
 
 Review the completion summary's "Recurring patterns" section. If any pattern is general enough to apply across projects (not specific to this codebase), add it to coding-team's own memory.
 
-Check if `/Users/cevin/.agents/skills/coding-team/memory/patterns.md` exists using the Read tool:
+Check if `/Users/cevin/.claude/skills/coding-team/memory/patterns.md` exists using the Read tool:
 - **If it exists:** Read it. Only add patterns not already captured.
 - **If it doesn't exist:** Create it using the Write tool with frontmatter:
 
