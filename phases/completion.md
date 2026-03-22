@@ -58,6 +58,8 @@ After all tasks, produce a summary that includes audit findings across all round
 
 Recurring patterns are the signal — if the same finding type appears across multiple tasks or rounds, it indicates a systemic issue worth noting for future work.
 
+**Persistence:** The completion summary is incorporated into the retrospective document when the user runs `/retrospective`. If the user skips the retrospective, save the completion summary as a standalone file: determine `$REPO_ROOT` via `git rev-parse --show-toplevel`, create `$REPO_ROOT/docs/retros/` if needed using Bash tool (`mkdir -p`), and write the summary to `$REPO_ROOT/docs/retros/YYYY-MM-DD-<feature-slug>-completion.md` using the Write tool. Do NOT skip saving — completion summaries contain audit patterns that inform future planning.
+
 ## Decision Log
 
 After producing the completion summary, check whether any architectural or design decisions were made during this feature that should be recorded for future sessions.
@@ -225,7 +227,7 @@ After the user chooses a completion option and it's been executed, print this bl
 >
 > **Recommended next steps:**
 >
-> 1. `/retrospective` — engineering retrospective (commit patterns, test health, shipping velocity, what to improve). Use coding-team's `/retrospective`, NOT gstack's `/retro` — they are different skills.
+> 1. `/retrospective` — engineering retrospective (commit patterns, test health, shipping velocity, what to improve). Saves to `docs/retros/` with eval feed-forward to `docs/project-evals.md`. Use coding-team's `/retrospective`, NOT gstack's `/retro` — they are different skills.
 > 2. `/doc-sync` — update README, ARCHITECTURE, CLAUDE.md to match the shipped code
 > 3. `/prompt-craft audit` — if this feature changed any skills, prompts, or CLAUDE.md, verify they still trigger correctly
 >
