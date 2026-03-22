@@ -36,6 +36,17 @@ Before writing tasks, check if any planned work needs specialized skill involvem
 
 **Annotating tasks:** For each task in the plan, add an `**Advisory skills:**` line after the `**Model:**` line. Reference the advisory by name (e.g., "PROMPT_CRAFT_ADVISORY"). If no detection rule matches, write `**Advisory skills:** None`.
 
+## Step 0.7: Load Accumulated Eval Criteria
+
+Before writing tasks, check for accumulated project-specific eval criteria from prior retrospectives and debug sessions:
+
+1. Determine `$REPO_ROOT` via `git rev-parse --show-toplevel`.
+2. Check if `$REPO_ROOT/docs/project-evals.md` exists using the Read tool.
+3. **If it exists:** Read the file. Extract all checklist items. These are criteria that agents missed in prior sessions — they MUST be included in the plan's `## Project-Specific Eval Criteria` section as seed criteria.
+4. **If it does not exist:** Skip this step. Do NOT create the file — it is created by `/retrospective` and `/debug` when they identify missed checks.
+
+The planning worker combines disk-loaded criteria with any new criteria generated from the current context brief. Disk criteria appear first (marked `[accumulated]`), followed by context-derived criteria. Do NOT remove or modify accumulated criteria — they encode hard-won lessons from prior sessions. If an accumulated criterion conflicts with the current design, flag the conflict in the plan rather than silently dropping the criterion.
+
 ## Step 0.75: Code Intelligence (before writing tasks)
 
 Use codesight-mcp tools to understand the codebase structure before decomposing tasks:
@@ -127,16 +138,19 @@ Do NOT invent context you do not have evidence for. If a field's answer is unkno
 
 ## Project-Specific Eval Criteria (optional)
 
-If the context brief identifies domain-specific constraints, the planning worker generates eval criteria that auditors MUST check beyond their standard lens.
+The planning worker produces eval criteria from two sources: (1) accumulated criteria loaded from `$REPO_ROOT/docs/project-evals.md` in Step 0.7, and (2) new criteria generated from the current context brief. Auditors MUST check all listed criteria beyond their standard lens.
 
 ```markdown
 ## Project-Specific Eval Criteria
 
 > Domain-specific checks that auditors MUST verify beyond their standard lens. These encode project context that generic audits miss.
 
+### Accumulated (from prior sessions)
+- [ ] [accumulated criterion from docs/project-evals.md]
+
+### Context-derived (this session)
 - [ ] [Criterion — e.g., "No destructive database operations without rollback mechanism"]
 - [ ] [Criterion — e.g., "MCP message handling changes must preserve backward compatibility"]
-- [ ] [Criterion — e.g., "All new public API surfaces must be documented in tools.md"]
 ```
 
 If the context brief has no domain-specific constraints, omit this section entirely. Do NOT generate generic criteria — they must encode actual project context. Generic criteria like "code should be well-tested" add noise, not signal.
