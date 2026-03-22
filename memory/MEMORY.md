@@ -9,3 +9,4 @@
 - [feedback-dispatch-ordering.md](feedback-dispatch-ordering.md) — Dispatch agent work before self-executable tasks to maximize parallelism
 - [feedback-ship-vs-release.md](feedback-ship-vs-release.md) — Always suggest /release not /ship; coding-team has its own equivalents for gstack skills
 - [feedback-rationalization-bypass.md](feedback-rationalization-bypass.md) — CC invents "mechanical" exceptions to bypass the all-code-through-coding-team rule
+- [feedback-context-weight.md](feedback-context-weight.md) — SKILL.md and execution.md too heavy; memory files should consolidate; direct embedding > propagation
