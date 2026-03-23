@@ -43,6 +43,7 @@ Agent tool:
     ## What to Check
 
     - **Input validation** — unvalidated or unbounded external inputs
+    - **Shadow paths** — every data flow has 4 paths: happy, nil/null input, empty/zero-length input, and upstream error. Trace all 4 for every new flow in the diff. Missing shadow paths are findings.
     - **Error handling** — swallowed errors, missing error paths, panics
     - **Injection vectors** — SQL, command, path traversal, template injection
     - **Auth/authz** — missing permission checks, privilege escalation paths
