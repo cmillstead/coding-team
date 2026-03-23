@@ -170,7 +170,8 @@ After writing the plan:
 
 1. Dispatch plan-document-reviewer agent (see `prompts/plan-doc-reviewer.md`)
 2. If Issues Found: fix, re-dispatch (max 3 iterations, then surface to user)
-3. If Approved: save plan and proceed
+3. **Cross-model tiebreaker (iteration 2+):** If the reviewer found issues on the second pass AND `command -v codex >/dev/null 2>&1` succeeds, offer: "Plan reviewer and planner disagree after 2 rounds. Run `/second-opinion review` as tiebreaker? (Y/n)". If yes, run it — Codex findings override when they align with the reviewer.
+4. If Approved: save plan and proceed
 
 Save plan to: `docs/plans/YYYY-MM-DD-<feature>.md` (always in the **main repo root**, not a worktree)
 
