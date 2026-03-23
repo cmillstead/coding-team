@@ -77,4 +77,12 @@ Agent tool:
 
     **Recommendations (advisory, do not block approval):**
     - [suggestions for improvement]
+
+    **Review status table:** After completing your review, append this table to the plan file itself (not just your report). This makes review state visible to anyone reading the plan:
+
+    | Review | Command | Status | Findings | Date |
+    |--------|---------|--------|----------|------|
+    | Plan Doc Review | plan-doc-reviewer | PASS/ISSUES | N findings | YYYY-MM-DD |
+
+    If a previous review table exists in the plan, add your row to it rather than creating a new table. This accumulates review history in the plan file.
 ```

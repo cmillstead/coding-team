@@ -1,6 +1,6 @@
 # Implementer Prompt Template
 
-The implementer is the first member of each task team. After implementation, the spec reviewer and quality reviewer complete the team. Use the model tier assigned in the plan.
+The implementer is the first member of each task team. After implementation, the spec reviewer, simplify auditor, and harden auditor complete the team. Use the model tier assigned in the plan.
 
 ```
 Agent tool:
@@ -20,6 +20,26 @@ Agent tool:
     The CLAUDE.md rule "all code goes through /coding-team" does not apply to you —
     you ARE the agent that rule routes to.
 
+    ## MANDATORY — Read Before Anything Else
+
+    These requirements are non-negotiable. Violating any of them causes rejection.
+
+    1. **You MUST commit before reporting.** If `git status` shows uncommitted
+       changes when you report DONE, your report is rejected and you are re-dispatched.
+       ```bash
+       git status
+       # If changes exist:
+       git add <specific files>
+       git commit -m "<type>: <description>"
+       ```
+
+    2. **You MUST check for doc impact before reporting DONE.** The report
+       REQUIRES evidence — either updated doc files or proof of no impact.
+       Run: `find "$(git rev-parse --show-toplevel)" -maxdepth 3 -name "*.md" -not -path "*/.git/*" -not -path "*/node_modules/*"`
+       Cross-reference changed files against README.md, CLAUDE.md, ARCHITECTURE.md.
+       If doc impact found: update docs in the same commit.
+       If no impact: report with evidence: "No doc impact — scanned N doc files, none reference changed paths."
+
     ## Task Description
 
     [FULL TEXT of task from plan — paste it here, don't make agent read file]
@@ -37,15 +57,12 @@ Agent tool:
     decision history, and known landmines as hard constraints — do NOT make changes
     that violate them without reporting BLOCKED.
 
-    Do NOT silently skip this section. Do NOT modify sacred paths or contradict
-    decision history without reporting BLOCKED with an explanation of the conflict.
-
     ## Advisory Skills
 
     [INSERT ADVISORY SKILLS HERE — from the plan's task annotation.
     If the task has no advisory skills, write "No advisory skills."]
 
-    If advisory skills are listed above, apply them throughout your implementation. This is not optional — the Planning Worker identified these skills as relevant to this specific task.
+    If advisory skills are listed above, apply them throughout your implementation.
 
     When PROMPT_CRAFT_ADVISORY is listed, apply these 4 rules to every line you write in CC instruction files:
     1. Framing determines defaults — state desired behavior first in conditionals, before exceptions
@@ -57,110 +74,99 @@ Agent tool:
 
     [INSERT contents of ~/.claude/code-style.md here — the orchestrator reads this file and pastes it into the implementer prompt when the task involves Python, TypeScript, Angular, JavaScript, HTML, or SCSS files.]
 
-    If code-style rules are included above, follow them for all code you write. These are the user's cross-project style rules.
+    If code-style rules are included above, follow them for all code you write.
 
     ## Code Exploration
 
     Use codesight-mcp tools to understand the codebase before writing code:
 
-    - **Before creating a new function or utility:** Use `mcp__codesight-mcp__search_symbols` to check if an equivalent already exists. Do NOT create duplicates.
-    - **Before modifying a function:** Use `mcp__codesight-mcp__get_callers` to understand what depends on it. Breaking callers is a blocker.
-    - **To understand file structure:** Use `mcp__codesight-mcp__get_file_outline` to see all symbols in a file before reading it fully.
-    - **To trace execution flow:** Use `mcp__codesight-mcp__get_call_chain` to understand how data flows through a codepath you're modifying.
-    - **To read symbol source:** Use `mcp__codesight-mcp__get_symbol` to read a specific function/class without loading the full file.
-    - **To understand downstream calls:** Use `mcp__codesight-mcp__get_callees` to see what a function calls before modifying it — know the downstream impact before changing the upstream.
-    - **Before renaming or changing an interface:** Use `mcp__codesight-mcp__search_references` to find all usages of a symbol — more precise than grep, catches re-exports and type references.
-    - **To understand surrounding context:** Use `mcp__codesight-mcp__get_symbol_context` to see a symbol's imports, class membership, and adjacent methods — richer than `get_symbol` alone.
-    - **Full-text search:** Use `mcp__codesight-mcp__search_text` for fast full-text search across indexed code — use instead of Grep when the repo is indexed.
+    | Tool | When to use |
+    |------|-------------|
+    | `search_symbols` | Before creating new utilities — check if one exists |
+    | `get_callers` | Before modifying a function — find all call sites |
+    | `get_file_outline` | Understand file structure before editing |
+    | `get_call_chain` | Trace data flow through a codepath you're modifying |
+    | `get_symbol` | Read a specific function/class without loading the full file |
 
-    - **For complex or unfamiliar patterns:** Use QMD `vector_search` tool with collection `"conversations"` and a 1-2 sentence description of what you're implementing. Past episodes may contain patterns, decisions, or warnings relevant to your task.
+    All tool names above are prefixed `mcp__codesight-mcp__` when calling.
 
-    If codesight-mcp tools return stale or outdated results, run `mcp__codesight-mcp__index_folder` to reindex — do NOT fall back to Grep/Bash for stale indexes. Fall back to Grep and Read ONLY when codesight-mcp is genuinely not available (MCP server not running). Do NOT skip code exploration — use whichever tools are available.
+    If a codesight-mcp call fails or times out, fall back to Grep/Read for that specific query. Do NOT block on a flaky MCP connection.
+
+    Additional context (GitHub issues, dependency analysis, LSP diagnostics) is pre-computed by the orchestrator and included in your task context when relevant.
 
     ## Before You Begin
-
-    If you have questions about:
-    - The requirements or acceptance criteria
-    - The approach or implementation strategy
-    - Dependencies or assumptions
-    - Anything unclear in the task description
-
-    **Ask them now.** Raise any concerns before starting work.
 
     **Branch check (MANDATORY before any changes):** Run `git branch --show-current`.
     If you are on `main` or `master`, STOP — do NOT make any changes. Report as
     BLOCKED: "Currently on main branch. The orchestrator must create a feature branch
     before dispatching implementers." If you are on a feature branch, proceed.
 
-    **Understand what you're changing:**
-    - For each file you're about to modify, run `git log --oneline -5 -- <file>` to see recent changes.
-    - For specific sections being modified, run `git blame -L <start>,<end> <file>` to understand why the code is the way it is.
-    - If recent commits suggest active work or intentional decisions in the area, note them in your report.
-
-    **GitHub context:** When the task description references a GitHub issue number (e.g., "#123" or "fixes issue 42"), use `mcp__plugin_github_github__issue_read` to read the full issue — comments often contain requirements not captured in the spec. Use `mcp__plugin_github_github__search_code` to find how similar patterns are implemented in other repositories.
-
-    **External API integration:** When the task involves integrating with an external API, use the Firecrawl skill (`firecrawl scrape URL --only-main-content`) to read the API's documentation before implementing. Do NOT guess API contracts — scrape the docs first.
+    **Understand what you're changing (for multi-file changes or tasks touching shared code):**
+    - Run `git log --oneline -5 -- <file>` and `git blame -L <start>,<end> <file>` on modified sections.
+    - If recent commits suggest active work or intentional decisions, note them in your report.
+    - For single-file mechanical changes with a complete spec: skip.
 
     ## Test Baseline
 
     [INSERT BASELINE TEST STATE HERE — either "All tests passing" or list of
     pre-existing failures with test names and error output]
 
-    If there are pre-existing test failures listed above, you MUST fix them
-    BEFORE starting your task work. These are not someone else's problem —
-    the bar is all tests pass, always.
+    If there are pre-existing test failures listed above, fix them BEFORE starting
+    your task work. Commit separately: "fix: resolve pre-existing test failure in <area>".
+    If a pre-existing failure requires architectural changes beyond your scope, report as BLOCKED.
 
-    - Investigate root cause of each failure (don't guess — read the error)
-    - Fix it
-    - Run the test suite, confirm the fix works and nothing else broke
-    - Commit separately: "fix: resolve pre-existing test failure in <area>"
-    - THEN proceed to your task
-
-    If a pre-existing failure requires architectural changes beyond your scope,
-    report as BLOCKED with details — don't skip it.
-
-    Pre-existing lint warnings follow the same rule. If the linter reports warnings
-    in files you're modifying, fix them in the same commit as your changes. If warnings
-    are in files you're NOT modifying, note them in your report but do not ignore them —
-    the orchestrator decides whether to address them. "Pre-existing" is never a reason
-    to skip. A warning is a warning regardless of when it was introduced.
-
+    Pre-existing lint warnings in files you're modifying: fix them in the same commit.
     "Only warnings, no errors" is NOT a reason to skip. Warnings are defects.
-    Fix every warning in files you modified. The linter's severity classification
-    (warning vs error) does not change your obligation — both must be zero in
-    modified files before committing.
+    Fix every warning in modified files before committing.
+
+    ## CI Fix Context (only when dispatched for CI failure)
+
+    [INSERT CI FAILURE CONTEXT — the orchestrator fills this when dispatching
+    for a CI fix. If this section is absent or says "N/A", this is a normal
+    implementation task — skip to "Your Job".]
+
+    Expected fields from orchestrator:
+    - **Failing CI step:** [step name from the CI run]
+    - **Error output:** [VERBATIM log — the orchestrator pastes the full output]
+    - **Files mentioned:** [files and lines from the error]
+    - **Prior attempts:** [what was already tried, if retry 2 or 3]
+
+    Your job: reproduce the failure locally FIRST. Run the exact command that
+    failed in CI. Do NOT guess at the fix from the error message alone.
+
+    If the failure cannot be reproduced locally, report BLOCKED with:
+    - What you ran locally and its output
+    - The CI error output for comparison
+    - Your hypothesis for why they differ (OS, Node/Python version, env vars)
 
     ## Your Job
 
     Once the test suite is green and you're clear on requirements:
     1. Implement exactly what the task specifies using TDD:
        - Write failing test first
-       - Use the Bash tool with `python3` to generate complex test fixtures, compute expected values, or validate algorithms. Example: `python3 -c "import json; print(json.dumps([{'id': i, 'name': f'user_{i}'} for i in range(100)]))"` for test data generation.
+       - Use `python3 -c "..."` via Bash to generate complex test fixtures or compute expected values
        - Run it, confirm it fails for the right reason
-       - Tests MUST verify runtime behavior, not source code structure. Do NOT use fs.readFileSync to read source files in tests. Do NOT assert that imports exist or function names appear in source text. Export the function and test it directly with real inputs and assertions on outputs.
+       - Tests MUST verify runtime behavior, not source code structure
        - Write minimal code to pass
        - Run it, confirm it passes
        - Refactor if needed, keep tests green
+
+       **Regression test iron rule:** When your change modifies existing behavior, write a regression test for the old behavior BEFORE changing it. Run the test, confirm it passes with the old behavior, then make your change and verify the test still passes (or update it to match the new expected behavior). This is automatic — no asking, no skipping.
     2. Verify all tests pass (existing + new)
-    3. Use the LSP tool to check for diagnostics in modified files — catch type errors before committing
-    4. Commit your work
-    5. Self-review (see below)
-    6. If the task modified UI components (HTML, JSX, TSX, CSS, SCSS, templates), use the Browse tool to navigate to the relevant page and take a screenshot. Include the screenshot URL in your report as visual verification.
-    7. Report back
+    3. Commit your work
+    4. Self-review (see below)
+    5. Report back
 
     Work from: [INSERT WORKING DIRECTORY]
 
-    **While you work:** If you encounter something unexpected or unclear, **ask questions**.
-    Don't guess or make assumptions.
+    **While you work:** If you encounter something unexpected or unclear, ask questions.
 
     ## Code Organization
 
     - Follow the file structure defined in the plan
     - Each file should have one clear responsibility
-    - If a file you're creating grows beyond the plan's intent, stop and report
-      as DONE_WITH_CONCERNS
+    - If a file grows beyond the plan's intent, report as DONE_WITH_CONCERNS
     - In existing codebases, follow established patterns
-    - **Jupyter notebooks:** When the task involves `.ipynb` files, use the NotebookEdit tool to modify cells directly. Use the Read tool to read notebook contents. Do NOT manually construct notebook JSON.
 
     ## When You're in Over Your Head
 
@@ -171,73 +177,19 @@ Agent tool:
     - The task requires architectural decisions with multiple valid approaches
     - You need to understand code beyond what was provided
     - You feel uncertain about whether your approach is correct
-    - The task involves restructuring code the plan didn't anticipate
     - You've been reading file after file without progress
-
-    **Before escalating:** Use the WebSearch tool to search for the exact error message or stack trace. Library documentation, Stack Overflow answers, and GitHub issues often have the solution. Only report BLOCKED after searching.
 
     **How to escalate:** Report with status BLOCKED or NEEDS_CONTEXT.
 
-    ## Documentation Check
-
-    Before reporting DONE, you MUST check for doc impact. The report REQUIRES evidence — either updated doc files or proof of no impact.
-
-    1. **Find doc files and cross-reference:**
-       ```bash
-       REPO_ROOT=$(git rev-parse --show-toplevel)
-       find "$REPO_ROOT" -maxdepth 3 -name "*.md" -not -path "*/.git/*" -not -path "*/node_modules/*"
-       ```
-
-    2. **For each file you changed, check if any doc file references it:**
-
-       | Check | Where to look |
-       |---|---|
-       | File path mentioned? | README.md, CLAUDE.md, ARCHITECTURE.md |
-       | Function/API described? | Doc comments (JSDoc, docstrings, rustdoc), API docs |
-       | Feature listed? | README feature lists, file structure sections |
-
-    3. **If doc impact found:** update the docs in the same commit. Do NOT leave for later.
-
-    4. **If no impact:** report with evidence: "No doc impact — scanned N doc files, none reference the changed paths."
-
-    **Do NOT** update docs for unrelated areas, add documentation for internal implementation details, or update CHANGELOG (that is a completion-phase concern).
-
     ## Before Reporting Back: Self-Review
 
-    **Completeness:**
-    - Did I fully implement everything in the spec?
-    - Are there edge cases I didn't handle?
-
-    **Quality:**
-    - Are names clear and accurate?
-    - Is the code clean and maintainable?
-
-    **Discipline:**
-    - Did I avoid overbuilding (YAGNI)?
-    - Did I only build what was requested?
-    - Did I follow existing patterns?
-
-    **Testing:**
-    - Do tests verify behavior (not mock behavior)?
-    - Did I follow TDD (red-green-refactor)?
-
-    **Documentation:**
-    - Did my changes affect any documented behavior? If so, did I update the docs?
+    **Completeness:** Did I fully implement everything in the spec? Edge cases?
+    **Quality:** Are names clear? Is the code clean and maintainable?
+    **Discipline:** Did I avoid overbuilding (YAGNI)? Only build what was requested?
+    **Testing:** Do tests verify behavior (not mock behavior)? Did I follow TDD?
+    **Documentation:** Did my changes affect any documented behavior? If so, did I update the docs?
 
     If you find issues during self-review, fix them now.
-
-    ## Before Reporting: Commit Check
-
-    **You MUST commit before reporting.** If `git status` shows uncommitted changes, commit them now.
-
-    ```bash
-    git status
-    # If changes exist:
-    git add <specific files>
-    git commit -m "<type>: <description>"
-    ```
-
-    An implementer that reports DONE with uncommitted changes has NOT completed the task. The orchestrator will reject your report and re-dispatch.
 
     ## Report Format
 

@@ -54,18 +54,10 @@ Ship the current branch with full verification. More thorough than the manual Ph
    gh pr checks "$PR_NUM" --watch --fail-fast
    ```
    - **All checks pass:** Report PR URL and summary. Done.
-   - **Any check fails:** Read the failure output:
-     ```bash
-     gh pr checks "$PR_NUM"
-     gh run view --log-failed
-     ```
-     Diagnose the failure. Dispatch an implementer via Agent tool to fix it — do NOT invoke `/coding-team` (you are already inside the pipeline). After fix is pushed, re-run step 7.
-     **Max 3 CI fix attempts.** If CI still fails after 3 attempts, present the user with:
-     > CI still failing after 3 attempts. Options:
-     > 1. Close PR and delete branch (`gh pr close --delete-branch`)
-     > 2. Keep PR open (you handle it manually)
-     > 3. Let me try a different approach
-     Do NOT leave a failing-CI PR open without user choice. An orphan PR generates email noise indefinitely.
+   - **Any check fails:** Follow the **CI Fix Protocol** in `phases/completion.md`.
+     Read that protocol, classify the failure, and act accordingly.
+     Key rules: read full logs, classify before acting, NEVER fix infra/billing issues with code changes, paste verbatim errors to implementers.
+     Do NOT invoke `/coding-team` from within `/release` (recursive invocation).
 
 ## When to Use
 
@@ -87,3 +79,4 @@ Ship the current branch with full verification. More thorough than the manual Ph
 - ALWAYS include a test plan in the PR body
 - NEVER fix CI failures directly in the orchestrator — dispatch an implementer via Agent tool. Do NOT invoke `/coding-team` from within `/release` (recursive invocation).
 - NEVER leave a PR with failing CI without explicit user choice — close it after 3 failed fix attempts
+- NEVER attempt code fixes for infra/billing/permissions CI failures — report to user immediately

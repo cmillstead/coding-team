@@ -1,3 +1,5 @@
+> **DEPRECATED**: Use `simplify-auditor.md` and `harden-auditor.md` instead. This file is retained for reference only.
+
 # Code Quality Reviewer Prompt Template
 
 Verify implementation is well-built: clean, tested, maintainable.

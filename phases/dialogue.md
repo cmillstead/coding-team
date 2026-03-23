@@ -35,3 +35,5 @@ After the user approves an approach, print this block VERBATIM (do not paraphras
 > **If this task involves review feedback:** Use `/review-feedback` to evaluate the feedback technically before designing a solution.
 >
 > ---
+
+**If the user rejects all approaches** or says 'never mind': acknowledge, do NOT proceed to Phase 2. Ask if they want to explore a different direction or end the task.

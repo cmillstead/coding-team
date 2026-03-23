@@ -19,7 +19,7 @@ If any found, print:
 - fix: route to `/coding-team` to investigate CI failures before resuming the original task
 - ignore: proceed with the user's original request
 
-If none found or `gh` is not available, proceed silently.
+If none found or `gh` is not available, proceed and note: 'No orphan PRs detected.'
 
 **Step 2: Discover existing plans and detect progress.** You have NO memory of prior conversations. Do NOT guess filenames.
 
@@ -37,7 +37,7 @@ Glob $MAIN_ROOT/docs/plans/*.md
 ```
 
 - **No docs/plans/ directory or no .md files:** Check for a state file at `$MAIN_ROOT/docs/plans/.coding-team-state`. If it exists, read it — the user approved an approach but hasn't reached the spec stage yet. Resume at Phase 2. If no state file either, this is a fresh task. Route using the table below.
-- **Files found:** Read each file's first 10 lines (title/header). Match the user's request to a plan by content, not filename. If ambiguous, show the user the list and ask which one.
+- **Files found:** Read each file's first 10 lines (title/header). If a plan file is empty, truncated, or has no `## Tasks` section: report 'Plan file [name] appears corrupt — [issue]' and ask user how to proceed. Match the user's request to a plan by content, not filename. If ambiguous, show the user the list and ask which one.
 
 **If you are in a worktree:** the plan files will NOT be in your current directory. Always resolve back to the main repo root to find them. Pass the full path to plan files when providing context to implementers.
 

@@ -33,20 +33,21 @@ Agent tool:
     - **Over-abstraction** — abstractions serving only one call site
     - **Consolidation** — duplicate logic that should be extracted
     - **API surface** — public methods/exports that should be private
+    - **Lint warnings** — did the implementer leave lint warnings in modified files? "Only warnings, no errors" is NOT acceptable — flag as a finding
 
     ## Code Intelligence
 
     Use codesight-mcp tools for deeper simplification analysis:
 
-    - Use `mcp__codesight-mcp__get_dead_code` on the repository to find unused functions or symbols introduced by this task.
-    - Use `mcp__codesight-mcp__search_symbols` to check if newly created utilities duplicate existing ones elsewhere in the codebase.
-    - Use `mcp__codesight-mcp__analyze_complexity` on each modified file to quantify complexity — flag functions with cyclomatic complexity above 10.
-    - Use the LSP tool with `find-references` to verify that renamed or moved symbols are updated at all call sites.
-    - Use `mcp__codesight-mcp__get_changes` with `include_impact: true` to get a symbol-level view of what changed and its downstream dependents.
-    - Use `mcp__codesight-mcp__get_imports` on modified files to flag unnecessary or circular import chains.
-    - Use `mcp__codesight-mcp__get_type_hierarchy` on classes in the diff to check inheritance depth — flag trees deeper than 4 levels as over-abstraction.
-    - Use `mcp__codesight-mcp__get_symbols` to list all symbols in modified files — cross-check against the spec to find bloat or unexpected additions.
-    - Use `mcp__codesight-mcp__search_references` to count references for each symbol — low reference counts may indicate over-abstraction or dead code.
+    | Tool | When to use |
+    |------|-------------|
+    | `analyze_complexity` | Quantify complexity — flag functions with cyclomatic complexity above 10 |
+    | `get_dead_code` | Find unused functions or symbols introduced by this task |
+    | `search_symbols` | Check if newly created utilities duplicate existing ones |
+    | `search_references` | Count references for each symbol — low counts may indicate over-abstraction |
+    | `get_dependencies` | Flag circular imports in modified files |
+
+    All tool names above are prefixed `mcp__codesight-mcp__` when calling.
 
     If codesight-mcp tools are not available, fall back to Grep for symbol searches. Do NOT skip duplicate detection.
 

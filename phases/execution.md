@@ -24,11 +24,15 @@ On approval, begin execution. **Agent team per task: implementer + audit team (s
 
 If you use Edit, Write, or Bash to run tests during Phase 5, the task must be re-done by an agent. Your direct edit bypasses the audit loop and is not trusted — it skips spec review, simplify audit, and harden audit. Unreviewed code does not ship.
 
+During Phase 5, spawn subagents for all code changes.
+
 **Why subagents for execution:** Evaluate the three signals (see SKILL.md Step 0):
 - **Implementer dispatch:** COORDINATION=no (one implementer per task, owns distinct files per plan), DISCOVERY=no (plan specifies exact changes), COMPLEXITY=varies but independent → **subagents**
 - **Audit dispatch:** COORDINATION=no (read-only reviewers examine same diff independently, report to lead), DISCOVERY=no (scope is the diff), COMPLEXITY=yes but independent → **subagents**
 
 Execution uses subagents because the plan pre-decomposes work into independent tasks. Each agent works alone and reports back.
+
+**Pre-flight: Feature branch.** Before dispatching the first implementer, verify the current branch is not main/master. If on main, create a feature branch: `git checkout -b <feature-name>`. All Phase 5 work happens on this branch.
 
 ## Execution Loop
 
@@ -40,6 +44,7 @@ BASELINE (once, before first task)
       If the working directory's repo is NOT listed, run `mcp__codesight-mcp__index_folder` with the working directory path.
       If the repo IS listed, run `mcp__codesight-mcp__get_status` to verify the index is current. If the index is stale (status shows outdated or files changed since last index), run `mcp__codesight-mcp__index_folder` to reindex. Do NOT fall back to Grep/Bash when the index is stale — reindex instead.
       If codesight-mcp tools are not available (MCP server not running), skip — agents will fall back to Grep/Read.
+      If a codesight-mcp call fails or times out, fall back to Grep/Read for that specific query. Do NOT block on a flaky MCP connection.
 
   0. Run full test suite and record results as BASELINE_FAILURES
      - If all tests pass: baseline is clean
@@ -73,21 +78,8 @@ For each task in plan:
      → re-dispatch implementer with "you missed steps X, Y — complete them"
      Do NOT proceed to audit with incomplete work.
 
-  AUDIT TEAM (only if completeness check passes and implementer reports DONE or DONE_WITH_CONCERNS)
-  5. Record HEAD_SHA, collect modified files list (git diff --name-only BASE..HEAD).
-     Also run `mcp__codesight-mcp__get_changes` with `repo_path` set to the working directory, `git_ref: "BASE..HEAD"`, and `include_impact: true` to get a symbol-level diff with downstream impact analysis. Pass BOTH the file list AND the symbol-level changes to each auditor.
-     After recording changes, run `mcp__codesight-mcp__invalidate_cache` for the repo so auditors see fresh symbol data reflecting the implementer's commits.
-  6. Dispatch audit agents IN PARALLEL via Agent tool (spec reviewer and simplify auditor as read-only Explore; harden auditor as general-purpose to allow Bash tool access for dependency vulnerability checks):
-     a. Spec reviewer (see prompts/spec-reviewer.md) — "does it match the spec? was TDD followed?"
-     b. Simplify auditor (see prompts/simplify-auditor.md) — "is there a simpler way?"
-     c. Harden auditor (see prompts/harden-auditor.md) — "what would an attacker try?"
-     d. Prompt-craft auditor (see prompts/prompt-craft-auditor.md) — triggers when BOTH:
-        (i) Task has PROMPT_CRAFT_ADVISORY annotation, AND
-        (ii) Modified files include at least 1 file matching: `phases/*.md`, `prompts/*.md`, `skills/*/SKILL.md`, `SKILL.md`, `CLAUDE.md`, `memory/*.md`
-        Both conditions required (belt and suspenders). If either is missing, skip this auditor.
-  7. Triage findings (see Audit Triage below)
-  8. If findings to fix → dispatch new implementer to fix → re-audit (max 3 rounds)
-     Fresh audit agents each round — don't reuse.
+  AUDIT PASS
+  Read `phases/audit-loop.md` and follow its instructions for the audit pass.
 
   SECURITY ESCALATION (after audit loop, before gate)
   8.5. Check if the task touches security-sensitive files:
@@ -97,44 +89,15 @@ For each task in plan:
        - If 1-2 matches: note in completion summary for user awareness.
        - If 3+ matches OR any harden auditor finding is CRITICAL: dispatch `/scan-security` (`skills/scan-security`) as an additional review gate via Agent tool (model: sonnet). Pass the full diff and harden auditor findings.
        - If 5+ matches OR 2+ CRITICAL harden findings: recommend `/scan-adversarial` to the user before proceeding.
-       - If zero matches: skip silently.
+       - If zero matches: skip and note in status: 'No security-sensitive files detected — skipped'
 
   GATE
-  9. VERIFY: The implementer ran the test suite as their final step. Read the
-     implementer's reported test output as the gate check. If the orchestrator
-     doubts the output, dispatch a verification subagent via Agent tool
-     (model: haiku) to re-run tests independently.
+  9. VERIFY: Dispatch a verification subagent to re-run tests independently.
+     If context budget is exhausted (>80%), accept the implementer's reported
+     output as fallback.
   10. Mark task complete
   11. Next task
 ```
-
-**Audit teammates/agents MUST be read-only (Explore).** This prevents reviewers from silently "fixing" things instead of flagging them. The separation between finding and fixing is the whole point.
-
-**Fresh audit teammates each round.** Don't reuse auditors — carried context biases toward "already checked" areas.
-
-## Audit Triage
-
-After collecting findings from all auditors:
-
-**Refactor gate:** For any finding categorized as "refactor" (not a bug or security issue), apply this bar: *"Would a senior engineer say this is clearly wrong, not just imperfect?"* Reject style preferences and marginal improvements.
-
-**Severity routing:**
-- **Critical/High** — implementer fixes immediately, re-audit
-- **Medium** — include in next fix round
-- **Low/Cosmetic** — fix inline if trivial, otherwise note in completion summary and skip
-
-**Budget check:** If fix rounds add 30%+ to the original implementation diff, tighten scope — skip medium/low simplify findings, focus on harden patches and spec gaps.
-
-**Drift check (between audit rounds):** Before spawning the next audit round, re-read the original task description. If findings are pulling into unrelated areas or scope has expanded beyond the task, re-scope or exit the audit loop.
-
-**BLOCKED auditors:** If any auditor reports Status: BLOCKED, do NOT proceed to the fix round. Investigate the blocker — usually missing files, empty file list, or insufficient context. Re-dispatch the blocked auditor with additional context (e.g., read the missing files and include their contents). If the blocker persists after 2 retries, surface to the user with the BLOCKED reason.
-
-## Audit Loop Exit
-
-Exit when ANY are true:
-1. **Clean audit** — all auditors report zero findings
-2. **Low-only round** — all remaining findings are low severity, fix inline
-3. **Loop cap reached** — 3 audit rounds completed. Fix remaining critical/high inline, log unresolved medium/low in completion summary
 
 ## Implementer Status Protocol
 
@@ -163,53 +126,9 @@ Before declaring execution complete, verify the full plan was executed:
 3. If the plan has a traceability table (scan findings), verify every "Fix" row has a corresponding commit.
 4. If any tasks were silently dropped, execute them now — do not proceed to Phase 6.
 
-## Documentation Drift Scan (after all tasks)
+**Full-suite verification:** Run the complete test suite and linter after ALL tasks complete. This catches integration failures between tasks that per-task GATE checks miss. All tests must pass and linter must be clean before proceeding to Phase 6.
 
-After plan completeness verification passes and before proceeding to Phase 6, check for documentation drift across the full diff.
-
-**Skip this scan when:**
-- The feature only modified test files (no behavior change to document)
-- Every implementer reported "No doc impact" for all tasks
-- The plan explicitly noted "no documentation surface" in the NOT in scope section
-
-**When NOT skipping:**
-
-1. **Pre-filter doc files that reference changed code:**
-   ```bash
-   REPO_ROOT=$(git rev-parse --show-toplevel)
-   CHANGED=$(git diff $(git merge-base HEAD main) --name-only)
-   DOC_FILES=$(find "$REPO_ROOT" -maxdepth 3 -name "*.md" -not -path "*/.git/*" -not -path "*/node_modules/*")
-   # Find doc files that mention any changed file stem
-   echo "$CHANGED" | sed 's|.*/||; s|\.[^.]*$||' | sort -u | while read stem; do
-     grep -l "$stem" $DOC_FILES 2>/dev/null
-   done | sort -u
-   ```
-
-2. **Dispatch a doc-review agent via Agent tool (read-only Explore, model: sonnet):**
-
-   Pass the agent: the pre-filtered doc files list AND the actual diff summary (`git diff $(git merge-base HEAD main) --stat` plus key changes).
-
-   Agent prompt:
-   > Review these documentation files against the branch changes.
-   >
-   > Changed files with summary: [diff stat + key changes]
-   > Doc files that reference changed code: [pre-filtered list]
-   >
-   > For each doc file, identify:
-   > - Stale file paths (references to renamed, moved, or deleted files)
-   > - Stale descriptions (behavior changed but docs describe the old way)
-   > - Missing entries (new files, features, or APIs not yet documented)
-   >
-   > Report format:
-   > - MUST_FIX: [doc file]: [what's stale] → [what it should say]
-   > - NICE_TO_HAVE: [doc file]: [minor improvement]
-   > - Or: "No drift detected"
-   >
-   > Do NOT make changes. Report only.
-
-3. **If MUST_FIX findings:** dispatch an implementer via Agent tool to fix the doc issues as a single task.
-
-4. **If only NICE_TO_HAVE or no drift:** proceed to Phase 6. Note NICE_TO_HAVE items in the completion summary for `/doc-sync` to pick up.
+Read `phases/doc-drift-scan.md` and follow its instructions.
 
 ## When Tasks Fail: Debugging Protocol
 
