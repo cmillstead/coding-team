@@ -24,6 +24,13 @@ After the completeness check passes and implementer reports DONE or DONE_WITH_CO
 
 **Fresh audit teammates each round.** Don't reuse auditors — carried context biases toward "already checked" areas.
 
+**Zero-findings scrutiny:** If any auditor reports zero findings on a diff
+touching 5+ files or 200+ changed lines, verify the auditor actually
+read the files (check for file:line references in methodology). "Zero
+findings" on a large diff may indicate the auditor ran but didn't engage.
+Re-dispatch once with: "Your previous review found zero findings on a
+N-file/N-line diff. Confirm by citing specific code sections you reviewed."
+
 ## Audit Triage
 
 After collecting findings from all auditors:
