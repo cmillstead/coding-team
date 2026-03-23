@@ -55,7 +55,12 @@ Agent tool:
        requirement in the spec?
     2. **Tests are meaningful** — do they test real behavior, or just
        assert trivially true things?
-    3. **Git history shows RED before GREEN** — check `git log --oneline`
+    3. **Test quality scoring** — rate each test file:
+       - ★★★ Tests behavior with edge cases AND error paths
+       - ★★  Tests correct behavior, happy path only
+       - ★   Smoke test / existence check / trivial assertion
+       Flag any ★ tests as needing strengthening. Note overall quality distribution in your report.
+    4. **Git history shows RED before GREEN** — check `git log --oneline`
        for the task's commits. Were test commits made before or alongside
        implementation commits? (If a single commit has both tests and
        implementation, that's acceptable for TDD — but if there are NO

@@ -142,6 +142,17 @@ When the plan addresses scan findings, review feedback, or any enumerated list o
 
 If `count(inputs) != count(fix) + count(deferred) + count(false positive)`, the plan is incomplete. Do not return it.
 
+## Priority Hierarchy Under Context Pressure
+
+If context budget is tight (planning worker above 60% context usage), prioritize in this order:
+1. Scope challenge (Step 0) — never skip
+2. Failure modes table — never skip
+3. Task decomposition with test specs — never skip
+4. Traceability table (when addressing findings) — never skip
+5. Context brief and eval criteria — condense to bullet lists
+6. NOT-in-scope and What-already-exists — shorten to one-liners
+7. Architecture diagrams and code intelligence — skip if already in spec
+
 ## Quality Gate — Self-Review Before Returning
 
 1. Pick 3 tasks at random — could a developer implement each without asking a single question?
