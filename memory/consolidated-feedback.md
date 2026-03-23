@@ -19,3 +19,4 @@ type: feedback
 11. List docs/plans/ directory first when resuming work — never guess filenames.
 12. Direct embedding > propagation through intermediaries. Put tools in worker descriptions, not Team Leader instructions.
 13. Codesight-mcp is PRIMARY for code analysis. Reindex stale indexes. Grep/Read are fallbacks only when MCP is down.
+14. CI failures require classification before action. Non-code failures (infra/billing/permissions) go to the user immediately — NEVER attempt code fixes.
