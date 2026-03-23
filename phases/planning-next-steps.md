@@ -15,13 +15,13 @@ After the plan passes review and is saved:
 
 2. Run: `command -v codex >/dev/null 2>&1` to check if Codex CLI is available.
 
-3. **If ANY risk signal is true AND Codex is available**, print this VERBATIM (substitute actual values), then STOP — do not print anything after this block. Your next message depends on the user's answer:
+3. **If Codex is available**, ALWAYS offer second opinion — risk signals determine the framing, not whether to ask. Print this VERBATIM (substitute actual values), then STOP — do not print anything after this block. Your next message depends on the user's answer:
 
 > ---
 >
 > **Plan saved to `docs/plans/<actual-path>`.**
 >
-> This plan [touches N files / modifies security surface / has opus-tier tasks / etc.].
+> [If risk signals fired: "This plan [touches N files / modifies security surface / has opus-tier tasks / etc.]."]
 >
 > Run `/second-opinion review` for an independent second opinion on the plan? (Y/n)
 >
@@ -30,7 +30,7 @@ After the plan passes review and is saved:
    - User says yes: run `/second-opinion review` against the plan file. After Codex review completes, continue with step 4.
    - User says no or sends a different message: continue with step 4.
 
-4. **If no risk signals fire OR Codex is not available OR Codex review is done**, print this VERBATIM (substitute actual values):
+4. **If Codex is not available OR second-opinion review is done**, print this VERBATIM (substitute actual values):
 
 > ---
 >
