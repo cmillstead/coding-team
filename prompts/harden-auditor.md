@@ -63,6 +63,8 @@ Agent tool:
     - Use `mcp__codesight-mcp__get_changes` with `include_impact: true` to get a symbol-level view of what changed and its downstream dependents — assess full blast radius.
     - Use `mcp__codesight-mcp__search_references` to find all call sites of security-critical functions (validators, sanitizers, auth checks) — verify no call site bypasses the security boundary.
 
+    **Unwired security utilities:** Use `search_references` to check that security-critical functions (sanitization, validation, auth checks, rate limiting) are called at ALL expected sites, not just where a scan finding flagged them. A sanitization function that exists but is only called at 1 of 7 call sites is worse than no function — it creates the illusion of protection. Flag as HIGH when a security utility exists but `search_references` shows fewer callers than expected call sites.
+
     If codesight-mcp tools are not available, fall back to Grep for call-site analysis. Do NOT skip data flow tracing on security-sensitive code.
 
     ## Dependency Vulnerability Check
