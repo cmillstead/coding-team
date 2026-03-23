@@ -45,6 +45,7 @@ description: "Use when [specific trigger]. [What it does in one sentence]. [Do N
 ### 3. Write the body
 
 Structure:
+- **Identity preamble**: tell the agent what it IS ("You are the engineering manager", "You are implementing Task N"). Identity determines behavior more reliably than prohibitions — an engineering manager doesn't write code not because someone said "don't" but because it's not their job.
 - **Standalone preamble** (if applicable): how to bootstrap when invoked directly vs from a pipeline
 - **Core protocol**: the actual instructions, written as imperative commands
 - **Decision points**: explicit if/then routing for any ambiguous situations
@@ -53,45 +54,15 @@ Structure:
 
 ### 4. Language rules
 
-These patterns control CC behavior more than content does:
+Seven patterns that control CC behavior. Summary (read `skills/prompt-craft/language-rules.md` for full examples):
 
-**Framing determines defaults.** Whatever comes first in a conditional is what CC will do. Put the desired path first, the fallback second.
-
-```markdown
-# BAD — CC will default to the simple path
-If the task is complex, use agent teams.
-Otherwise, use subagents.
-
-# GOOD — CC will default to agent teams
-Use agent teams for multi-agent coordination.
-Fall back to subagents only if AGENT_TEAMS_AVAILABLE = false.
-```
-
-**Name the tools explicitly.** CC uses whatever tool name appears in the instructions. If you write "dispatch agents" CC picks whichever tool it's most familiar with. If you write `Teammate({ operation: "spawnTeam" })` CC uses that exact tool.
-
-```markdown
-# BAD — ambiguous
-Dispatch workers to analyze the problem.
-
-# GOOD — explicit
-Spawn teammates via Teammate({ operation: "spawnTeam" }).
-Create tasks via TaskCreate({ subject, description }).
-```
-
-**Prohibitions must be explicit.** CC doesn't infer what it shouldn't do. If you don't say "never write code directly in Phase 5" it will write code directly in Phase 5.
-
-```markdown
-# BAD — implies but doesn't prohibit
-The main agent orchestrates and dispatches implementers.
-
-# GOOD — explicit prohibition
-The main agent orchestrates. It NEVER uses Edit, Write, or runs tests directly.
-If you catch yourself writing code — STOP. Spawn an agent instead.
-```
-
-**Quantify thresholds.** "Large tasks" is ambiguous. "Tasks touching 8+ files" is mechanical.
-
-**Tables beat prose for routing.** CC scans tables faster than paragraphs. Use tables for any decision with discrete inputs and outputs.
+1. **Framing determines defaults** — desired path first, fallback second
+2. **Name tools explicitly** — `Agent tool`, not "dispatch agents"
+3. **Prohibitions must be explicit** — CC doesn't infer what not to do
+4. **Identity over prohibition** — "you are the orchestrator" beats "NEVER write code." Use identity for foundational boundaries, prohibitions for operational rules.
+5. **Name the rationalization** — when CC bypasses with "too simple" / "already handled" / "pre-existing", name the phrase and turn it into a compliance trigger
+6. **Quantify thresholds** — "8+ files" not "large tasks"
+7. **Tables beat prose for routing** — classification tables for any multi-path decision
 
 ### 5. Test the skill
 
@@ -121,6 +92,9 @@ Read the surrounding context. Common failure patterns:
 | CC only follows instructions early in conversation | Context window pressure pushes instructions out | Shorten the skill. Move details to on-demand files. Repeat critical rules at decision points. |
 | CC defaults to subagents when you want agent teams | Subagent is framed as default, agent teams as exception | Flip the framing. Put agent teams path first. |
 | CC writes code when it should delegate | No explicit prohibition on direct coding | Add "NEVER use Edit/Write directly. Spawn an agent." |
+| CC constructs category exceptions ("just mechanical", "just test expectations") | Rule has no escape hatch but CC invents one | Name the specific rationalization as a compliance trigger (see Language Rules) |
+| CC dismisses background task output without reading | No instruction to read output before acting on assumptions | Add "read output FIRST, then classify" — name "already handled" as rationalization |
+| CC obeys reluctantly, finds new bypasses each session | Prohibition-based framing creates adversarial dynamic | Rewrite as identity framing — tell the agent what it IS, not what it can't do |
 
 ### Step 3: Check competing instructions
 
@@ -131,11 +105,13 @@ Search for contradictions:
 
 ### Step 4: Propose fix
 
-Write the minimal change. Prefer:
-1. Adding an explicit prohibition (cheapest, most reliable)
-2. Reframing a conditional (flip default/fallback ordering)
-3. Adding a decision table (replaces ambiguous prose)
-4. Restructuring content (more expensive, for context window issues)
+Write the minimal change. Prefer (in order):
+1. **Name the rationalization** — if the agent bypasses with a specific phrase ("too simple", "already handled", "pre-existing"), name that phrase and turn it into a trigger. Cheapest, most targeted fix.
+2. **Identity framing** — if the agent keeps fighting a boundary, rewrite as identity ("you are the orchestrator") instead of prohibition ("don't write code"). Fixes the root cause.
+3. **Decision table** — if the agent doesn't know what to do, give it a classification table with signal keywords and actions. Replaces ambiguous prose.
+4. **Explicit prohibition** — for specific operational rules where identity doesn't apply. Use sparingly — each prohibition is a future bypass opportunity.
+5. **Reframing a conditional** — flip default/fallback ordering so the desired path comes first.
+6. **Restructuring content** — most expensive. For context window pressure issues only.
 
 ### Step 5: Write a memory file
 
@@ -155,6 +131,14 @@ type: feedback
 **How to apply:** [The fix, stated as an instruction CC can follow]
 ```
 
+### Step 6: Verify the fix held
+
+In the next session where the behavior could recur, check:
+- Did the agent follow the new instruction?
+- Did it find a new bypass around it?
+- If the fix held: update the memory file with "Verified: held in session on [date]"
+- If the agent found a new bypass: escalate to the next fix tier (rationalization → identity → table → restructure)
+
 ---
 
 ## Audit — Evaluate an Existing Skill or Prompt
@@ -169,6 +153,8 @@ Read the skill/prompt file completely, then evaluate against this checklist:
 - [ ] Is the desired default behavior stated first in every conditional?
 - [ ] Are all tool names explicit? (no "dispatch agents" — specify which tool)
 - [ ] Are prohibitions explicit? (not implied by the presence of a positive instruction)
+- [ ] Are foundational boundaries framed as identity, not prohibition? ("you are X" not "don't do Y")
+- [ ] Are known agent rationalizations named as compliance triggers?
 
 ### Context efficiency
 

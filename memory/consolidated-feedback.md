@@ -18,5 +18,6 @@ type: feedback
 10. Update symlinks in ~/.claude/skills/ when renaming or creating standalone skills.
 11. List docs/plans/ directory first when resuming work — never guess filenames.
 12. Direct embedding > propagation through intermediaries. Put tools in worker descriptions, not Team Leader instructions.
-13. Codesight-mcp is PRIMARY for code analysis. Reindex stale indexes. Grep/Read are fallbacks only when MCP is down.
+13. Codesight-mcp is preferred for code analysis when available. Reindex stale indexes. Grep/Read are fallbacks when MCP is unavailable or calls fail.
 14. CI failures require classification before action. Non-code failures (infra/billing/permissions) go to the user immediately — NEVER attempt code fixes.
+15. When a background CI watcher completes, read its output before dismissing. "Already handled" is a rationalization — read the log, then decide.

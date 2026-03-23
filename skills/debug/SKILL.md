@@ -44,6 +44,8 @@ If you haven't completed Phase 1, you cannot propose fixes.
 
 **Full-text code search:** Use `mcp__codesight-mcp__search_text` for fast full-text search across indexed code — faster than grep for searching error strings, magic values, or configuration keys across large repos.
 
+If codesight-mcp tools are not available, fall back to Grep/Read for call-site and symbol searches. Do NOT skip tracing — use whichever tools are available.
+
 **After forming a hypothesis, lock scope:** Identify the narrowest directory containing the affected files. Restrict edits to that directory for the rest of the debug session. This prevents accidentally "fixing" unrelated code while investigating.
 
 ## Phase 2: Pattern Analysis

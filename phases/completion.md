@@ -61,6 +61,8 @@ PR_NUM=$(gh pr view --json number -q .number)
 gh pr checks "$PR_NUM" --watch --fail-fast
 ```
 
+**When a background CI watcher completes:** Read its output FIRST. Do NOT assume the result based on prior context. "Already handled" is not a valid dismissal — read the actual output, classify the result, then act. A watcher you launched 5 minutes ago may be reporting a new failure, not the one you think.
+
 If all checks pass: report PR URL and summary. Done.
 
 If CI fails:
@@ -215,6 +217,6 @@ After the user chooses a completion option and it's been executed, print this bl
 >
 > **If you chose "Push and create PR" and want a more automated release:** Run `/release` — it syncs main, runs tests, audits coverage, pushes, and creates the PR with coverage stats.
 >
-> **Starting something new?** `/clear` then `/coding-team` with your next task.
+> **Starting something new?** `/clear` then `/coding-team` with your next task. If it's an unfamiliar codebase, start with `/onboard` for a guided orientation.
 >
 > ---
