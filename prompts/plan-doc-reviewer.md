@@ -44,6 +44,13 @@ Agent tool:
 
     This check is non-negotiable. A plan that silently drops findings is worse than no plan — it creates false confidence that issues were addressed.
 
+    ## Structural Validation (check all 4)
+
+    1. **Coherence** — do technology/pattern choices conflict? (e.g., task 2 uses sync but task 5 assumes async)
+    2. **Requirements coverage** — does every spec requirement map to at least one task?
+    3. **Implementation readiness** — could an implementer complete each task without asking questions? Check: exact file paths, clear acceptance criteria, no "handle appropriately" language.
+    4. **Gap analysis** — are there Critical gaps (blocks implementation), Important gaps (causes rework), or Nice-to-have improvements?
+
     ## Calibration
 
     **Only flag issues that would cause real problems during implementation.**
