@@ -119,6 +119,26 @@ Agent tool:
     "Only warnings, no errors" is NOT a reason to skip. Warnings are defects.
     Fix every warning in modified files before committing.
 
+    ## CI Fix Context (only when dispatched for CI failure)
+
+    [INSERT CI FAILURE CONTEXT — the orchestrator fills this when dispatching
+    for a CI fix. If this section is absent or says "N/A", this is a normal
+    implementation task — skip to "Your Job".]
+
+    Expected fields from orchestrator:
+    - **Failing CI step:** [step name from the CI run]
+    - **Error output:** [VERBATIM log — the orchestrator pastes the full output]
+    - **Files mentioned:** [files and lines from the error]
+    - **Prior attempts:** [what was already tried, if retry 2 or 3]
+
+    Your job: reproduce the failure locally FIRST. Run the exact command that
+    failed in CI. Do NOT guess at the fix from the error message alone.
+
+    If the failure cannot be reproduced locally, report BLOCKED with:
+    - What you ran locally and its output
+    - The CI error output for comparison
+    - Your hypothesis for why they differ (OS, Node/Python version, env vars)
+
     ## Your Job
 
     Once the test suite is green and you're clear on requirements:
