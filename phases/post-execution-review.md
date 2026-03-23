@@ -55,4 +55,4 @@ After all tasks are executed and verified:
 >
 > ---
 
-**User override:** If the user has said "never ask about second opinion" or "skip second-opinion gates" in this session, skip step 3 entirely for the rest of the session.
+**User override:** If the user has said "never ask about second opinion" or "skip second-opinion gates" in this session, skip second-opinion in execution for the rest of the session.

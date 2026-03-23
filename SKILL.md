@@ -69,9 +69,8 @@ If COORDINATION = no → subagents regardless of AGENT_TEAMS_AVAILABLE
 | Bug report or test failure | `/debug` skill (`skills/debug/SKILL.md`) |
 | Existing PR with review feedback | `/review-feedback` skill (`skills/review-feedback/SKILL.md`) |
 | Multiple independent failures | `/parallel-fix` skill (`skills/parallel-fix/SKILL.md`) |
-| Simple mechanical task (rename, format, single-file edit) | Route through coding-team at Phase 5 with a single haiku-tier task. Do NOT skip the pipeline — the user has mandated all code changes go through coding-team. |
-
-**All code changes go through coding-team.** For trivial tasks (typo, rename), skip to Phase 5 with a single haiku-tier task — but still use the pipeline. Never write code directly.
+| Single-file change under 20 lines with a complete spec | Phase 5 with a single haiku-tier task. Still goes through the pipeline. |
+| User says "autoplan", "auto-review", "run all reviews", or "make the decisions" | **Phase 4 auto-advance** — run Phase 1→4 sequentially, auto-deciding intermediate questions using these principles: (1) completeness over shortcuts, (2) pragmatic over theoretical, (3) explicit over clever, (4) bias toward action, (5) DRY, (6) boil lakes not oceans. Surface only taste decisions (close approaches, borderline scope) at a final approval gate before Phase 5. |
 
 ---
 
@@ -161,7 +160,7 @@ Each phase reads its detail file on entry. Do not read ahead — load only the a
 - Present exactly 4 structured completion options
 - Get confirmation before discarding work
 - Use the model tier assigned in the plan
-- Match process weight to task weight — trivial tasks skip to Phase 5 with a single haiku task, but still go through the pipeline
+- Match process weight to task weight
 
 ---
 
@@ -204,6 +203,17 @@ Each phase reads its detail file on entry. Do not read ahead — load only the a
 | Execution | `phases/execution.md` |
 | Post-Execution Review | `phases/post-execution-review.md` |
 | Completion | `phases/completion.md` |
+
+**Extracted on-demand files** (loaded by phase files when needed):
+
+| File | Extracted from | Purpose |
+|------|---------------|---------|
+| `phases/audit-loop.md` | execution.md | Audit team dispatch, triage, and loop exit |
+| `phases/design-team-lifecycle.md` | design-team.md | Agent teams lifecycle details |
+| `phases/doc-drift-scan.md` | execution.md | Documentation drift scan |
+| `phases/memory-nudge.md` | completion.md | Session learning extraction |
+| `phases/plan-format.md` | planning.md | Plan document template and task structure |
+| `phases/planning-next-steps.md` | planning.md | Risk signals and second-opinion gate |
 
 **Agent prompt templates** (used by the execution loop):
 

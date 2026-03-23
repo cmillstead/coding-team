@@ -1,13 +1,12 @@
 # Harden Auditor Prompt Template
 
 Read-only audit for security and resilience gaps.
-MUST be dispatched as Explore agent (read-only). Model: sonnet.
+MUST be dispatched as general-purpose agent (needs Bash access for dependency audit commands). Model: sonnet.
 
 ```
 Agent tool:
   description: "Harden audit for Task N"
   model: sonnet
-  subagent_type: Explore
   prompt: |
     You are a harden auditor on a task team. Your job: find security and
     resilience gaps in recently changed code. You CANNOT edit files — only report.

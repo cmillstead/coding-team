@@ -16,7 +16,7 @@ The Team Leader then:
    - Each teammate gets: full context, sibling task IDs, explicit out-of-scope statement, skill advisory block.
 4. Spawns each specialist as a teammate via the Task tool with `team_name`.
 5. Monitors `TaskList` for completion. Checks inbox for messages.
-6. Quality check — if a worker's output is off-scope, thin, or low quality: respawn with a tighter prompt. Don't patch bad output — scrap and rerun.
+6. Quality check — if a worker's output is off-scope, thin, or low quality: respawn with a tighter prompt. Don't patch bad output — scrap and rerun. Maximum 1 respawn per worker. If the second attempt is still thin, use what was returned.
 7. Cross-review pass — broadcasts to all teammates to read sibling outputs and flag cross-domain concerns. Workers message each other directly.
 8. Synthesizes findings into a design doc.
 9. Shuts down all teammates, runs cleanup, returns design doc.
@@ -82,13 +82,13 @@ If episodes are found:
 - Watch out for: <what would help next time>
 ```
 
-If no episodes found or scores are below threshold: skip silently. Do NOT fabricate episode context.
+If no episodes found or scores are below threshold: skip and note in status: 'Episode retrieval not available — skipped'. Do NOT fabricate episode context.
 
 ### Golden principles
 
 Read `~/.claude/golden-principles.md` using the Read tool. Pass the full contents to the Team Leader as a "## Golden Principles" section in the context. Design workers making architecture recommendations MUST check their proposals against these principles.
 
-If the file doesn't exist, skip silently.
+If the file doesn't exist, skip and note in status: 'Golden principles not available — skipped'
 
 ### Passing context to workers
 
@@ -177,47 +177,7 @@ Design work almost always routes to agent teams when available. The Team Leader 
 
 When AGENT_TEAMS_AVAILABLE = false: all design work uses subagents via the Agent tool.
 
-## Agent Teams Lifecycle
-
-All agent team usage follows this lifecycle:
-
-```
-1. CREATE TEAM
-   Teammate({ operation: "spawnTeam", team_name: "<descriptive-name>" })
-
-2. CREATE TASKS
-   TaskCreate({ subject, description, activeForm })
-   - Set dependencies with blocked_by if tasks have ordering requirements
-
-3. SPAWN TEAMMATES
-   Use Task tool with team_name parameter to spawn into the team
-   - Each teammate gets: full context, clear scope, constraints, output format
-   - Teammates auto-load CLAUDE.md, MCP servers, and skills
-   - Teammates do NOT inherit lead's conversation history — include everything they need in the spawn prompt
-
-4. COORDINATE
-   - Monitor via TaskList for task status
-   - Check inbox for messages from teammates
-   - Broadcast when all teammates need the same information
-   - Direct message for targeted coordination
-
-5. SHUTDOWN
-   For each teammate:
-     Teammate({ operation: "requestShutdown", target_agent_id: "<id>" })
-   Wait for each to approve (they finish current work first)
-
-6. CLEANUP
-   Teammate({ operation: "cleanup" })
-   - Only the lead runs cleanup
-   - Verify all teammates are shut down before cleanup
-   - Cleanup removes shared team resources (inbox, config, task files)
-```
-
-**Never:**
-- Let teammates run cleanup (their team context may not resolve correctly)
-- Skip shutdown and go straight to cleanup (check for active teammates first)
-- Spawn teammates without the team existing (spawnTeam first)
-- Forget to include task-specific context in spawn prompts (teammates have no conversation history)
+Read `phases/design-team-lifecycle.md` and follow its instructions.
 
 ---
 

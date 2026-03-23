@@ -25,14 +25,14 @@ The main SKILL.md is a router that knows the phase sequence, input/output contra
 
 | Invocation | Loaded | Lines |
 |---|---|---|
-| `/coding-team` (router decides) | Main SKILL.md | ~219 |
-| `/coding-team` → resume session | Main + `phases/session-resume.md` | ~332 |
-| `/coding-team` → Phase 4 (planning) | Main + `phases/planning.md` | ~536 |
-| `/coding-team` → Phase 5 (execution) | Main + `phases/execution.md` | ~495 |
-| `/coding-team` → Phase 5 post-exec | Main + execution + `phases/post-execution-review.md` | ~553 |
-| `/coding-team` → Phase 2 (design) | Main + `phases/design-team.md` | ~462 |
-| `/coding-team` → Phase 6 (completion) | Main + `phases/completion.md` | ~455 |
-| `/debug` (standalone) | `skills/debug/SKILL.md` only | ~168 |
+| `/coding-team` (router decides) | Main SKILL.md | ~218 |
+| `/coding-team` → resume session | Main + `phases/session-resume.md` | ~331 |
+| `/coding-team` → Phase 4 (planning) | Main + `phases/planning.md` | ~386 |
+| `/coding-team` → Phase 5 (execution) | Main + `phases/execution.md` | ~413 |
+| `/coding-team` → Phase 5 post-exec | Main + execution + `phases/post-execution-review.md` | ~471 |
+| `/coding-team` → Phase 2 (design) | Main + `phases/design-team.md` | ~421 |
+| `/coding-team` → Phase 6 (completion) | Main + `phases/completion.md` | ~342 |
+| `/debug` (standalone) | `skills/debug/SKILL.md` only | ~201 |
 | `/verify` (standalone) | `skills/verify/SKILL.md` only | ~55 |
 | `/prompt-craft` (standalone) | `skills/prompt-craft/SKILL.md` only | ~263 |
 
@@ -103,7 +103,7 @@ For fresh tasks (no prior plans), it routes based on what you bring:
 | A bug report or test failure | `/debug` skill |
 | A PR with review feedback | `/review-feedback` skill |
 | Multiple independent failures | `/parallel-fix` skill |
-| A trivial task (rename, typo, single-file fix) | Phase 5 with a single haiku-tier task |
+| Single-file change under 20 lines with a complete spec | Phase 5 with a single haiku-tier task |
 
 ### Phase 1: Dialogue
 
@@ -163,7 +163,7 @@ The main agent is the **orchestrator** — it dispatches agents, reads results, 
 
 Before the first task, the full test suite runs to establish a **baseline**. Pre-existing failures are fixed before new work begins.
 
-Each task gets a **task team**: an implementer (using TDD) plus an audit team of 3-4 read-only reviewers dispatched in parallel after the implementer reports done.
+Each task gets a **task team**: an implementer (using TDD) plus an audit team of 3-4 reviewers (spec and simplify are read-only; harden has Bash access for dependency audits) dispatched in parallel after the implementer reports done.
 
 **Implementer** reports one of: DONE, DONE_WITH_CONCERNS, NEEDS_CONTEXT, or BLOCKED. Blocked tasks are assessed and escalated — never ignored or retried without changes.
 
@@ -346,6 +346,12 @@ phases/                           # pipeline phase details (loaded on demand)
   execution.md                    #   Phase 5 — task teams + audit loops
   post-execution-review.md        #   risk signals + Codex review (loaded after execution)
   completion.md                   #   Phase 6 — verify, merge/PR, learning loop
+  audit-loop.md                   #   audit team dispatch + triage (extracted from execution)
+  design-team-lifecycle.md        #   agent teams lifecycle details (extracted from design-team)
+  doc-drift-scan.md               #   documentation drift scan (extracted from execution)
+  memory-nudge.md                 #   session learning extraction (extracted from completion)
+  plan-format.md                  #   plan document template + task structure (extracted from planning)
+  planning-next-steps.md          #   risk signals + second-opinion gate (extracted from planning)
 skills/                           # standalone skills (can be invoked independently)
   debug/SKILL.md                  #   /debug — root cause investigation
   verify/SKILL.md                 #   /verify — evidence-before-claims gates
@@ -383,7 +389,7 @@ The skill writes artifacts during execution and at completion:
 
 ## Troubleshooting: Claude won't use coding-team
 
-If the main agent keeps writing code directly instead of delegating to `/coding-team`, the problem is almost always **competing instructions in your CLAUDE.md**. The agent finds language that implies it should write code and uses that to rationalize skipping delegation.
+If the main agent writes code directly instead of delegating to `/coding-team`, the CLAUDE.md identity framing may have competing signals. The agent's role is 'engineering manager' — any language that implies it should write code conflicts with this identity.
 
 Use `/prompt-craft diagnose` to find the conflict:
 
@@ -399,8 +405,8 @@ Use `/prompt-craft diagnose` to find the conflict:
 | "Write tests alongside new code" | Implies the agent writes tests | "Ensure tests exist (coding-team handles this)" |
 | "Read code-style.md when writing Python" | Implies the agent writes Python | "Pass code-style.md to coding-team agents" |
 | Model routing table without "(for coding-team agents)" | Reads as tasks for the main agent | Add "(for coding-team agents, NOT for you)" to the header |
-| "Skip coding-team for simple tasks" | Agent reclassifies everything as "simple" | Remove the escape hatch entirely |
-| Delegation rule buried mid-file | Gets outweighed by surrounding code-writing context | Move to line 1 of CLAUDE.md |
+| Escape hatch language ("skip", "simple", "trivial") | Agent reclassifies everything as "simple" | Quantify thresholds: "single-file under 20 lines" not "simple" |
+| Identity statement not first section | Gets outweighed by surrounding code-writing context | Identity framing must be the first thing the agent reads |
 
 **Key insight:** A single "don't write code" rule loses to five other lines that implicitly assume you DO write code. Every line in CLAUDE.md must be consistent with the delegation model. `/prompt-craft diagnose` finds these inconsistencies.
 
