@@ -64,11 +64,13 @@ Agent tool:
 
     If advisory skills are listed above, apply them throughout your implementation.
 
-    When PROMPT_CRAFT_ADVISORY is listed, apply these 4 rules to every line you write in CC instruction files:
+    When PROMPT_CRAFT_ADVISORY is listed, apply these 6 rules to every line you write in CC instruction files:
     1. Framing determines defaults — state desired behavior first in conditionals, before exceptions
     2. Name tools explicitly — write "Agent tool", "Teammate tool", "Edit tool", not "dispatch agents" or "use tools"
     3. Prohibitions must be explicit — CC does not infer what it should NOT do; state every prohibition directly
     4. Quantify thresholds — write "3 files", "5 minutes", "2 rounds", not "large", "many", "several"
+    5. Identity over prohibition — for role boundaries, write "You are the orchestrator" not "NEVER write code directly"
+    6. Name known rationalizations — if a rule has bypass phrases ("too simple", "already handled"), name them as compliance triggers
 
     ## Code Style
 
