@@ -30,11 +30,18 @@ The main SKILL.md is a router that knows the phase sequence, input/output contra
 | `/coding-team` → Phase 4 (planning) | Main + `phases/planning.md` | ~386 |
 | `/coding-team` → Phase 5 (execution) | Main + `phases/execution.md` | ~413 |
 | `/coding-team` → Phase 5 post-exec | Main + execution + `phases/post-execution-review.md` | ~471 |
-| `/coding-team` → Phase 2 (design) | Main + `phases/design-team.md` | ~421 |
-| `/coding-team` → Phase 6 (completion) | Main + `phases/completion.md` | ~342 |
-| `/debug` (standalone) | `skills/debug/SKILL.md` only | ~201 |
+| `/coding-team` → Phase 2 (design) | Main + `phases/design-team.md` | ~432 |
+| `/coding-team` → Phase 6 (completion) | Main + `phases/completion.md` | ~451 |
+| `/debug` (standalone) | `skills/debug/SKILL.md` only | ~203 |
 | `/verify` (standalone) | `skills/verify/SKILL.md` only | ~55 |
-| `/prompt-craft` (standalone) | `skills/prompt-craft/SKILL.md` only | ~263 |
+| `/prompt-craft` (standalone) | `skills/prompt-craft/SKILL.md` only | ~249 |
+| `/doc-write` (standalone) | `skills/doc-write/SKILL.md` only | ~185 |
+| `/dep-audit` (standalone) | `skills/dep-audit/SKILL.md` only | ~108 |
+| `/migration-guide` (standalone) | `skills/migration-guide/SKILL.md` only | ~127 |
+| `/onboard` (standalone) | `skills/onboard/SKILL.md` only | ~101 |
+| `/a11y` (standalone) | `skills/a11y/SKILL.md` only | ~106 |
+| `/api-qa` (standalone) | `skills/api-qa/SKILL.md` only | ~93 |
+| `/incident` (standalone) | `skills/incident/SKILL.md` only | ~129 |
 
 Phase files do not reference each other. The main SKILL.md's phase contracts define the input/output handoff between phases.
 
@@ -366,6 +373,13 @@ skills/                           # standalone skills (can be invoked independen
   release/SKILL.md                #   /release — automated release workflow
   retrospective/SKILL.md          #   /retrospective — engineering retrospective
   doc-sync/SKILL.md               #   /doc-sync — post-ship documentation update
+  doc-write/SKILL.md              #   /doc-write — write docs from scratch or improve existing
+  dep-audit/SKILL.md              #   /dep-audit — dependency health, license, and upgrade audit
+  migration-guide/SKILL.md        #   /migration-guide — breaking change upgrade guides
+  onboard/SKILL.md                #   /onboard — guided codebase orientation
+  a11y/SKILL.md                   #   accessibility audit — WCAG compliance, keyboard nav, ARIA
+  api-qa/SKILL.md                 #   API contract testing — validation, error responses, breaking changes
+  incident/SKILL.md               #   incident response — structured production incident coordination
 prompts/                          # agent prompt templates (used by execution loop)
   implementer.md                  #   implementer agent template
   spec-reviewer.md                #   spec compliance + TDD verification (read-only)

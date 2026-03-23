@@ -16,3 +16,4 @@
 - [feedback-context-weight.md](feedback-context-weight.md) — SKILL.md and execution.md too heavy; memory files should consolidate; direct embedding > propagation
 - [feedback-no-pause-between-phases.md](feedback-no-pause-between-phases.md) — Don't pause between severity phases in scan-fix workflows; auto-continue with progress summaries
 - [feedback-ci-infra-failures.md](feedback-ci-infra-failures.md) — Agents waste cycles on non-code CI failures; added failure classification protocol
+- [feedback-strategy-validation.md](feedback-strategy-validation.md) — Identity framing + named rationalizations confirmed working; zero friction since strategy change (2026-03-22)

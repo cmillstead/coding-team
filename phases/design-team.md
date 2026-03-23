@@ -21,7 +21,7 @@ The Team Leader then:
 8. Synthesizes findings into a design doc.
 9. Shuts down all teammates, runs cleanup, returns design doc.
 
-**Architecture visualization:** The Team Leader can use `mcp__codesight-mcp__get_diagram` to generate architecture diagrams of the codebase. Include relevant diagrams in the context passed to specialist workers — visual context helps workers understand system boundaries and data flow.
+**Architecture visualization:** The Team Leader can use `mcp__codesight-mcp__get_diagram` to generate architecture diagrams of the codebase. Include relevant diagrams in the context passed to specialist workers — visual context helps workers understand system boundaries and data flow. If codesight-mcp is not available, skip diagram generation — workers will read the code directly.
 
 **If AGENT_TEAMS_AVAILABLE = false:**
 
