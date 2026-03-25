@@ -1,6 +1,6 @@
 ---
 name: review-feedback
-description: "Use when receiving code review feedback — from PR reviewers, teammates, users, or external contributors. Technical evaluation protocol: read, understand, verify against codebase, evaluate technically, then respond or push back with reasoning. No performative agreement."
+description: "Use when you RECEIVED review comments and need to evaluate and address them — from PR reviewers, teammates, users, or external contributors. Not for reviewing code yourself (use /review for that). Technical evaluation protocol: read, understand, verify against codebase, evaluate technically, then respond or push back with reasoning. No performative agreement."
 ---
 
 # /review-feedback — Handling Code Review
