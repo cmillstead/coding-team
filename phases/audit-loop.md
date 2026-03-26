@@ -22,6 +22,11 @@ After the completeness check passes and implementer reports DONE or DONE_WITH_CO
 4. If findings to fix → dispatch new implementer to fix → re-audit (max 3 rounds)
    Fresh audit agents each round — don't reuse.
    After the implementer applies audit fixes: re-run tests to verify fixes didn't introduce regressions. This is mandatory.
+   **Same-class search (after security fixes):** When an implementer fixes a security finding (injection, auth bypass, unsanitized input, missing validation), dispatch a follow-up search before re-audit:
+   - Use `mcp__codesight-mcp__search_references` or `mcp__codesight-mcp__search_text` to find all analogous call sites
+   - If the fix created a shared utility (sanitizer, validator), verify it's called at ALL expected sites
+   - Flag unprotected sites as new findings for the next fix round
+   This prevents the Case 23 pattern: fixing 1 of N instances while N-1 remain vulnerable.
 
 **Audit agents MUST be read-only (Explore) — except harden auditor which needs Bash for dependency audit commands.** This prevents reviewers from silently "fixing" things instead of flagging them. The separation between finding and fixing is the whole point.
 
