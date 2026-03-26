@@ -74,6 +74,12 @@ Before defining tasks, map out which files will be created or modified and what 
 
 **Model:** haiku | sonnet | opus
 
+**Side-effects:** [only include when task creates infrastructure artifacts]
+- Hook registration in `settings.json`
+- Symlink in `~/.claude/skills/` or `~/.claude/agents/`
+- Deployment via `scripts/deploy.sh`
+- Config update in `.mcp.json`, `package.json`, etc.
+
 - [ ] **Step 1: Write the failing test**
 
 ```python
@@ -108,6 +114,8 @@ git commit -m "feat: add specific feature"
 ````
 
 **Each step is one action (2-5 minutes).** Complete code in plan — not "add validation here." Exact commands with expected output.
+
+**Infrastructure tasks:** When a task creates hooks, agents, skills, or config files that require registration or deployment beyond the file itself, include a final step: "Register/deploy: [exact command or manual step]." Unregistered infrastructure is a dark feature — it exists but doesn't work.
 
 ## Model Assignment Per Task
 
