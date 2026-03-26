@@ -256,6 +256,14 @@ def main():
                 "Use codesight-mcp search_text instead of the Read tool for targeted lookups."
             ).format(pct),
         }))
+    elif pct >= 50:
+        print(json.dumps({
+            "decision": "allow",
+            "reason": (
+                "You are a concise communicator. Context at {:.0f}% — start being concise. "
+                "Shorter explanations, less recapping, no restating what the user said."
+            ).format(pct),
+        }))
 
 
 if __name__ == "__main__":
