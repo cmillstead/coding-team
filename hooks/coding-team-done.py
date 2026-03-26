@@ -37,8 +37,13 @@ def get_skill_names():
     return FALLBACK_SKILLS
 
 
-try:
-    data = json.load(sys.stdin)
+def main():
+    try:
+        data = json.load(sys.stdin)
+    except (json.JSONDecodeError, ValueError):
+        print(json.dumps({"decision": "allow"}))
+        return
+
     tool = data.get("tool_name", "")
     tool_input = data.get("tool_input", {})
 
@@ -46,7 +51,14 @@ try:
         skill_name = tool_input.get("skill_name", tool_input.get("skill", ""))
         skill_names = get_skill_names()
         if skill_name in skill_names:
-            if os.path.exists(ACTIVE_FILE):
-                os.remove(ACTIVE_FILE)
-except (json.JSONDecodeError, ValueError, KeyError):
-    pass
+            try:
+                if os.path.exists(ACTIVE_FILE):
+                    os.remove(ACTIVE_FILE)
+            except OSError:
+                pass
+
+    print(json.dumps({"decision": "allow"}))
+
+
+if __name__ == "__main__":
+    main()

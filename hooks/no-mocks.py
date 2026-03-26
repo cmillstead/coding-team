@@ -181,7 +181,10 @@ def handle_edit_write(tool_name: str, tool_input: dict) -> None:
 
 
 def main():
-    event = json.load(sys.stdin)
+    try:
+        event = json.load(sys.stdin)
+    except (json.JSONDecodeError, ValueError):
+        return  # malformed input, skip silently
     tool_name = event.get('tool_name', '')
     tool_input = event.get('tool_input', {})
 
