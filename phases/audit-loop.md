@@ -45,7 +45,7 @@ After collecting findings from all auditors:
 - **Medium** — include in next fix round
 - **Low/Cosmetic** — fix inline if trivial, otherwise note in completion summary and skip
 
-**Budget check:** If fix rounds add 30%+ to the original implementation diff, tighten scope — skip medium/low simplify findings, focus on harden patches and spec gaps.
+**Budget check:** If fix rounds add 30%+ to the original implementation diff, surface this to the user: "Fix rounds have grown to N% of the original diff. All findings are still planned. Want to defer any medium/low findings to a follow-up?" The user decides what to defer — the agent does not auto-skip. Known rationalization: "tighten scope" — scope tightening is the user's decision, not an automatic budget optimization.
 
 **Drift check (between audit rounds):** Before spawning the next audit round, re-read the original task description. If findings are pulling into unrelated areas or scope has expanded beyond the task, re-scope or exit the audit loop.
 
