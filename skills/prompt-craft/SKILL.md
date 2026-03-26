@@ -6,86 +6,60 @@ description: "Write or audit Claude Code SKILL.md files, CLAUDE.md instructions,
 # /prompt-craft — Skill & Prompt Engineering
 
 When invoked standalone:
-- If the user wants to create a new skill: start at **Create**
-- If the user wants to fix a behavioral issue ("CC keeps doing X"): start at **Diagnose**
-- If the user wants to improve an existing skill or prompt: start at **Audit**
-- If the user wants to update the skill taxonomy: start at **Taxonomy**
+- Create a new skill: start at **Create**
+- Fix a behavioral issue ("CC keeps doing X"): start at **Diagnose**
+- Improve an existing skill or prompt: start at **Audit**
+- Update the skill taxonomy: start at **Taxonomy**
 
-When invoked from /coding-team Phase 2 as a design worker: the Team Leader provides scope. Focus your analysis on the prompt/skill dimensions of the task.
+When invoked from /coding-team Phase 2: the Team Leader provides scope. Read `skills/prompt-craft/phase2-worker.md` for the Phase 2 lens.
 
 ---
 
 ## Create — New Skill from Scratch
 
 ### 1. Clarify purpose
-
-Before writing anything:
 - What specific behavior should this skill produce?
-- When should CC invoke it? (trigger phrases, task patterns)
-- When should CC NOT invoke it? (false triggers to avoid)
-- Is this a standalone skill or a pipeline phase?
-- What's the context budget? (target line count)
+- When should CC invoke it? When should it NOT?
+- Standalone skill or pipeline phase? Context budget?
 
 ### 2. Write frontmatter
 
-The `description` field is the most important line in the skill. It controls when CC invokes it. Rules:
+The `description` field controls when CC invokes the skill:
 - Start with "Use when..." — CC pattern-matches on this
-- Include trigger phrases the user would actually say
-- Include negative triggers ("Do NOT use when...")
-- Be specific. "Use for code tasks" triggers on everything. "Use when investigating a bug or test failure" triggers correctly.
-- Keep it under 3 sentences
+- Include trigger phrases and negative triggers ("Do NOT use when...")
+- Be specific: "Use when investigating a bug or test failure" not "Use for code tasks"
+- Keep under 3 sentences
 
 ```yaml
 ---
 name: skill-name
-description: "Use when [specific trigger]. [What it does in one sentence]. [Do NOT use when / negative trigger]."
+description: "Use when [trigger]. [What it does]. [Do NOT use when...]."
 ---
 ```
 
 ### 3. Write the body
 
-Structure:
-- **Identity preamble**: tell the agent what it IS ("You are the engineering manager", "You are implementing Task N"). Identity determines behavior more reliably than prohibitions — an engineering manager doesn't write code not because someone said "don't" but because it's not their job.
-- **Standalone preamble** (if applicable): how to bootstrap when invoked directly vs from a pipeline
-- **Core protocol**: the actual instructions, written as imperative commands
-- **Decision points**: explicit if/then routing for any ambiguous situations
-- **Red flags**: what CC should never do in this skill's context
-- **Verification**: how to confirm the skill produced correct behavior
+Structure: **Identity preamble** (what the agent IS — identity determines behavior more reliably than prohibitions) → **Standalone preamble** (bootstrap when invoked directly vs pipeline) → **Core protocol** (imperative commands) → **Decision points** (if/then routing) → **Red flags** (what to never do) → **Verification** (how to confirm correct behavior).
 
 ### 4. Language rules
 
-Seven patterns that control CC behavior. Summary (read `skills/prompt-craft/language-rules.md` for full examples):
+Seven patterns (full examples in `skills/prompt-craft/language-rules.md`):
 
 1. **Framing determines defaults** — desired path first, fallback second
 2. **Name tools explicitly** — `Agent tool`, not "dispatch agents"
 3. **Prohibitions must be explicit** — CC doesn't infer what not to do
-4. **Identity over prohibition** — "you are the orchestrator" beats "NEVER write code." Use identity for foundational boundaries, prohibitions for operational rules.
-5. **Name the rationalization** — when CC bypasses with "too simple" / "already handled" / "pre-existing", name the phrase and turn it into a compliance trigger
+4. **Identity over prohibition** — "you are the orchestrator" beats "NEVER write code"
+5. **Name the rationalization** — turn bypass phrases into compliance triggers
 6. **Quantify thresholds** — "8+ files" not "large tasks"
-7. **Tables beat prose for routing** — classification tables for any multi-path decision
+7. **Tables beat prose for routing** — classification tables for multi-path decisions
 
 ### 5. Test the skill
 
-After writing, evaluate with the audit checklist (see Audit section below).
+Evaluate with the audit checklist (see Audit section below).
 
-### 6. Agent Template (standard structure)
+### 6. Agent Template (standard 14-step structure)
 
-After 12 audit cycles, agents converge on this 13-step structure. Use as a checklist when creating new agents:
-
-1. **Frontmatter** — name, description, model, tools
-2. **Dispatch Context** — how it's invoked (standalone vs pipeline)
-3. **Identity Block** — what you ARE, what your JOB is (Pattern 9: Identity-Negative)
-4. **Pipeline Isolation** — "You are INSIDE /coding-team... Do NOT invoke..."
-5. **MANDATORY block** — non-negotiable requirements (near the top — Rule 9)
-6. **Core Protocol** — what to check, how to check it
-7. **Code Intelligence table** — tool-to-use mapping (if MCP tools available)
-8. **MCP Resilience block** — Pattern 4 (if MCP tools available)
-9. **Project-Specific Criteria slot** — "[INSERT...]" placeholder
-10. **Calibration** — what severity bar to apply
-11. **When You Cannot Complete** — BLOCKED status, no guessing
-12. **Finding Integrity** — Pattern 3 (for read-only auditors)
-13. **Named Rationalizations** — agent-specific bypasses as compliance triggers
-14. **Output Format** — structured report template
+1. Frontmatter  2. Dispatch Context  3. Identity Block  4. Pipeline Isolation  5. MANDATORY block  6. Core Protocol  7. Code Intelligence table  8. MCP Resilience block  9. Project-Specific Criteria slot  10. Calibration  11. When You Cannot Complete  12. Finding Integrity  13. Named Rationalizations  14. Output Format
 
 See `skills/prompt-craft/patterns-catalog.md` for templates of steps 8, 11, 12, and 13.
 
@@ -96,139 +70,79 @@ See `skills/prompt-craft/patterns-catalog.md` for templates of steps 8, 11, 12, 
 When a user reports "CC keeps doing X instead of Y":
 
 ### Step 1: Identify the instruction
-
-Find the exact line in the skill/prompt that should produce behavior Y. If it doesn't exist, the fix is adding it.
+Find the exact line that should produce behavior Y. If it doesn't exist, the fix is adding it.
 
 ### Step 2: Check framing
 
-Read the surrounding context. Common failure patterns:
-
-| Symptom | Likely cause | Fix |
-|---|---|---|
-| CC uses the wrong tool | Desired tool isn't named explicitly, or the wrong tool is named first | Name the correct tool with exact syntax. Put it first in any conditional. |
-| CC skips a step | Step is described as optional or implicit | Make it mandatory with explicit language ("MUST", "ALWAYS", "before proceeding") |
-| CC does the opposite of what's written | Instruction is framed as an exception to the default | Flip the default. Make desired behavior the first/primary path. |
-| CC half-follows instructions | Instructions are mixed with explanation | Separate imperative instructions from explanatory prose. Instructions first, rationale after. |
-| CC follows the spirit but not the letter | Instructions use vague language | Replace "should", "consider", "try to" with "MUST", "DO", "ALWAYS" |
-| CC only follows instructions early in conversation | Context window pressure pushes instructions out | Shorten the skill. Move details to on-demand files. Repeat critical rules at decision points. |
-| CC defaults to subagents when you want agent teams | Subagent is framed as default, agent teams as exception | Flip the framing. Put agent teams path first. |
-| CC writes code when it should delegate | No explicit prohibition on direct coding | Add "NEVER use Edit/Write directly. Spawn an agent." |
-| CC constructs category exceptions ("just mechanical", "just test expectations") | Rule has no escape hatch but CC invents one | Name the specific rationalization as a compliance trigger (see Language Rules) |
-| CC dismisses background task output without reading | No instruction to read output before acting on assumptions | Add "read output FIRST, then classify" — name "already handled" as rationalization |
-| CC obeys reluctantly, finds new bypasses each session | Prohibition-based framing creates adversarial dynamic | Rewrite as identity framing — tell the agent what it IS, not what it can't do |
-| CC freezes or invents workarounds after a prohibition | Prohibition lacks a replacement behavior | Add "Instead, do Y" after every "NEVER do X" — see Rule 8 in language-rules.md |
-| CC processes some items in a list but not all | No enumerated completion protocol | Add item count at dispatch, count verification by orchestrator, named rationalizations ("pattern is established", "representative ones") — see patterns-catalog.md Pattern 1 |
-| CC follows rules early but ignores them late in conversation | Context pressure pushes instructions past the survival threshold | Front-load critical rules in top 100 lines. Extract sections past line 200 to on-demand files. Add required output fields that force compliance regardless of context depth — see Rule 9 in language-rules.md |
+| Symptom | Fix |
+|---|---|
+| CC uses the wrong tool | Name the correct tool explicitly with exact syntax; put it first in conditionals |
+| CC skips a step | Make mandatory: "MUST", "ALWAYS", "before proceeding" |
+| CC does the opposite | Flip the default — desired behavior first, exception second |
+| CC half-follows instructions | Separate imperative instructions from explanatory prose |
+| CC follows spirit but not letter | Replace "should"/"consider"/"try to" with "MUST"/"DO"/"ALWAYS" |
+| CC ignores instructions late in conversation | Shorten skill, move details to on-demand files, repeat critical rules at decision points |
+| CC defaults to subagents over agent teams | Put agent teams path first in framing |
+| CC writes code when it should delegate | Add "NEVER use Edit/Write directly. Spawn an agent." |
+| CC constructs category exceptions | Name the rationalization as a compliance trigger |
+| CC dismisses background task output | Add "read output FIRST, then classify" — name "already handled" as rationalization |
+| CC obeys reluctantly, finds new bypasses | Rewrite as identity framing, not prohibition |
+| CC freezes after prohibition | Add "Instead, do Y" after every "NEVER do X" |
+| CC processes some list items but not all | Add item count at dispatch + orchestrator count verification |
+| CC ignores rules late in long conversations | Front-load critical rules in top 100 lines; add required output fields |
 
 ### Step 3: Check competing instructions
-
-Search for contradictions:
 - Does another skill or CLAUDE.md give conflicting guidance?
-- Does the main SKILL.md say one thing but the phase file say another?
+- Does the main SKILL.md say one thing but a phase file say another?
 - Does a prompt template override the skill's instructions?
 
 ### Step 4: Propose fix
 
-Write the minimal change. Prefer (in order):
-1. **Name the rationalization** — if the agent bypasses with a specific phrase ("too simple", "already handled", "pre-existing"), name that phrase and turn it into a trigger. Cheapest, most targeted fix.
-2. **Identity framing** — if the agent keeps fighting a boundary, rewrite as identity ("you are the orchestrator") instead of prohibition ("don't write code"). Fixes the root cause.
-3. **Decision table** — if the agent doesn't know what to do, give it a classification table with signal keywords and actions. Replaces ambiguous prose.
-4. **Explicit prohibition** — for specific operational rules where identity doesn't apply. Use sparingly — each prohibition is a future bypass opportunity.
-5. **Reframing a conditional** — flip default/fallback ordering so the desired path comes first.
-6. **Restructuring content** — most expensive. For context window pressure issues only.
+Prefer (in order): 1. **Name the rationalization** 2. **Identity framing** 3. **Decision table** 4. **Explicit prohibition** 5. **Reframing a conditional** 6. **Restructuring content** (most expensive, for context pressure only)
 
 ### Step 5: Write a memory file
 
-If this is a recurring issue, create a memory file in `memory/`:
-
-```yaml
----
-name: Short descriptive name
-description: One-line summary of the behavioral issue
-type: feedback
----
-
-[What CC does wrong]
-
-**Why:** [Root cause in the instructions]
-
-**How to apply:** [The fix, stated as an instruction CC can follow]
-```
+If recurring, create `memory/feedback-<slug>.md` with: what CC does wrong, why (root cause), how to apply (the fix as an instruction).
 
 ### Step 6: Verify the fix held
-
-In the next session where the behavior could recur, check:
-- Did the agent follow the new instruction?
-- Did it find a new bypass around it?
-- If the fix held: update the memory file with "Verified: held in session on [date]"
-- If the agent found a new bypass: escalate to the next fix tier (rationalization → identity → table → restructure)
+In the next session: did the agent follow the instruction? Find a new bypass? If held, note in memory file. If bypassed, escalate to next fix tier.
 
 ---
 
 ## Audit — Evaluate an Existing Skill or Prompt
 
-Read the skill/prompt file completely, then evaluate against this checklist:
-For standard block templates, see `skills/prompt-craft/patterns-catalog.md`.
+Read the file completely, then evaluate. For standard block templates, see `skills/prompt-craft/patterns-catalog.md`.
 
 ### Behavioral alignment
-
-- [ ] Does the frontmatter `description` accurately describe when to trigger?
-- [ ] Are there false-positive triggers? (would CC invoke this for tasks it shouldn't?)
-- [ ] Are there false-negative triggers? (would CC miss tasks it should handle?)
-- [ ] Is the desired default behavior stated first in every conditional?
-- [ ] Are all tool names explicit? (no "dispatch agents" — specify which tool)
-- [ ] Are prohibitions explicit? (not implied by the presence of a positive instruction)
-- [ ] Are foundational boundaries framed as identity, not prohibition? ("you are X" not "don't do Y")
-- [ ] Are known agent rationalizations named as compliance triggers?
+- [ ] Frontmatter `description` accurately describes triggers? No false positives/negatives?
+- [ ] Desired default behavior stated first in every conditional?
+- [ ] All tool names explicit? Prohibitions explicit?
+- [ ] Foundational boundaries use identity framing, not prohibition?
+- [ ] Known rationalizations named as compliance triggers?
 
 ### Context efficiency
-
-- [ ] How many lines? Could any be moved to an on-demand file?
-- [ ] Are there sections that only apply to rare situations? (move to conditional reads)
-- [ ] Is there duplicated content that could be inlined as a 5-line summary instead?
-- [ ] Would this skill still work if context was tight? (critical instructions near the top?)
+- [ ] Could sections move to on-demand files? Rare-situation sections extracted?
+- [ ] Critical instructions near the top? Works under tight context?
 
 ### Clarity for CC
-
-- [ ] Could CC follow every instruction without asking a question?
-- [ ] Are thresholds quantified? (no "large", "complex", "many" without numbers)
-- [ ] Do decision points have explicit routing? (tables or if/then, not "consider")
-- [ ] Are examples provided for ambiguous patterns?
-- [ ] Is rationale separated from instruction? (CC follows instructions, skims rationale)
+- [ ] Thresholds quantified? Decision points have explicit routing (tables/if-then)?
+- [ ] Rationale separated from instruction?
 
 ### Standard blocks
+- [ ] Enumerated-item-completion protection? Replacement behaviors for prohibitions?
+- [ ] Under 200 lines? "When You Cannot Complete" block? Finding Integrity block?
+- [ ] Escalation paths explicit (BLOCKED, NEEDS_CONTEXT)?
 
-- [ ] Does the file have enumerated-item-completion protection? (for any agent processing a list)
-- [ ] Are replacement behaviors provided for every prohibition? ("NEVER X" must have "Instead, Y")
-- [ ] Is the file under 200 lines? (context saturation threshold — see `patterns-catalog.md` tier table)
-- [ ] Does the file have a "When You Cannot Complete" block? (for any agent that can get stuck)
-- [ ] Is there a Finding Integrity block? (for any read-only auditor)
-- [ ] Are escalation paths explicit? (BLOCKED, NEEDS_CONTEXT statuses defined)
-
-### Prompt template quality (for `prompts/*.md`)
-
-- [ ] Does the prompt tell the agent what it IS? ("You are implementing Task N")
-- [ ] Does it tell the agent what it is NOT? (out-of-scope statement)
-- [ ] Is full context provided? (agents don't inherit conversation history)
-- [ ] Is the expected output format specified?
-- [ ] Does it handle failure? (when to escalate, when to stop)
-- [ ] Does it prevent common agent mistakes? (explicit prohibitions)
+### Prompt template quality (`prompts/*.md`)
+- [ ] Tells agent what it IS and what it is NOT?
+- [ ] Full context provided? Output format specified? Failure handling?
 
 ### Report format
-
 ```
 AUDIT: [skill/prompt name]
-
-PASS:
-- [what's working well]
-
-ISSUES:
-- [severity] [issue]: [current text] → [suggested fix]
-- [severity] [issue]: [current text] → [suggested fix]
-
-CONTEXT:
-- Current: N lines
-- Recommended: N lines (move X to on-demand)
+PASS: [what's working well]
+ISSUES: [severity] [issue]: [current text] -> [suggested fix]
+CONTEXT: Current N lines, Recommended N lines (move X to on-demand)
 ```
 
 ---
@@ -236,20 +150,3 @@ CONTEXT:
 ## Taxonomy — Skill Discovery Maintenance
 
 For taxonomy operations (adding/removing skills, auditing the taxonomy), read `skills/prompt-craft/taxonomy.md`.
-
----
-
-## As a Phase 2 Design Worker
-
-When the Team Leader spawns you as a specialist worker, your lens is:
-
-**Focus:** Prompt quality, skill coverage, agent coordination patterns, instruction clarity.
-
-**Questions to answer:**
-- Are the existing agent prompts (`prompts/*.md`) well-suited for this task?
-- Does this task need a new prompt template or modifications to an existing one?
-- Will the skill advisory blocks the Team Leader passes to workers be useful or noise?
-- Are there behavioral issues in the current skill/prompt setup that this task will hit?
-- Does the task's coordination pattern (agent teams vs subagents) match its complexity signals?
-
-**Output:** Findings, concerns, and recommendations from the prompt/skill lens. Flag any prompt templates that need updating before execution.

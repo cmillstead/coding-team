@@ -5,21 +5,21 @@ description: "Use when you want an independent second opinion from a different A
 
 # /second-opinion — Cross-Model Second Opinion
 
-Independent review from OpenAI's Codex CLI. Different model, different training, different blind spots. The overlap tells you what's definitely real. The unique findings from each are where you find the bugs neither would catch alone.
+Independent review from OpenAI's Codex CLI. Different model, different blind spots. Overlapping findings are high-confidence. Unique findings from each model are where the second opinion earns its value.
 
 When invoked standalone:
-- If the user says `/second-opinion` with no arguments: check for an active diff (`git diff main --stat`) and review it. If no diff, ask what to review.
-- If the user says `/second-opinion review`: review the current diff or a specified plan file
-- If the user says `/second-opinion challenge`: adversarial mode against the current diff
-- If the user says `/second-opinion consult <question>`: open-ended consultation
+- No arguments: check for active diff (`git diff main --stat`) and review it. If no diff, ask what to review.
+- `review`: review current diff or specified plan file
+- `challenge`: adversarial mode against current diff
+- `consult <question>`: open-ended consultation
 
-When invoked from /coding-team pipeline: the lead specifies which mode and what to review.
+When invoked from /coding-team pipeline: the lead specifies mode and target.
+
+For all command examples, iterative revision protocol, and pipeline integration details, see `skills/second-opinion/reference.md`.
 
 ---
 
 ## Prerequisite: Codex CLI
-
-Before any mode, verify Codex CLI is available:
 
 ```bash
 which codex 2>/dev/null
@@ -31,93 +31,29 @@ If not found: inform the user and suggest `npm install -g @openai/codex`. Do NOT
 
 ## Mode 1: Review (pass/fail gate)
 
-Independent review of a plan or diff. Codex reads the material, classifies findings by severity, and returns a verdict.
+Independent review of a plan or diff. Use `codex review --base main` for diffs, `codex review --uncommitted` for unstaged changes, or `codex exec` for plan files (see reference.md for exact commands).
 
-### For a diff (default)
+Always capture output: `2>&1 | tee /tmp/second-opinion-review-${REVIEW_ID}.txt`
 
-`codex review` is inherently read-only — it examines code without modifying anything.
-
-```bash
-# Generate session-scoped ID for output capture
-REVIEW_ID=$(uuidgen | tr '[:upper:]' '[:lower:]' | head -c 8)
-
-# Run built-in code review against main branch, capture output
-codex review --base main 2>&1 | tee /tmp/second-opinion-review-${REVIEW_ID}.txt
-```
-
-`codex review` runs an opinionated code review automatically — custom review instructions cannot be passed alongside `--base`. For custom-prompted reviews, use Mode 3 (consult) with an explicit `git diff` command.
-
-To review uncommitted changes instead of the branch diff:
-
-```bash
-codex review --uncommitted 2>&1 | tee /tmp/second-opinion-review-${REVIEW_ID}.txt
-```
-
-### For a plan file
-
-Use `codex exec` to review a plan document. The default model is used unless the user specifies an override with `-m MODEL`.
-
-```bash
-REVIEW_ID=$(uuidgen | tr '[:upper:]' '[:lower:]' | head -c 8)
-
-codex exec \
-  "Review the implementation plan at <plan-file-path>. Focus on:
-1. Correctness — will this plan achieve the stated goals?
-2. Risks — what could go wrong? Edge cases? Data loss?
-3. Missing steps — is anything forgotten?
-4. Alternatives — is there a simpler or better approach?
-5. Security — any security concerns?
-
-Be specific and actionable.
-End with exactly: VERDICT: APPROVED or VERDICT: REVISE" \
-  2>&1 | tee /tmp/second-opinion-review-${REVIEW_ID}.txt
-```
-
-### Iterative revision (plan review only)
-
-If Codex returns VERDICT: REVISE:
-
-1. Read Codex's feedback
-2. Revise the plan — address each issue. This is NOT just passing messages. Make real improvements.
-3. Summarize revisions for the user
-4. Re-submit to Codex using session resume:
-
-```bash
-codex exec resume ${CODEX_SESSION_ID} \
-  "I've revised the plan based on your feedback. Updated plan is at <plan-file-path>.
-Changes made: [list specific changes]
-Please re-review. End with VERDICT: APPROVED or VERDICT: REVISE" \
-  2>&1 | tee /tmp/second-opinion-review-${REVIEW_ID}.txt
-```
-
-Max 5 rounds. If `resume` fails (session expired), fall back to a fresh `codex exec` with prior context in the prompt.
+For plan reviews: if Codex returns VERDICT: REVISE, iterate up to 5 rounds using `codex exec resume`. Address each issue with real improvements between rounds.
 
 ### Present results
 
 ```
 ## Codex Review
-
 **Verdict:** PASS | FAIL | APPROVED | REVISE
-
 **Findings:**
 - [P1] file:line — description
 - [P2] file:line — description
-- [P3] file:line — description
-
 **Overlap with Claude review:** (if /review or audit has also run)
-- [finding] — flagged by both Claude and Codex (high confidence)
-
+- [finding] — flagged by both (high confidence)
 **Codex-only findings:**
-- [finding] — flagged only by Codex (investigate)
-
+- [finding] — investigate
 **Claude-only findings:**
-- [finding] — flagged only by Claude (investigate)
+- [finding] — investigate
 ```
 
-The cross-model analysis is the key output. Overlapping findings are almost certainly real. Unique findings from either model are where you find the bugs neither would catch alone.
-
 ### Cleanup
-
 ```bash
 rm -f /tmp/second-opinion-review-${REVIEW_ID}.txt
 ```
@@ -126,36 +62,13 @@ rm -f /tmp/second-opinion-review-${REVIEW_ID}.txt
 
 ## Mode 2: Challenge (adversarial)
 
-Codex actively tries to break your code. Use `codex exec` with an adversarial prompt since there is no built-in challenge mode.
+Codex actively tries to break your code via `codex exec` with an adversarial prompt. Tests for: crash inputs, state corruption sequences, race conditions, validation bypasses, untested edge cases.
 
-```bash
-REVIEW_ID=$(uuidgen | tr '[:upper:]' '[:lower:]' | head -c 8)
+See reference.md for the full adversarial prompt template.
 
-codex exec \
-  "You are an adversarial code reviewer. Your job is to BREAK this code.
-
-Run 'git diff main' to see the changes, then read the surrounding codebase for context.
-
-For each changed file, try to construct:
-1. Inputs that cause crashes, panics, or unhandled exceptions
-2. Sequences of operations that corrupt state
-3. Race conditions under concurrent access
-4. Payloads that bypass validation or escape sanitization
-5. Edge cases the tests don't cover
-
-For each attack vector you find, provide:
-- The exact input or sequence
-- What breaks
-- Severity (P1 critical / P2 high / P3 medium)
-
-Be specific. Show the attack, not just describe the category." \
-  2>&1 | tee /tmp/second-opinion-challenge-${REVIEW_ID}.txt
-```
-
-Present results grouped by severity. P1 findings are blockers. P2 findings must be addressed before proceeding.
+Present results grouped by severity. P1 findings are blockers. P2 must be addressed before proceeding.
 
 ### Cleanup
-
 ```bash
 rm -f /tmp/second-opinion-challenge-${REVIEW_ID}.txt
 ```
@@ -164,120 +77,38 @@ rm -f /tmp/second-opinion-challenge-${REVIEW_ID}.txt
 
 ## Mode 3: Consult (open-ended)
 
-Ask Codex an open-ended question about the codebase. Useful for getting a different perspective on architecture, approach, or trade-offs.
-
-```bash
-REVIEW_ID=$(uuidgen | tr '[:upper:]' '[:lower:]' | head -c 8)
-
-codex exec \
-  "<user's question>
-
-Read the codebase for context. Give a specific, actionable answer." \
-  2>&1 | tee /tmp/second-opinion-consult-${REVIEW_ID}.txt
-```
-
-Present Codex's response. If the user wants to follow up, use `codex exec resume ${CODEX_SESSION_ID} "FOLLOW-UP QUESTION"` to maintain conversation context.
+Ask Codex an open-ended question about the codebase via `codex exec`. For follow-ups, use `codex exec resume ${CODEX_SESSION_ID}` to maintain conversation context.
 
 ### Cleanup
-
 ```bash
 rm -f /tmp/second-opinion-consult-${REVIEW_ID}.txt
 ```
 
 ---
 
-## Pipeline Integration Points
-
-### Phase 4: Plan review (optional second gate)
-
-After coding-team's plan-doc-reviewer passes, offer Codex review:
-
-```
-Plan passed internal review. Want a Codex second opinion before proceeding?
-```
-
-If yes, run Mode 1 (review) against the plan file. If Codex returns REVISE, iterate up to 5 rounds. Only proceed to execution when both Claude's reviewer and Codex approve (or the user overrides).
-
-### Phase 5: Post-audit cross-model check (optional)
-
-After all tasks are complete and the audit loop has exited, offer Codex review of the full diff:
-
-```
-All tasks pass audit. Want a Codex second opinion on the full diff before completion?
-```
-
-If yes, run Mode 1 (review) against the diff. Cross-reference Codex findings against Claude's audit findings. Present the overlap analysis.
-
-### Phase 5: Adversarial challenge (optional, for critical code)
-
-For tasks tagged as security-sensitive or touching auth/payment/data-deletion:
-
-```
-This diff touches security-sensitive code. Want a Codex adversarial challenge?
-```
-
-If yes, run Mode 2 (challenge). P1 findings block completion.
-
-### When to offer vs when to skip
-
-Offer Codex review when:
-- Plan touches 5+ files or introduces new security surface
-- Diff touches auth, payment, data deletion, or encryption
-- User explicitly requests it
-- Audit loop found issues that were close to the refactor gate threshold (borderline findings benefit from a second perspective)
-
-Skip when:
-- Mechanical changes (rename, formatting, logging)
-- Codex CLI is not installed
-- User has declined Codex review in this session
-
-Do NOT offer on every task. It adds 30-60 seconds per invocation. Match the cost to the risk.
-
----
-
 ## Model Selection
 
-Default: the Codex CLI default model (no `-m` flag needed for standard reviews).
+Default: Codex CLI default model (no `-m` flag). User can override with `-m MODEL`:
+- `/second-opinion review o4-mini` — cheaper, faster
+- `/second-opinion challenge o3` — maximum reasoning for adversarial mode
 
-The user can override any command with `-m MODEL`:
-- `/second-opinion review o4-mini` — add `-m o4-mini` to the codex command for a cheaper, faster review
-- `/second-opinion challenge o3` — add `-m o3` for maximum reasoning in adversarial mode
-
-If the default model returns low-quality results, suggest retrying with a stronger model via `-m`.
+If default returns low-quality results, suggest retrying with a stronger model.
 
 ---
 
 ## Cross-Model Analysis
 
-When both Claude (via `/review` or the audit loop) and Codex have reviewed the same code, produce a cross-model analysis:
-
-```
-## Cross-Model Analysis
-
-### Consensus (both models agree)
-- [finding] — high confidence, fix these first
-
-### Codex-only
-- [finding] — different training may have caught something Claude missed. Investigate.
-
-### Claude-only
-- [finding] — Codex didn't flag this. Could be a Claude-specific concern or a Codex blind spot. Evaluate.
-
-### Disagreements
-- [topic] — Claude says X, Codex says Y. [Your assessment of who's right and why.]
-```
-
-The consensus findings are the highest-confidence issues. The model-specific findings are where the second opinion earns its value.
+When both Claude and Codex have reviewed the same code, produce a cross-model analysis showing consensus findings, Codex-only findings, Claude-only findings, and disagreements. See reference.md for the full template.
 
 ---
 
 ## Rules
 
-- `codex review` is inherently read-only — it NEVER writes files. `codex exec` in challenge/consult modes has full access but is used only for analysis.
-- Always use session-scoped temp file paths (UUID prefix) to prevent conflicts between concurrent sessions
-- Capture output with `2>&1 | tee /tmp/second-opinion-*.txt` — there is no `-o` output flag
-- Capture and reuse the Codex session ID for multi-round reviews — use `codex exec resume SESSION_ID` for follow-ups
-- If a Codex revision contradicts the user's explicit requirements, skip that revision and note it
+- `codex review` is read-only. `codex exec` in challenge/consult has full access but is used only for analysis.
+- Always use session-scoped temp file paths (UUID prefix) to prevent conflicts
+- Capture output with `2>&1 | tee /tmp/second-opinion-*.txt` — there is no `-o` flag
+- Reuse Codex session ID for multi-round reviews via `codex exec resume SESSION_ID`
+- If a Codex revision contradicts user requirements, skip that revision and note it
 - Clean up temp files after every invocation
 - Never present Codex's output as Claude's own analysis — always attribute clearly
-- **ALL findings must be addressed before proceeding** — fix, defer with user approval, or explain why it's a false positive. "Pre-existing" is NOT a valid reason to skip a finding. If the code has a bug, it has a bug regardless of when it was introduced. NEVER dismiss findings as "pre-existing, not regressions."
+- **ALL findings must be addressed** — fix, defer with user approval, or explain why it's a false positive. "Pre-existing" is NOT valid to skip a finding.

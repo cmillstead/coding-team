@@ -14,6 +14,28 @@ import pytest
 HOOKS_DIR = Path("/Users/cevin/.claude/skills/coding-team/hooks")
 
 
+def pytest_addoption(parser):
+    """Register custom CLI options for hook tests."""
+    parser.addoption(
+        "--run-llm-judge",
+        action="store_true",
+        default=False,
+        help="Run expensive LLM-as-judge agent quality tests (~$0.05 each)",
+    )
+
+
+def pytest_configure(config):
+    """Register custom markers."""
+    config.addinivalue_line(
+        "markers",
+        "llm_judge: marks tests that require real LLM calls (deselect with '-m \"not llm_judge\"')",
+    )
+    config.addinivalue_line(
+        "markers",
+        "smoke: Tier 1 agent smoke tests (structural validation, no LLM calls)",
+    )
+
+
 @dataclass
 class HookResult:
     stdout: str

@@ -38,11 +38,11 @@ If you haven't completed Phase 1, you cannot propose fixes.
 
 **Trace downstream:** Use `mcp__codesight-mcp__get_callees` on failing functions to understand what they call — the bug may be in a downstream dependency, not the function itself.
 
-**Prior bug search:** Use QMD `vector_search` tool with collection `"conversations"` and a description of the bug symptoms to find similar past bugs. Past episodes often contain root causes and fix patterns that apply to the current investigation.
+**Prior bug search:** Use QMD `vector_search` tool with collection `"conversations"` and bug symptoms to find similar past bugs with root causes and fix patterns.
 
-**Find entry points:** Use `mcp__codesight-mcp__get_key_symbols` to identify the most significant symbols in the affected module — helps orient investigation in unfamiliar code.
+**Find entry points:** Use `mcp__codesight-mcp__get_key_symbols` to identify the most significant symbols in the affected module.
 
-**Full-text code search:** Use `mcp__codesight-mcp__search_text` for fast full-text search across indexed code — faster than grep for searching error strings, magic values, or configuration keys across large repos.
+**Full-text code search:** Use `mcp__codesight-mcp__search_text` for fast full-text search across indexed code — faster than grep for error strings, magic values, or config keys.
 
 If codesight-mcp tools are not available, fall back to Grep/Read for call-site and symbol searches. Do NOT skip tracing — use whichever tools are available.
 
@@ -118,9 +118,7 @@ Use agent teams for parallel investigation.
 
 **If AGENT_TEAMS_AVAILABLE = false, or 2 hypotheses only:**
 
-Fall back to Agent tool when agent teams are unavailable, only 2 hypotheses exist (overhead not justified), or hypotheses are trivially independent (different subsystems with no shared state).
-
-**Fallback path:**
+Fall back to Agent tool when agent teams are unavailable, only 2 hypotheses exist, or hypotheses are trivially independent.
 
 Dispatch a **debug team** — one agent per hypothesis, all investigating in parallel (read-only Explore agents). Each agent:
 - States the hypothesis clearly
@@ -164,9 +162,8 @@ Status:          DONE | DONE_WITH_CONCERNS | BLOCKED
 ```
 
 **Save debug report to disk:**
-- Determine `$REPO_ROOT` via `git rev-parse --show-toplevel`.
-- Create directory `$REPO_ROOT/docs/debug/` if it does not exist using Bash tool: `mkdir -p "$REPO_ROOT/docs/debug/"`.
-- Write the debug report to `$REPO_ROOT/docs/debug/YYYY-MM-DD-<symptom-slug>.md` using the Write tool. Use today's date and a kebab-case slug derived from the symptom (e.g., `2026-03-22-null-ref-in-auth-handler.md`).
+- Determine `$REPO_ROOT` via `git rev-parse --show-toplevel`. Create `$REPO_ROOT/docs/debug/` if needed.
+- Write the report to `$REPO_ROOT/docs/debug/YYYY-MM-DD-<symptom-slug>.md` (e.g., `2026-03-22-null-ref-in-auth-handler.md`).
 - **Architectural note trigger:** If the fix touches more than 5 files (blast radius > 5) OR the "Related" field mentions prior bugs in the same area, append an `## Architectural Note` section to the saved report. The note must describe the structural pattern that makes this area bug-prone and what architectural change would prevent recurrence.
 - **Eval feed-forward:** If the architectural note identifies a check that auditors should verify in future sessions, append it to `$REPO_ROOT/docs/project-evals.md` as a checklist item.
   - If `$REPO_ROOT/docs/project-evals.md` does not exist, create it using the Write tool with this exact template:
