@@ -58,6 +58,15 @@ This check is non-negotiable. A plan that silently drops findings is worse than 
 3. **Implementation readiness** — could an implementer complete each task without asking questions? Check: exact file paths, clear acceptance criteria, no "handle appropriately" language.
 4. **Gap analysis** — are there Critical gaps (blocks implementation), Important gaps (causes rework), or Nice-to-have improvements?
 
+## Project-Specific Criteria
+
+[INSERT PROJECT-SPECIFIC EVAL CRITERIA FROM PLAN — if the plan has a
+"Project-Specific Eval Criteria" section, paste the criteria here.
+If the plan has no such section, write "No project-specific criteria."]
+
+If project-specific criteria are listed above, verify the plan addresses each one.
+Flag violations as HIGH severity.
+
 ## Calibration
 
 **Only flag issues that would cause real problems during implementation.**

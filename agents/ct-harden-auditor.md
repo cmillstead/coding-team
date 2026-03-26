@@ -57,7 +57,7 @@ context that generic audits miss.
 - **Error handling** — swallowed errors, missing error paths, panics
 - **Injection vectors** — SQL, command, path traversal, template injection
 - **Auth/authz** — missing permission checks, privilege escalation paths
-- **Secrets** — hardcoded credentials, tokens, API keys in code. Use `mcp__plugin_github_github__run_secret_scanning` on the repository for automated detection — more reliable than grep patterns.
+- **Secrets** — hardcoded credentials, tokens, API keys in code. Use Grep with patterns like `password\s*=`, `api_key`, `secret`, `token` in modified files. If the orchestrator pre-computed secret scanning results, they will be included in your context.
 - **Data exposure** — sensitive data in logs, error messages, responses
 - **Dependency risk** — new dependencies with known vulnerabilities
 - **Race conditions** — shared mutable state, TOCTOU, concurrent access

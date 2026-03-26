@@ -20,7 +20,7 @@ After the completeness check passes and implementer reports DONE or DONE_WITH_CO
    Fresh audit agents each round — don't reuse.
    After the implementer applies audit fixes: re-run tests to verify fixes didn't introduce regressions. This is mandatory.
 
-**Audit teammates/agents MUST be read-only (Explore).** This prevents reviewers from silently "fixing" things instead of flagging them. The separation between finding and fixing is the whole point.
+**Audit agents MUST be read-only (Explore) — except harden auditor which needs Bash for dependency audit commands.** This prevents reviewers from silently "fixing" things instead of flagging them. The separation between finding and fixing is the whole point.
 
 **Fresh audit teammates each round.** Don't reuse auditors — carried context biases toward "already checked" areas.
 
