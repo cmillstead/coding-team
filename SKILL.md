@@ -174,21 +174,15 @@ Each phase reads its detail file on entry. Do not read ahead — load only the a
 
 During execution, the orchestrator routes edits by **impact surface**, not line count:
 
-| File pattern | Route | Why |
-|---|---|---|
-| `agents/*.md`, `phases/*.md`, `prompts/*.md` | Agent tool — PROMPT_CRAFT_ADVISORY | Controls agent behavior — any change can cascade |
-| `skills/**/*.md`, `CLAUDE.md` | Agent tool — PROMPT_CRAFT_ADVISORY | Controls agent behavior |
-| `hooks/*` | Agent tool — dispatch to implementer | Safety-critical enforcement code |
-| `docs/plans/*.md` | Agent tool — dispatch to implementer | Shared reference |
-| `memory/*.md` | Orchestrator edits directly | Low impact, orchestrator-owned |
-| `~/Documents/obsidian-vault/**` | Orchestrator edits directly | Low impact, orchestrator-owned |
-| `/tmp/*` session notes | Orchestrator edits directly | Ephemeral |
-| Source code, ≤20 lines, 1 file | Orchestrator may edit directly | Low audit value — delegation overhead exceeds benefit |
-| Source code, >20 lines or multi-file | Agent tool — dispatch to implementer | High audit value — worth the overhead |
+| File pattern | Route |
+|---|---|
+| `agents/*.md`, `phases/*.md`, `prompts/*.md`, `skills/**/*.md`, `CLAUDE.md` | Agent tool — PROMPT_CRAFT_ADVISORY |
+| `hooks/*`, `docs/plans/*.md` | Agent tool — dispatch to implementer |
+| `memory/*.md`, `~/Documents/obsidian-vault/**`, `/tmp/*` | Orchestrator edits directly |
+| Source code, ≤20 lines, 1 file | Orchestrator may edit directly |
+| Source code, >20 lines or multi-file | Agent tool — dispatch to implementer |
 
-**The threshold principle**: delegate when audit value is high, allow direct edits when audit value is low. Instruction files (agents, phases, prompts, skills, hooks, CLAUDE.md) ALWAYS have high audit value regardless of change size — a 1-line change to an agent prompt can break the pipeline. Source code has audit value proportional to change complexity. The 20-line/1-file threshold is the crossover point where delegation overhead exceeds audit benefit.
-
-Known rationalization: "This instruction file change is trivial" — impact surface determines routing, not perceived complexity. Instruction files always delegate.
+Instruction files ALWAYS delegate regardless of change size — a 1-line change can cascade. Source code delegates when audit value justifies overhead (>20 lines or multi-file). Known rationalization: "This instruction file change is trivial" — impact surface determines routing, not perceived complexity.
 
 ---
 
