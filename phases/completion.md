@@ -1,5 +1,21 @@
 # Phase 6: Completion
 
+## Pre-check: Second-Opinion Gate
+
+Before proceeding with Phase 6, verify the second-opinion gate was executed:
+
+1. Read `/tmp/coding-team-session.json` (if it exists)
+2. Check for `"second_opinion_offered": true` in the session data
+3. Run: `command -v codex >/dev/null 2>&1`
+
+**If the flag is missing AND Codex is available:** STOP — do not proceed with Phase 6. Load `phases/post-execution-review.md` and follow it first. The post-execution review will set the flag when complete. Return here after.
+
+**If the flag is present OR Codex is not available:** Proceed with Phase 6 below.
+
+Known rationalization: "We already reviewed everything in the audit loop" — audit loop review is internal (same model reviewing its own work). Second-opinion is cross-model validation and serves a fundamentally different purpose. They are not substitutes for each other.
+
+---
+
 After all tasks are executed and verified:
 
 1. **Run full test suite** — independent verification required even if Phase 5 passed, because context may have been cleared between phases and additional commits may have landed (fresh output required)
