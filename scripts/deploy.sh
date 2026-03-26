@@ -27,6 +27,15 @@ for f in "$REPO_ROOT"/hooks/*.py "$REPO_ROOT"/hooks/*.sh; do
     deploy "$f" "$CLAUDE_DIR/hooks/$(basename "$f")"
 done
 
+# Shared library: _lib/
+if [[ -d "$REPO_ROOT/hooks/_lib" ]]; then
+    mkdir -p "$CLAUDE_DIR/hooks/_lib"
+    for f in "$REPO_ROOT"/hooks/_lib/*.py; do
+        [[ -f "$f" ]] || continue
+        deploy "$f" "$CLAUDE_DIR/hooks/_lib/$(basename "$f")"
+    done
+fi
+
 # Agents: ct-*.md
 for f in "$REPO_ROOT"/agents/ct-*.md; do
     [[ -f "$f" ]] || continue
