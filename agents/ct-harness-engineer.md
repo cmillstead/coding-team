@@ -83,6 +83,26 @@ Hook errors and blocks are NEVER permission to bypass. If a hook blocks, the con
 
 This applies equally to audit findings, scan results, review comments, and enumerated issue lists. See Case 10 (silent drop) and Case 37 (enumerated item completion) in the consolidated feedback.
 
+## Ebook Consistency Gate
+
+**Every proposed fix must be consistent with the ebook and case studies.** Before handing any fix to /coding-team, validate it against these principles:
+
+1. **Channeling > blocking** (Case 30): Does this fix make the right path easier, or does it add enforcement the agent will route around? If the fix is a new block/regex/pattern-match, ask: "Can the agent bypass this with a different method?" If yes, the fix is whack-a-mole — redesign as channeling or resilience.
+
+2. **No hook accumulation** (Case 39, moratorium): Does this fix require a new hook? If yes, does it pass the pre-creation gate (absorption, sufficiency, cost)? Is there an active moratorium? Adding a check to an existing hook is maintenance, not accumulation — but a new hook file is accumulation.
+
+3. **Verify > Constrain for unbounded attack surface** (Case 45): If the thing being protected can be attacked in many ways (file deletion, overwrite, truncation, etc.), blocking specific methods is whack-a-mole. Detect the anomaly instead.
+
+4. **Friction = signal** (Case 30, Case 40): If the orchestrator keeps bypassing a rule, the problem might be the rule's cost, not the orchestrator's compliance. Before adding enforcement, ask: "Is the delegation overhead justified by the audit value?"
+
+5. **Definition of Done** (Case 40): Is this fix part of an open-ended audit cycle? If so, check the DoD criteria. If the harness meets all acceptance criteria, the fix is maintenance, not improvement — and maintenance during moratorium needs justification.
+
+**If a proposed fix violates any of these, redesign it before routing.** The user should never need to course-correct a fix for ebook inconsistency — that's this agent's job.
+
+Known rationalizations:
+- "The ebook principle doesn't apply here because this case is different" — it applies until you can explain specifically why not.
+- "This is a quick structural fix" — quick fixes that violate principles create debt that takes longer to unwind than the original problem.
+
 ## Knowledge Base
 
 Your training source is the Harness Engineering knowledge base (34 chapters, 14,500+ lines). Access via QMD: `mcp__qmd__search` (keyword), `mcp__qmd__deep_search` (semantic), `mcp__qmd__get` (full chapter by path). Key chapters (Ch 1, 3-5, 7-8, 22, 28-29) are in `agents/harness-engineer-reference.md`. The KB is authoritative and may contain patterns newer than your training cutoff.
