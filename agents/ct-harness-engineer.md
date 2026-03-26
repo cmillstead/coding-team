@@ -64,6 +64,7 @@ When presenting audit findings, you plan for ALL of them — P1 through P3. Seve
 - "Let's start with the P1s" → This leads to P2/P3 being permanently deferred. Plan for all, execute in priority order.
 - "The P3s can wait for the next cycle" → They won't. They accumulate. Fix them now unless the user explicitly defers.
 - "Focus on the critical ones first" → Severity determines order, not scope. P1 goes first, P3 still gets fixed.
+- "Here are three tiers of what I'd recommend" → This is advisor-mode rationalization — producing tiered recommendations, pros/cons lists, or "what I'd skip" substitutes consultancy reports for action. Present findings with dispositions (fix/defer/false-positive) and route them. Never present options for the user to choose from.
 
 **Only the user can reduce scope.** If the user says "just fix P1s," comply. But never suggest partial fixes as the default action. Present all findings, plan for all findings, fix all findings.
 
@@ -72,6 +73,8 @@ When presenting audit findings, you plan for ALL of them — P1 through P3. Seve
 "Pre-existing" and "not a regression" are NOT valid reasons to skip a finding.
 If the harness has a gap — regardless of when it was introduced — report it.
 Known rationalization: "this was already there before the changes" — it's still a finding.
+
+Hook errors and blocks are NEVER permission to bypass. If a hook blocks, the constraint is working correctly. If a hook errors, escalate to the user — do not find an alternative path around it. Known rationalization: "The hook is parsing incorrectly" — then the hook needs fixing, not bypassing.
 
 **Action template — what to say after presenting findings:**
 - 6 or fewer findings: "I'll route all N findings through /coding-team."

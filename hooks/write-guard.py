@@ -26,6 +26,7 @@ from _lib import output as _output
 # ---------------------------------------------------------------------------
 SESSION_FILE = Path("/tmp/coding-team-session.json")
 MAX_AGE_SECONDS = 2 * 60 * 60  # 2 hours
+ACTIVE_MARKER = Path("/tmp/coding-team-active")
 
 
 def is_orchestrator_file(file_path: str) -> bool:
@@ -64,19 +65,41 @@ def read_session() -> tuple[dict | None, bool]:
 
 
 def check_phase5(file_path: str) -> str | None:
-    """Check phase 5 edit guard. Returns block reason or None."""
+    """Check coding-team session edit guard. Returns block reason or None.
+
+    Blocks orchestrator edits to non-allowlisted files during ANY active
+    coding-team session (phase 'execution' or 'active').
+
+    Tamper detection: if the active marker exists but the session JSON is
+    missing, the session file was deleted mid-session — block to maintain safety.
+    """
     session, had_error = read_session()
     if had_error:
-        return None
+        return (
+            "BLOCKED: coding-team session file is corrupt or unreadable. "
+            "Cannot determine session state — blocking to maintain safety. "
+            "Delete /tmp/coding-team-session.json if no coding-team session is active."
+        )
     if session is None:
+        # Session file missing — check if a session SHOULD be active
+        if ACTIVE_MARKER.exists():
+            return (
+                "BLOCKED: coding-team session file is missing but the session marker "
+                "(/tmp/coding-team-active) still exists. This suggests the session file "
+                "was deleted mid-session — blocking to maintain safety.\n\n"
+                "If the session is genuinely over, complete it through Phase 6 "
+                "(which cleans up both files via the lifecycle hook).\n\n"
+                "Known rationalization: 'The session file is blocking my edits' — "
+                "that IS the correct behavior. Delegate edits through the Agent tool."
+            )
         return None
-    if session["phase"] != "execution":
+    if session["phase"] not in ("execution", "active"):
         return None
     if is_orchestrator_file(file_path):
         return None
 
     return (
-        f"BLOCKED: During execution phase, the orchestrator delegates all file edits — "
+        f"BLOCKED: During active coding-team session, the orchestrator delegates all file edits — "
         f"never makes them directly. Use the Agent tool to dispatch this edit of {file_path}. "
         f"For agent/phase/prompt/skill files, include PROMPT_CRAFT_ADVISORY in the agent prompt. "
         f"Only memory/, ~/Documents/obsidian-vault/, and /tmp/ are orchestrator-editable during Phase 5."
@@ -418,4 +441,21 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as exc:
+        import traceback
+        try:
+            from _lib import output as _fallback_output
+            _fallback_output.block(
+                f"HOOK CRASH — write-guard failed with: {exc}\n\n"
+                f"Blocking to maintain safety. Report this error to the user.\n"
+                f"Traceback:\n{traceback.format_exc()}"
+            )
+        except Exception:
+            # Last resort: raw JSON to stdout if even _lib is broken
+            import json
+            print(json.dumps({
+                "decision": "block",
+                "reason": f"HOOK CRASH (fallback) — write-guard: {exc}"
+            }))

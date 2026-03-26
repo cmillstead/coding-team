@@ -56,4 +56,19 @@ After all tasks are executed and verified:
 >
 > ---
 
+5. **Write second-opinion gate flag** — regardless of which option was chosen (review/challenge/both/skip), mark the gate as passed:
+   ```bash
+   python3 -c "
+import json
+p = '/tmp/coding-team-session.json'
+try:
+    d = json.load(open(p))
+except (FileNotFoundError, json.JSONDecodeError):
+    d = {}
+d['second_opinion_offered'] = True
+json.dump(d, open(p, 'w'))
+"
+   ```
+   This flag is checked by `phases/completion.md` to ensure the gate was not skipped.
+
 **User override:** If the user has said "never ask about second opinion" or "skip second-opinion gates" in this session, skip second-opinion in execution for the rest of the session.

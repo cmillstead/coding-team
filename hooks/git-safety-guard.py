@@ -161,6 +161,7 @@ def has_project_infrastructure() -> bool:
     return any(glob.glob(os.path.join(cwd, g)) for g in GLOB_MARKERS)
 
 
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -321,4 +322,20 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as exc:
+        import traceback
+        try:
+            from _lib import output as _fallback_output
+            _fallback_output.block(
+                f"HOOK CRASH — git-safety-guard failed with: {exc}\n\n"
+                f"Blocking to maintain safety. Report this error to the user.\n"
+                f"Traceback:\n{traceback.format_exc()}"
+            )
+        except Exception:
+            import json
+            print(json.dumps({
+                "decision": "block",
+                "reason": f"HOOK CRASH (fallback) — git-safety-guard: {exc}"
+            }))
