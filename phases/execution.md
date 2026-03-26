@@ -145,7 +145,29 @@ Before declaring execution complete, verify the full plan was executed:
 3. If the plan has a traceability table (scan findings), verify every "Fix" row has a corresponding commit.
 4. If any tasks were silently dropped, execute them now — do not proceed to Phase 6.
 
-**Full-suite verification:** Run the complete test suite and linter after ALL tasks complete. This catches integration failures between tasks that per-task GATE checks miss. All tests must pass and linter must be clean before proceeding to Phase 6.
+**Full-suite verification:** Run the complete test suite and linter after ALL tasks complete. This catches integration failures between tasks that per-task GATE checks miss. All tests must pass and linter must be clean before proceeding.
+
+## Feature-Level QA Review (after full-suite verification)
+
+After all tasks pass and the full test suite is clean, dispatch the QA reviewer to check the **complete feature diff** holistically. This catches integration issues, dark features, and behavioral gaps that per-task auditors miss.
+
+1. Collect the full feature diff:
+   ```bash
+   BASE=$(git merge-base HEAD main 2>/dev/null || git merge-base HEAD master)
+   git diff --stat $BASE..HEAD
+   git diff --name-only $BASE..HEAD
+   ```
+2. Dispatch the QA reviewer via Agent tool (model: sonnet, subagent_type: Explore — read-only):
+   - Pass: feature description (from the original plan), full diff summary, list of all modified files, and the list of tasks that were executed
+   - See `~/.claude/agents/ct-qa-reviewer.md` for the full prompt template
+3. Triage QA findings using the same severity routing as the audit loop:
+   - **HIGH** (integration mismatch, dark feature, behavioral bug) → dispatch implementer to fix, then re-run full test suite
+   - **MEDIUM** (edge case, test gap) → include in a fix round
+   - **LOW** (minor test gap for non-critical path) → note in completion summary
+4. If the QA reviewer reports FAIL or has 2+ HIGH findings: fix all HIGH/MEDIUM findings before proceeding. Max 2 fix rounds for QA findings.
+5. If the QA reviewer reports PASS or PASS_WITH_CONCERNS with no HIGH findings: proceed.
+
+**Skip condition:** If the feature has only 1 task AND touches 3 or fewer files, the per-task audit is sufficient — skip the QA review. Feature-level QA adds value when multiple tasks interact.
 
 Read `phases/doc-drift-scan.md` and follow its instructions.
 

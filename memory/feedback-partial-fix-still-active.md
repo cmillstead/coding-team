@@ -1,15 +1,15 @@
 ---
-name: Partial fix rationalization still active in harness-engineer
-description: Harness-engineer agent offered to fix only P1 findings, silently dropping P2/P3 — the selective-fix rationalization persists despite being a named case study
+name: Partial fix rationalization — batch template needed
+description: Harness-engineer offers to fix a subset of findings despite completionist identity; fixed by adding explicit batch action template that covers ALL findings
 type: feedback
 ---
 
-The harness-engineer diagnose output suggested "Want me to fix these findings? I'd route F1+F2 through /coding-team as P1s" — offering to fix 2 of 10 findings. This is the selective-fix rationalization (fix critical, silently drop the rest).
+The harness-engineer presents all findings in the table (completionist identity works for reporting), but then offers to route only a subset through /coding-team (completionist identity fails at the action step). Example: "Want me to route F4, F8, F1, and F12 through /coding-team?" — offering 4 of 12.
 
-**Why:** Agents default to triage framing ("fix the critical ones first") which sounds reasonable but results in P2/P3 findings never being addressed. The user explicitly asked to fix all findings.
+**Why:** The instruction said "never suggest partial fixes" (prohibition) but didn't say what TO do instead. The agent defaulted to cherry-picking because it had no replacement behavior template.
 
 **How to apply:**
-- Default is ALL findings, ALL severities — user must explicitly request partial fixes
-- When presenting findings, never offer severity-based selection as the default action
-- Named rationalization: "Let's start with the P1s" — this leads to P2/P3 being permanently deferred
-- The harness-engineer agent prompt needs the completionist identity framing from Case 10 (silent drop) and the selective-fix fix
+- Added batch action template to ct-harness-engineer.md: 6 or fewer → "I'll fix all N"; 7+ → "I'll fix all N in priority-ordered batches"
+- Key framing: NEVER end with "Want me to route [subset]?" — this is the selective-fix rationalization wearing a question mark
+- Prohibition alone doesn't work — you must provide the replacement behavior
+- Verified: previous fix (completionist identity from cycle 11) fixed reporting but not the action step
