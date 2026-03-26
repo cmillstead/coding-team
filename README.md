@@ -205,6 +205,7 @@ These can be invoked independently with their own slash commands, or used automa
 | Worktree | `/worktree` | Isolated git worktree for feature work. | ~88 |
 | Parallel Fix | `/parallel-fix` | Parallel agent dispatch for independent failures. | ~141 |
 | Prompt Craft | `/prompt-craft` | Write, evaluate, and refine skills and agent prompts. Diagnose behavioral issues. | ~263 |
+| Harness Engineer | `/harness-engineer` | Harness infrastructure design & audit: hooks, rules, settings, maturity. | ~55 |
 | Second Opinion | `/second-opinion` | Cross-model second opinion via OpenAI Codex CLI. Review, challenge, consult. | ~295 |
 | Scope Lock | `/scope-lock` | Restrict edits to a directory during debugging. | ~48 |
 | Scope Unlock | `/scope-unlock` | Remove scope-lock edit restriction. | ~26 |
@@ -281,7 +282,7 @@ Expose individual protocols as standalone slash commands:
 
 ```bash
 # All standalone skills
-for skill in debug verify review-feedback worktree parallel-fix tdd prompt-craft second-opinion scope-lock scope-unlock release retrospective doc-sync; do
+for skill in debug verify review-feedback worktree parallel-fix tdd prompt-craft harness-engineer second-opinion scope-lock scope-unlock release retrospective doc-sync; do
   ln -s ~/.claude/skills/coding-team/skills/$skill ~/.claude/skills/$skill
 done
 ```
@@ -337,9 +338,31 @@ For simple tasks (typo, rename, single-file fix), the skill skips to Phase 5 wit
 ## File structure
 
 ```
-SKILL.md                          # router + phase contracts (~219 lines)
+SKILL.md                          # router + phase contracts (~230 lines)
 README.md                         # this file
-hooks/coding-team-router.py       # session-start hook
+hooks/                            # Claude Code hooks (deployed to ~/.claude/hooks/)
+  coding-team-router.py           #   session-start hook — suggests /coding-team
+  coding-team-active.py           #   marks coding-team session as active
+  coding-team-done.py             #   clears active marker on skill completion
+  plan-completeness-check.py      #   warns when agent output covers fewer findings than input
+  phase5-edit-guard.py            #   warns when orchestrator edits code during Phase 5
+  track-artifacts-in-repo.py      #   reminds to commit deployed files back to repo
+  no-mocks.py                     #   blocks mock patterns in test files
+  agent-quality-tracker.py        #   logs skill quality + emits correction on error/empty
+  (+ 12 more hooks)               #   see hooks/ directory for full list
+scripts/                          # deployment and infrastructure scripts
+  deploy.sh                       #   sync hooks, agents, scripts from repo to ~/.claude/
+  statusline-command.sh            #   Claude Code status line formatting
+agents/                           # native agent definitions (deployed to ~/.claude/agents/)
+  ct-implementer.md               #   implementer agent template
+  ct-spec-reviewer.md             #   spec compliance + TDD verification (read-only)
+  ct-simplify-auditor.md          #   simplify auditor — clarity/complexity (read-only)
+  ct-harden-auditor.md            #   harden auditor — security/resilience (read-only)
+  ct-prompt-craft-auditor.md      #   prompt-craft auditor — CC instruction quality (read-only)
+  ct-harness-engineer.md          #   harness engineer — hooks, rules, maturity (read-write)
+  ct-spec-doc-reviewer.md         #   design doc reviewer
+  ct-plan-doc-reviewer.md         #   plan doc reviewer
+  harness-engineer-reference.md   #   on-demand reference for harness engineer
 memory/                           # behavioral feedback (persists across sessions)
   MEMORY.md                       #   index — points to consolidated file
   consolidated-feedback.md        #   distilled rules from all feedback (loaded by default)
@@ -367,6 +390,7 @@ skills/                           # standalone skills (can be invoked independen
   parallel-fix/SKILL.md           #   /parallel-fix — parallel agent dispatch
   tdd/SKILL.md                    #   /tdd — test-driven development cycle
   prompt-craft/SKILL.md           #   /prompt-craft — skill & prompt engineering
+  harness-engineer/SKILL.md       #   /harness-engineer — harness infrastructure design & audit
   second-opinion/SKILL.md         #   /second-opinion — cross-model second opinion
   scope-lock/SKILL.md             #   /scope-lock — restrict edits to a directory
   scope-unlock/SKILL.md           #   /scope-unlock — remove edit restriction
@@ -380,15 +404,6 @@ skills/                           # standalone skills (can be invoked independen
   a11y/SKILL.md                   #   accessibility audit — WCAG compliance, keyboard nav, ARIA
   api-qa/SKILL.md                 #   API contract testing — validation, error responses, breaking changes
   incident/SKILL.md               #   incident response — structured production incident coordination
-prompts/                          # agent prompt templates (used by execution loop)
-  implementer.md                  #   implementer agent template
-  spec-reviewer.md                #   spec compliance + TDD verification (read-only)
-  simplify-auditor.md             #   simplify auditor — clarity/complexity (read-only)
-  harden-auditor.md               #   harden auditor — security/resilience (read-only)
-  prompt-craft-auditor.md         #   prompt-craft auditor — CC instruction quality (read-only)
-  quality-reviewer.md             #   legacy combined reviewer (use simplify + harden)
-  spec-doc-reviewer.md            #   design doc reviewer
-  plan-doc-reviewer.md            #   plan doc reviewer
 ```
 
 ## Output files
