@@ -43,7 +43,12 @@ def main():
     if not input_findings:
         return
 
+    # Normalize tool_result to string (can be str or dict with stdout/stderr)
     result = data.get("tool_result", "")
+    if isinstance(result, dict):
+        result = result.get("stdout", "") + " " + result.get("stderr", "")
+    elif not isinstance(result, str):
+        result = str(result)
     if not result:
         return
 
