@@ -7,7 +7,8 @@ After the completeness check passes and implementer reports DONE or DONE_WITH_CO
 1. Record HEAD_SHA, collect modified files list (git diff --name-only BASE..HEAD).
    Also run `mcp__codesight-mcp__get_changes` with `repo_path` set to the working directory, `git_ref: "BASE..HEAD"`, and `include_impact: true` to get a symbol-level diff with downstream impact analysis. Pass BOTH the file list AND the symbol-level changes to each auditor.
    After recording changes, run `mcp__codesight-mcp__invalidate_cache` for the repo so auditors see fresh symbol data reflecting the implementer's commits.
-2. Dispatch audit agents IN PARALLEL via Agent tool (spec reviewer and simplify auditor as read-only Explore; harden auditor as general-purpose to allow Bash tool access for dependency vulnerability checks):
+   **Pre-compute for spec reviewer:** Run `git log --oneline BASE..HEAD` and include the output in the spec reviewer's `## Git History` section. The spec reviewer has no Bash tool — it cannot run git commands itself.
+2. Dispatch audit agents IN PARALLEL via Agent tool (spec reviewer and simplify auditor as read-only Explore; harden auditor and harness engineer as general-purpose to allow Bash tool access):
    a. Spec reviewer (see ~/.claude/agents/ct-spec-reviewer.md) — "does it match the spec? was TDD followed?"
    b. Simplify auditor (see ~/.claude/agents/ct-simplify-auditor.md) — "is there a simpler way?"
    c. Harden auditor (see ~/.claude/agents/ct-harden-auditor.md) — "what would an attacker try?"
@@ -15,6 +16,8 @@ After the completeness check passes and implementer reports DONE or DONE_WITH_CO
       (i) Task has PROMPT_CRAFT_ADVISORY annotation, AND
       (ii) Modified files include at least 1 file matching: `phases/*.md`, `prompts/*.md`, `skills/*/SKILL.md`, `SKILL.md`, `CLAUDE.md`, `memory/*.md`
       Both conditions required (belt and suspenders). If either is missing, skip this auditor.
+   e. Harness engineer (see ~/.claude/agents/ct-harness-engineer.md) — triggers when modified files include at least 1 file matching: `settings.json`, `hooks/*`, `rules/*`, `*.claude/CLAUDE.md`, `agents/*.md`
+      Dispatch as general-purpose (needs Bash for hook inspection). If no harness files in the diff, skip.
 3. Triage findings (see Audit Triage below)
 4. If findings to fix → dispatch new implementer to fix → re-audit (max 3 rounds)
    Fresh audit agents each round — don't reuse.

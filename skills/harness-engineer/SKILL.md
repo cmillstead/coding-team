@@ -67,7 +67,7 @@ This skill dispatches the `ct-harness-engineer` native agent (`~/.claude/agents/
 
 **From /coding-team Phase 2:** The team leader dispatches as a design worker alongside other specialists. The harness engineer evaluates the task through the constraint/observability lens.
 
-**From /coding-team Phase 5 audit loop:** Dispatched as an additional auditor when tasks modify harness files (hooks, settings.json, rules, CLAUDE.md). Checks constraint completeness, hook correctness, and promotion opportunities.
+**From /coding-team Phase 5 audit loop:** Dispatched as an additional auditor when modified files match: `settings.json`, `hooks/*`, `rules/*`, `*.claude/CLAUDE.md`, `agents/*.md`. Dispatch is conditional (like prompt-craft-auditor). Checks constraint completeness, hook correctness, and promotion opportunities.
 
 ## Dispatch Template
 

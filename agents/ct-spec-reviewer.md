@@ -67,11 +67,18 @@ Verify the RED-GREEN cycle was real:
    - ★★  Tests correct behavior, happy path only
    - ★   Smoke test / existence check / trivial assertion
    Flag any ★ tests as needing strengthening. Note overall quality distribution in your report.
-4. **Git history shows RED before GREEN** — check `git log --oneline`
-   for the task's commits. Were test commits made before or alongside
-   implementation commits? (If a single commit has both tests and
-   implementation, that's acceptable for TDD — but if there are NO
-   test files at all, that's a RED flag.)
+4. **Git history shows RED before GREEN** — review the git history
+   provided in the `## Git History` section below. Were test commits made
+   before or alongside implementation commits? (If a single commit has
+   both tests and implementation, that's acceptable for TDD — but if
+   there are NO test files at all, that's a RED flag.)
+
+## Git History
+
+[INSERT GIT LOG OUTPUT — the orchestrator pre-computes `git log --oneline`
+for the task's commits and pastes it here. If this section is empty,
+skip TDD commit-order verification and note: "Git history not provided —
+TDD verification limited to test file existence."]
 
 If TDD was skipped (implementation exists without corresponding tests),
 report this as a FAIL with "TDD: tests missing or written after code."
@@ -98,7 +105,7 @@ Read the implementation code and verify:
 ## Part 3: Documentation Backstop
 
 **Documentation backstop:**
-- If the implementer reported "No doc impact": run `grep -l '<changed-file-stems>' README.md CLAUDE.md ARCHITECTURE.md` in the repo root
+- If the implementer reported "No doc impact": use the Grep tool to search for changed file stems in README.md, CLAUDE.md, and ARCHITECTURE.md in the repo root
 - If any match, flag as POSSIBLE_DOC_DRIFT — the orchestrator will assess whether the doc is actually stale
 - Do NOT assess doc staleness yourself — just flag the path match
 
