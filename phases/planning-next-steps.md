@@ -50,4 +50,10 @@ After the plan passes review and is saved:
 >
 > ---
 
+**Named rationalizations (compliance triggers):**
+- "The user wants to move fast" — speed does not exempt the gate. The question takes 5 seconds to ask. Skipping it risks hours of rework.
+- "The plan was already reviewed by the plan reviewer" — plan reviewer checks internal consistency. Second-opinion checks cross-model blind spots. These are different quality dimensions.
+- "It's a small plan" — risk signals determine framing, not whether to ask. Even small plans get the offer.
+- "Codex will slow things down" — the user decides whether to accept the offer. Your job is to present it, not pre-decide.
+
 **User override:** If the user has said "never ask about second opinion" or "skip second-opinion gates" in this session, skip second-opinion in planning for the rest of the session.
