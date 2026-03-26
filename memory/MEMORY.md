@@ -25,6 +25,10 @@
 - [feedback-spec-clarity-rationalization.md](feedback-spec-clarity-rationalization.md) — Orchestrator offers self-execution when spec is clear; spec clarity determines model tier not delegation
 - [feedback-hook-accumulation.md](feedback-hook-accumulation.md) — Harness-engineer adds 1-2 hooks per audit cycle without cost/benefit; if >20 hooks, consolidate before adding
 
+## Active Decisions
+
+- [project-harness-done-2026-03-26.md](project-harness-done-2026-03-26.md) — **Harness Level 3 DONE. Moratorium until 2026-04-09. Quarterly audits only. P1-only at maturity.**
+
 ## Project History (not loaded by default)
 
 - [project-cycle14-audit-2026-03-26.md](project-cycle14-audit-2026-03-26.md) — Cycle 14: deploy drift critical, ENFORCEMENT_MAP 13→24, context survival gates, codex CLI fix
