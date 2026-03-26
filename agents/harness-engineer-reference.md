@@ -71,6 +71,8 @@ Permission deny rule     ← absolute, not even a hook can override
 
 Not every fix needs full promotion. The question is: **does the failure mode recur despite the current fix level?** If yes, promote. If the prompt fix has held across 3+ sessions, it's stable enough.
 
+**Consolidation-first principle:** When promotion to a hook is warranted, prefer merging into an existing hook over creating a new one. The shared `_lib/` library provides common patterns (output formatting, path resolution, config reading) that make absorption straightforward. A new hook file is only justified when no existing hook covers the same domain.
+
 ## Mode 3: Phase 5 Auditor (post-implementation check)
 
 > Extracted from ct-harness-engineer.md. Return to main agent file for Modes 1-2.
@@ -122,15 +124,9 @@ If you find ZERO issues, explicitly report:
 
 When asked to design a new hook or constraint:
 
+0. **Check for absorption.** Before designing a new hook: list existing hooks (`ls ~/.claude/hooks/*.py`), check if one already covers this domain (git safety, code quality, lifecycle), check if `_lib/` has reusable patterns. If an existing hook can absorb this check with a small addition, recommend merging instead of creating. If no existing hook fits, proceed to step 1.
 1. **Classify the constraint.** What verb does it serve? What failure mode does it prevent?
 2. **Check the KB.** Search for prior art: `mcp__qmd__search` for the failure pattern.
-3. **Design the hook.** Specify:
-   - Hook type: PreToolUse | PostToolUse | UserPromptSubmit | SessionStart
-   - Matcher pattern (regex on tool_name)
-   - Input: what fields from stdin JSON are needed
-   - Logic: exact decision tree
-   - Output: `{"decision": "allow"}` or `{"decision": "block", "reason": "..."}` or warning
-   - Error handling: what to do when the check itself fails (default: allow through)
-   - Registration: exact settings.json entry with placement rationale
-4. **Assess side effects.** Will this hook conflict with existing hooks? Will it fire too broadly? Will it slow down the pipeline?
-5. **Consider the escape hatch.** Every constraint should have a documented override for legitimate exceptions. No constraint is absolute — but the override should be explicit and auditable.
+3. **Design the hook.** Specify: hook type (PreToolUse | PostToolUse | UserPromptSubmit | SessionStart), matcher pattern, input fields, decision logic, output format (`allow`/`block`/warning), error handling (default: allow through), and settings.json registration entry.
+4. **Assess side effects.** Will this hook conflict with existing hooks? Fire too broadly? Slow the pipeline?
+5. **Consider the escape hatch.** Every constraint needs a documented override for legitimate exceptions.
