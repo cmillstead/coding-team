@@ -20,7 +20,6 @@ sys.path.insert(0, os.path.dirname(__file__))
 from _lib.output import advisory
 
 METRICS_DIR = Path.home() / ".claude" / "metrics"
-QUALITY_TRACKER_PATH = Path.home() / ".claude" / "agent-quality-tracker.jsonl"
 MAX_FILES_TO_CHECK = 3
 
 
@@ -236,33 +235,41 @@ def get_pr_throughput():
 def get_skill_failure_rates():
     """Cross-reference agent-quality-tracker for skill failure rates.
 
-    Reads ~/.claude/agent-quality-tracker.jsonl and returns skills with >10% failure rate.
-    Returns None if file doesn't exist or no notable failure rates.
+    Globs ~/.claude/metrics/agent-quality-*.jsonl (written by agent-quality-tracker.py),
+    reads the most recent 3 files, and returns skills with >10% failure rate.
+    Returns None if no files exist or no notable failure rates.
     """
-    tracker_path = QUALITY_TRACKER_PATH
-    if not tracker_path.exists():
+    if not METRICS_DIR.exists():
+        return None
+
+    files = sorted(METRICS_DIR.glob("agent-quality-*.jsonl"), reverse=True)
+    if not files:
         return None
 
     totals = Counter()
     failures = Counter()
 
-    try:
-        with open(tracker_path) as fh:
-            for line in fh:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    entry = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-                skill = entry.get("skill")
-                if not skill:
-                    continue
-                totals[skill] += 1
-                if entry.get("status") == "error":
-                    failures[skill] += 1
-    except OSError:
+    for f in files[:MAX_FILES_TO_CHECK]:
+        try:
+            with open(f) as fh:
+                for line in fh:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        entry = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    skill = entry.get("skill")
+                    if not skill:
+                        continue
+                    totals[skill] += 1
+                    if entry.get("status") == "error":
+                        failures[skill] += 1
+        except OSError:
+            continue
+
+    if not totals:
         return None
 
     notable = []

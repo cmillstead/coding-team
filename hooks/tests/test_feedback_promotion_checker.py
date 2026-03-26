@@ -68,31 +68,57 @@ class TestScoreMechanicality:
 
 
 class TestCheckAlreadyEnforced:
-    def test_finds_matching_hook_name(self):
-        """Feedback name that overlaps with a hook name should be detected."""
+    def test_explicit_map_lookup(self):
+        """Feedback in ENFORCEMENT_MAP should return the mapped enforcer."""
         result = run_python_func(
             "check_already_enforced",
             "feedback-reread-before-edit",
             "some content",
-            ["reread-before-edit", "secret-guard"],
+            [],
             [],
         )
-        assert result is not None
-        assert "hook:" in result
-        assert "reread-before-edit" in result
+        assert result == "hook:reread-before-edit"
 
-    def test_finds_matching_rule_name(self):
-        """Feedback name that overlaps with a rule name should be detected."""
+    def test_explicit_map_rule_lookup(self):
+        """Feedback mapped to a rule should return the rule enforcer."""
         result = run_python_func(
             "check_already_enforced",
-            "feedback-migration-files",
+            "feedback-mcp-retry-spiral",
             "some content",
             [],
-            ["migration-files", "config-files"],
+            [],
         )
-        assert result is not None
-        assert "rule:" in result
-        assert "migration-files" in result
+        assert result == "rule:mcp-resilience"
+
+    def test_explicit_map_shared_enforcer(self):
+        """Multiple feedbacks can map to the same enforcer."""
+        result_a = run_python_func(
+            "check_already_enforced",
+            "feedback-ci-orphan-cleanup",
+            "content",
+            [],
+            [],
+        )
+        result_b = run_python_func(
+            "check_already_enforced",
+            "feedback-ci-infra-failures",
+            "content",
+            [],
+            [],
+        )
+        assert result_a == "hook:ci-orphan-detector"
+        assert result_b == "hook:ci-orphan-detector"
+
+    def test_explicit_map_ignores_hooks_and_rules_args(self):
+        """ENFORCEMENT_MAP takes precedence; hooks/rules sets are not consulted."""
+        result = run_python_func(
+            "check_already_enforced",
+            "feedback-warnings-escape-hatch",
+            "some content",
+            ["unrelated-hook"],
+            ["unrelated-rule"],
+        )
+        assert result == "hook:lint-warning-enforcer"
 
     def test_detects_fixed_with_hook_in_content(self):
         """Content containing 'fixed with hook' should be detected."""
@@ -128,7 +154,7 @@ class TestCheckAlreadyEnforced:
         assert result == "referenced in content"
 
     def test_returns_none_for_unmatched(self):
-        """Feedback with no matching hook, rule, or content reference returns None."""
+        """Feedback with no map entry and no content reference returns None."""
         result = run_python_func(
             "check_already_enforced",
             "feedback-brand-new-issue",
@@ -137,6 +163,27 @@ class TestCheckAlreadyEnforced:
             ["test-files", "config-files"],
         )
         assert result is None
+
+
+class TestEnforcementMap:
+    def test_all_map_entries_have_correct_prefix(self):
+        """Every ENFORCEMENT_MAP value must start with 'hook:' or 'rule:'."""
+        mod = _load_module()
+        for name, enforcer in mod.ENFORCEMENT_MAP.items():
+            assert enforcer.startswith("hook:") or enforcer.startswith("rule:"), (
+                f"{name} has invalid enforcer prefix: {enforcer}"
+            )
+
+    def test_all_map_keys_have_feedback_prefix(self):
+        """Every ENFORCEMENT_MAP key must start with 'feedback-'."""
+        mod = _load_module()
+        for name in mod.ENFORCEMENT_MAP:
+            assert name.startswith("feedback-"), f"Key missing feedback- prefix: {name}"
+
+    def test_map_has_expected_size(self):
+        """ENFORCEMENT_MAP should have 13 entries."""
+        mod = _load_module()
+        assert len(mod.ENFORCEMENT_MAP) == 13
 
 
 class TestIntegration:
@@ -169,69 +216,11 @@ class TestIntegration:
             assert "enforced" in parsed
             assert "behavioral" in parsed
 
-
-class TestIssueTracking:
-    """Tests for get_already_filed, mark_as_filed, and deduplication logic."""
-
-    def test_get_already_filed_empty(self, tmp_path):
-        """No tracker file returns empty set."""
+    def test_no_dark_features_remain(self):
+        """Verify create_promotion_issue and issue tracking were removed."""
         mod = _load_module()
-        # Point to a non-existent file in tmp_path
-        mod.ISSUE_TRACKER_FILE = tmp_path / "nonexistent.json"
-        result = mod.get_already_filed()
-        assert result == set()
-
-    def test_mark_as_filed_creates_file(self, tmp_path):
-        """Filing marks persist to disk."""
-        mod = _load_module()
-        tracker = tmp_path / "tracker.json"
-        mod.ISSUE_TRACKER_FILE = tracker
-
-        mod.mark_as_filed("feedback-test-item")
-
-        assert tracker.exists()
-        data = json.loads(tracker.read_text())
-        assert "feedback-test-item" in data["filed"]
-
-    def test_already_filed_skipped(self, tmp_path):
-        """Candidate already filed returns False from create_promotion_issue."""
-        mod = _load_module()
-        tracker = tmp_path / "tracker.json"
-        mod.ISSUE_TRACKER_FILE = tracker
-
-        # Pre-file the candidate
-        mod.mark_as_filed("feedback-already-done")
-
-        candidate = {
-            "name": "feedback-already-done",
-            "mechanical_score": 5,
-            "behavioral_score": 1,
-        }
-        result = mod.create_promotion_issue(candidate, "some content")
-        assert result is False
-
-    def test_create_issue_low_score_not_filed(self):
-        """Candidates with mechanical_score < 4 are not auto-filed by main() logic."""
-        mod = _load_module()
-        # The filtering happens in main(), not in create_promotion_issue.
-        # Verify the threshold by checking the filter logic directly.
-        candidates = [
-            {"name": "fb-low", "status": "candidate", "mechanical_score": 2, "behavioral_score": 1},
-            {"name": "fb-high", "status": "candidate", "mechanical_score": 5, "behavioral_score": 1},
-        ]
-        promotable = [c for c in candidates if c["status"] == "candidate"]
-        high_score = [c for c in promotable if c["mechanical_score"] >= 4]
-        assert len(high_score) == 1
-        assert high_score[0]["name"] == "fb-high"
-
-    def test_tracker_deduplication(self, tmp_path):
-        """Same name filed twice only stored once."""
-        mod = _load_module()
-        tracker = tmp_path / "tracker.json"
-        mod.ISSUE_TRACKER_FILE = tracker
-
-        mod.mark_as_filed("feedback-dup-item")
-        mod.mark_as_filed("feedback-dup-item")
-
-        data = json.loads(tracker.read_text())
-        assert data["filed"].count("feedback-dup-item") == 1
+        assert not hasattr(mod, "create_promotion_issue")
+        assert not hasattr(mod, "get_already_filed")
+        assert not hasattr(mod, "mark_as_filed")
+        assert not hasattr(mod, "REPO")
+        assert not hasattr(mod, "ISSUE_TRACKER_FILE")

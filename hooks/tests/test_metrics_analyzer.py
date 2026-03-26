@@ -362,9 +362,10 @@ class TestPrThroughput:
 
 class TestSkillFailureRates:
     def test_failure_rates_computed(self, tmp_path):
-        """Skills with >10% failure rate are surfaced."""
+        """Skills with >10% failure rate are surfaced from date-based JSONL files."""
         mod = _load_analyzer_module()
-        tracker = tmp_path / "agent-quality-tracker.jsonl"
+        metrics_dir = tmp_path / "metrics"
+        metrics_dir.mkdir(parents=True)
         lines = []
         # coding-team: 2 errors out of 10 = 20%
         for _ in range(8):
@@ -375,11 +376,10 @@ class TestSkillFailureRates:
         for _ in range(4):
             lines.append(json.dumps({"skill": "scan-code", "status": "success", "ts": "2026-03-26T10:00:00Z"}))
         lines.append(json.dumps({"skill": "scan-code", "status": "error", "ts": "2026-03-26T10:00:00Z"}))
-        tracker.write_text("\n".join(lines) + "\n")
+        (metrics_dir / "agent-quality-2026-03-26.jsonl").write_text("\n".join(lines) + "\n")
 
-        # Override the tracker path
-        original = mod.QUALITY_TRACKER_PATH
-        mod.QUALITY_TRACKER_PATH = tracker
+        original = mod.METRICS_DIR
+        mod.METRICS_DIR = metrics_dir
         try:
             result = mod.get_skill_failure_rates()
             assert result is not None
@@ -388,34 +388,75 @@ class TestSkillFailureRates:
             assert "scan-code" in result
             assert "20%" in result
         finally:
-            mod.QUALITY_TRACKER_PATH = original
+            mod.METRICS_DIR = original
 
     def test_no_file_returns_none(self, tmp_path):
-        """Missing tracker file returns None."""
+        """Missing metrics directory returns None."""
         mod = _load_analyzer_module()
-        original = mod.QUALITY_TRACKER_PATH
-        mod.QUALITY_TRACKER_PATH = tmp_path / "nonexistent.jsonl"
+        original = mod.METRICS_DIR
+        mod.METRICS_DIR = tmp_path / "nonexistent"
         try:
             result = mod.get_skill_failure_rates()
             assert result is None
         finally:
-            mod.QUALITY_TRACKER_PATH = original
+            mod.METRICS_DIR = original
+
+    def test_no_quality_files_returns_none(self, tmp_path):
+        """Metrics directory exists but has no agent-quality files returns None."""
+        mod = _load_analyzer_module()
+        metrics_dir = tmp_path / "metrics"
+        metrics_dir.mkdir(parents=True)
+        # Only tool-usage files, no agent-quality files
+        (metrics_dir / "tool-usage-2026-03-26.jsonl").write_text("{}\n")
+
+        original = mod.METRICS_DIR
+        mod.METRICS_DIR = metrics_dir
+        try:
+            result = mod.get_skill_failure_rates()
+            assert result is None
+        finally:
+            mod.METRICS_DIR = original
 
     def test_low_failure_rate_not_reported(self, tmp_path):
         """Skills with <=10% failure rate are not reported."""
         mod = _load_analyzer_module()
-        tracker = tmp_path / "agent-quality-tracker.jsonl"
+        metrics_dir = tmp_path / "metrics"
+        metrics_dir.mkdir(parents=True)
         lines = []
         # coding-team: 1 error out of 20 = 5%
         for _ in range(19):
             lines.append(json.dumps({"skill": "coding-team", "status": "success", "ts": "2026-03-26T10:00:00Z"}))
         lines.append(json.dumps({"skill": "coding-team", "status": "error", "ts": "2026-03-26T10:00:00Z"}))
-        tracker.write_text("\n".join(lines) + "\n")
+        (metrics_dir / "agent-quality-2026-03-26.jsonl").write_text("\n".join(lines) + "\n")
 
-        original = mod.QUALITY_TRACKER_PATH
-        mod.QUALITY_TRACKER_PATH = tracker
+        original = mod.METRICS_DIR
+        mod.METRICS_DIR = metrics_dir
         try:
             result = mod.get_skill_failure_rates()
             assert result is None
         finally:
-            mod.QUALITY_TRACKER_PATH = original
+            mod.METRICS_DIR = original
+
+    def test_reads_most_recent_3_files(self, tmp_path):
+        """Only the 3 most recent date-based files are read."""
+        mod = _load_analyzer_module()
+        metrics_dir = tmp_path / "metrics"
+        metrics_dir.mkdir(parents=True)
+
+        # Create 4 files — oldest should be ignored
+        for day in ["2026-03-23", "2026-03-24", "2026-03-25", "2026-03-26"]:
+            lines = [json.dumps({"skill": f"skill-{day}", "status": "error", "ts": f"{day}T10:00:00Z"})]
+            (metrics_dir / f"agent-quality-{day}.jsonl").write_text("\n".join(lines) + "\n")
+
+        original = mod.METRICS_DIR
+        mod.METRICS_DIR = metrics_dir
+        try:
+            result = mod.get_skill_failure_rates()
+            assert result is not None
+            # Most recent 3: 03-26, 03-25, 03-24; oldest 03-23 excluded
+            assert "skill-2026-03-26" in result
+            assert "skill-2026-03-25" in result
+            assert "skill-2026-03-24" in result
+            assert "skill-2026-03-23" not in result
+        finally:
+            mod.METRICS_DIR = original

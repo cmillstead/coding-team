@@ -144,6 +144,7 @@ In the next session where the behavior could recur, check:
 ## Audit — Evaluate an Existing Skill or Prompt
 
 Read the skill/prompt file completely, then evaluate against this checklist:
+For standard block templates, see `skills/prompt-craft/patterns-catalog.md`.
 
 ### Behavioral alignment
 
@@ -170,6 +171,15 @@ Read the skill/prompt file completely, then evaluate against this checklist:
 - [ ] Do decision points have explicit routing? (tables or if/then, not "consider")
 - [ ] Are examples provided for ambiguous patterns?
 - [ ] Is rationale separated from instruction? (CC follows instructions, skims rationale)
+
+### Standard blocks
+
+- [ ] Does the file have enumerated-item-completion protection? (for any agent processing a list)
+- [ ] Are replacement behaviors provided for every prohibition? ("NEVER X" must have "Instead, Y")
+- [ ] Is the file under 200 lines? (context saturation threshold — see `patterns-catalog.md` tier table)
+- [ ] Does the file have a "When You Cannot Complete" block? (for any agent that can get stuck)
+- [ ] Is there a Finding Integrity block? (for any read-only auditor)
+- [ ] Are escalation paths explicit? (BLOCKED, NEEDS_CONTEXT statuses defined)
 
 ### Prompt template quality (for `prompts/*.md`)
 

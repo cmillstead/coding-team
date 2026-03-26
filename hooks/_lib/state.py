@@ -10,7 +10,7 @@ from pathlib import Path
 def get_session_id() -> str:
     """Get the current session ID from environment."""
     return os.environ.get("CLAUDE_SESSION_ID",
-                          os.environ.get("SESSION_ID", "default"))
+                          os.environ.get("SESSION_ID", f"pid-{os.getppid()}"))
 
 
 def get_state_file(prefix: str) -> Path:
