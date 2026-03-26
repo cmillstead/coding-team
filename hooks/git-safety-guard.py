@@ -108,7 +108,39 @@ def is_commit_or_push(command: str) -> bool:
 
 
 def extract_commit_message(command: str) -> str | None:
-    """Extract commit message from git commit -m command."""
+    """Extract commit message from git commit command.
+
+    Handles -m "msg", -m 'msg', -F file, --file=file, and HEREDOC patterns.
+    Returns None if the message cannot be extracted.
+    """
+    # Check for HEREDOC pattern: -m "$(cat <<'EOF'\n...\nEOF\n)"
+    heredoc_match = re.search(
+        r"-m\s+\"\$\(cat\s+<<'?(\w+)'?\s*\n(.*?)\n\1\s*\)\"",
+        command, re.DOTALL
+    )
+    if heredoc_match:
+        return heredoc_match.group(2).strip()
+
+    # Check -F / --file= (read the file contents)
+    file_patterns = [
+        re.compile(r'-F\s+"([^"]*)"'),
+        re.compile(r"-F\s+'([^']*)'"),
+        re.compile(r'-F\s+(\S+)'),
+        re.compile(r'--file="([^"]*)"'),
+        re.compile(r"--file='([^']*)'"),
+        re.compile(r'--file=(\S+)'),
+    ]
+    for pattern in file_patterns:
+        match = pattern.search(command)
+        if match:
+            filepath = match.group(1)
+            try:
+                with open(filepath) as f:
+                    return f.read().strip()
+            except (OSError, IOError):
+                return None  # Can't read file = can't validate
+
+    # Existing -m patterns
     patterns = [
         re.compile(r'-m\s+"([^"]*)"'),
         re.compile(r"-m\s+'([^']*)'"),
@@ -251,22 +283,41 @@ def main():
 
         # Commit message format check (only for git commit, not push)
         if re.search(r'\bgit\s+commit\b', command):
+            # Skip if --amend or --no-edit (no new message expected)
+            if re.search(r'--amend|--no-edit', command):
+                return
+
             msg_text = extract_commit_message(command)
-            if msg_text is not None:
-                has_prefix = any(msg_text.startswith(prefix) for prefix in COMMIT_PREFIXES)
-                if not has_prefix:
-                    first_word = msg_text.split()[0] if msg_text.strip() else "(empty)"
-                    prefixes_str = ", ".join(COMMIT_PREFIXES)
-                    output.block(
-                        "COMMIT MESSAGE FORMAT ERROR\n\n"
-                        "Message must start with a conventional prefix.\n"
-                        f"Allowed: {prefixes_str}\n"
-                        f"Got: '{first_word}'\n\n"
-                        'Example: git commit -m "feat: add user authentication"\n\n'
-                        "Known rationalization: 'It is just a WIP commit' -- "
-                        "WIP commits still need prefixes for git log readability."
-                    )
-                    return
+            if msg_text is None:
+                prefixes_str = ", ".join(COMMIT_PREFIXES)
+                output.block(
+                    "COMMIT MESSAGE UNPARSEABLE\n\n"
+                    "Could not extract commit message from command.\n"
+                    f"Use: git commit -m \"{COMMIT_PREFIXES[0]} description\"\n"
+                    f"Or: write message to a file, then git commit -F /path/to/msg.txt\n"
+                    f"Allowed prefixes: {prefixes_str}\n\n"
+                    "Known rationalization: 'The hook is parsing incorrectly' -- "
+                    "fix the commit message format, not the command structure. "
+                    "Working around a safety hook is a policy violation."
+                )
+                return
+
+            has_prefix = any(msg_text.startswith(prefix) for prefix in COMMIT_PREFIXES)
+            if not has_prefix:
+                first_word = msg_text.split()[0] if msg_text.strip() else "(empty)"
+                prefixes_str = ", ".join(COMMIT_PREFIXES)
+                output.block(
+                    "COMMIT MESSAGE FORMAT ERROR\n\n"
+                    "Message must start with a conventional prefix.\n"
+                    f"Allowed: {prefixes_str}\n"
+                    f"Got: '{first_word}'\n\n"
+                    'Example: git commit -m "feat: add user authentication"\n\n'
+                    "Known rationalizations:\n"
+                    "- 'It is just a WIP commit' -- WIP commits still need prefixes for git log readability.\n"
+                    "- 'The hook is parsing incorrectly' -- fix the commit message, not the command format. "
+                    "Circumventing a safety hook is a policy violation."
+                )
+                return
 
 
 if __name__ == "__main__":

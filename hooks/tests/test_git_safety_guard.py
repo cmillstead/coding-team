@@ -1,5 +1,25 @@
 """Tests for git-safety-guard.py hook."""
 
+import hashlib
+import json
+import os
+import time
+from pathlib import Path
+
+
+def _seed_verification_state(session_id: str):
+    """Seed verification state so commit format checks are reached."""
+    session_hash = hashlib.sha256(session_id.encode()).hexdigest()[:12]
+    state_file = Path(f"/tmp/claude-verification-{session_hash}.json")
+    now = time.time()
+    state_file.write_text(json.dumps({
+        "verifications": [
+            {"command": "pytest tests/", "time": now},
+            {"command": "ruff check .", "time": now},
+        ],
+        "last_updated": now,
+    }))
+
 
 class TestSecretGuard:
     def test_blocks_git_add_env(self, run_hook, make_event):
@@ -42,3 +62,152 @@ class TestAllowedCommands:
         event = make_event("Read", file_path="/some/file.py")
         result = run_hook("git-safety-guard.py", event)
         assert result.stdout.strip() == ""
+
+
+class TestCommitMessageFormat:
+    """Tests for commit message prefix validation."""
+
+    def test_blocks_commit_without_prefix(self, run_hook, make_event, tmp_state_dir, tmp_path):
+        (tmp_path / "Makefile").touch()
+        old_cwd = os.getcwd()
+        os.chdir(tmp_path)
+        _seed_verification_state(tmp_state_dir)
+        try:
+            event = make_event("Bash", command='git commit -m "add new feature"')
+            result = run_hook("git-safety-guard.py", event)
+            assert result.parsed is not None
+            assert result.parsed["decision"] == "block"
+            assert "FORMAT ERROR" in result.parsed["reason"]
+        finally:
+            os.chdir(old_cwd)
+
+    def test_allows_commit_with_feat_prefix(self, run_hook, make_event, tmp_state_dir, tmp_path):
+        (tmp_path / "Makefile").touch()
+        old_cwd = os.getcwd()
+        os.chdir(tmp_path)
+        _seed_verification_state(tmp_state_dir)
+        try:
+            event = make_event("Bash", command='git commit -m "feat: add new feature"')
+            result = run_hook("git-safety-guard.py", event)
+            assert result.stdout.strip() == ""
+        finally:
+            os.chdir(old_cwd)
+
+    def test_allows_commit_with_fix_prefix(self, run_hook, make_event, tmp_state_dir, tmp_path):
+        (tmp_path / "Makefile").touch()
+        old_cwd = os.getcwd()
+        os.chdir(tmp_path)
+        _seed_verification_state(tmp_state_dir)
+        try:
+            event = make_event("Bash", command='git commit -m "fix: resolve crash on startup"')
+            result = run_hook("git-safety-guard.py", event)
+            assert result.stdout.strip() == ""
+        finally:
+            os.chdir(old_cwd)
+
+
+class TestCommitMessageFileFlag:
+    """Tests for -F / --file= commit message extraction."""
+
+    def test_validates_message_from_file(self, run_hook, make_event, tmp_state_dir, tmp_path):
+        (tmp_path / "Makefile").touch()
+        msg_file = tmp_path / "commit-msg.txt"
+        msg_file.write_text("feat: add user authentication\n\nDetailed description here.")
+        old_cwd = os.getcwd()
+        os.chdir(tmp_path)
+        _seed_verification_state(tmp_state_dir)
+        try:
+            event = make_event("Bash", command=f'git commit -F {msg_file}')
+            result = run_hook("git-safety-guard.py", event)
+            assert result.stdout.strip() == ""
+        finally:
+            os.chdir(old_cwd)
+
+    def test_blocks_bad_prefix_from_file(self, run_hook, make_event, tmp_state_dir, tmp_path):
+        (tmp_path / "Makefile").touch()
+        msg_file = tmp_path / "commit-msg.txt"
+        msg_file.write_text("add user authentication")
+        old_cwd = os.getcwd()
+        os.chdir(tmp_path)
+        _seed_verification_state(tmp_state_dir)
+        try:
+            event = make_event("Bash", command=f'git commit -F {msg_file}')
+            result = run_hook("git-safety-guard.py", event)
+            assert result.parsed is not None
+            assert result.parsed["decision"] == "block"
+            assert "FORMAT ERROR" in result.parsed["reason"]
+        finally:
+            os.chdir(old_cwd)
+
+    def test_blocks_unreadable_file(self, run_hook, make_event, tmp_state_dir, tmp_path):
+        (tmp_path / "Makefile").touch()
+        old_cwd = os.getcwd()
+        os.chdir(tmp_path)
+        _seed_verification_state(tmp_state_dir)
+        try:
+            event = make_event("Bash", command='git commit -F /nonexistent/path.txt')
+            result = run_hook("git-safety-guard.py", event)
+            assert result.parsed is not None
+            assert result.parsed["decision"] == "block"
+            assert "UNPARSEABLE" in result.parsed["reason"]
+        finally:
+            os.chdir(old_cwd)
+
+    def test_validates_double_dash_file(self, run_hook, make_event, tmp_state_dir, tmp_path):
+        (tmp_path / "Makefile").touch()
+        msg_file = tmp_path / "commit-msg.txt"
+        msg_file.write_text("fix: resolve memory leak")
+        old_cwd = os.getcwd()
+        os.chdir(tmp_path)
+        _seed_verification_state(tmp_state_dir)
+        try:
+            event = make_event("Bash", command=f'git commit --file={msg_file}')
+            result = run_hook("git-safety-guard.py", event)
+            assert result.stdout.strip() == ""
+        finally:
+            os.chdir(old_cwd)
+
+
+class TestCommitMessageUnparseable:
+    """Tests for block-by-default when message can't be extracted."""
+
+    def test_blocks_commit_with_no_message_flag(self, run_hook, make_event, tmp_state_dir, tmp_path):
+        (tmp_path / "Makefile").touch()
+        old_cwd = os.getcwd()
+        os.chdir(tmp_path)
+        _seed_verification_state(tmp_state_dir)
+        try:
+            event = make_event("Bash", command='git commit')
+            result = run_hook("git-safety-guard.py", event)
+            assert result.parsed is not None
+            assert result.parsed["decision"] == "block"
+            assert "UNPARSEABLE" in result.parsed["reason"]
+        finally:
+            os.chdir(old_cwd)
+
+    def test_allows_amend_without_message(self, run_hook, make_event, tmp_state_dir, tmp_path):
+        (tmp_path / "Makefile").touch()
+        old_cwd = os.getcwd()
+        os.chdir(tmp_path)
+        _seed_verification_state(tmp_state_dir)
+        try:
+            event = make_event("Bash", command='git commit --amend --no-edit')
+            result = run_hook("git-safety-guard.py", event)
+            assert result.stdout.strip() == ""
+        finally:
+            os.chdir(old_cwd)
+
+    def test_bypass_rationalization_in_error(self, run_hook, make_event, tmp_state_dir, tmp_path):
+        """Verify the hook bypass rationalization appears in block messages."""
+        (tmp_path / "Makefile").touch()
+        old_cwd = os.getcwd()
+        os.chdir(tmp_path)
+        _seed_verification_state(tmp_state_dir)
+        try:
+            event = make_event("Bash", command='git commit -m "add stuff"')
+            result = run_hook("git-safety-guard.py", event)
+            assert result.parsed is not None
+            assert result.parsed["decision"] == "block"
+            assert "hook is parsing incorrectly" in result.parsed["reason"].lower()
+        finally:
+            os.chdir(old_cwd)

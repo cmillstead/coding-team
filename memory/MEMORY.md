@@ -24,6 +24,8 @@
 - [feedback-context-survival-gates.md](feedback-context-survival-gates.md) — QA review and second-opinion gates lost to context pressure in long sessions; fixed with mandatory post-execution checklist + codex review syntax fix
 - [feedback-spec-clarity-rationalization.md](feedback-spec-clarity-rationalization.md) — Orchestrator offers self-execution when spec is clear; spec clarity determines model tier not delegation
 - [feedback-hook-accumulation.md](feedback-hook-accumulation.md) — Harness-engineer adds 1-2 hooks per audit cycle without cost/benefit; if >20 hooks, consolidate before adding
+- [feedback-heredoc-commit-bug.md](feedback-heredoc-commit-bug.md) — git-safety-guard now handles -F/--file= and HEREDOC patterns; block-by-default on unparseable messages
+- [feedback-hook-bypass-rationalization.md](feedback-hook-bypass-rationalization.md) — Agent circumvented hook by switching command format; fixed with block-by-default + named rationalization
 
 ## Active Decisions
 

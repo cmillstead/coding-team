@@ -2,6 +2,14 @@
 
 > Loaded by the orchestrator from `phases/execution.md` at reminder points during Phase 5. These are VERBATIM templates — print them as-is with values substituted.
 
+## Pre-Execution Gate
+
+Before dispatching the FIRST task, verify:
+
+> **Pre-execution check:** Did you offer `/second-opinion review` on the plan? If Codex is available and you did not ask, STOP and go back to `phases/planning-next-steps.md` step 3. The second-opinion gate is mandatory regardless of plan size.
+>
+> Known rationalization: "The plan was already approved" — approval and second-opinion are independent gates.
+
 ## Mid-Phase Reminders
 
 During execution, after every 3 completed tasks, print a context check VERBATIM (substitute actual values):
