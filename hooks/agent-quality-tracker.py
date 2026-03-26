@@ -15,17 +15,19 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+sys.path.insert(0, os.path.dirname(__file__))
+from _lib.event import parse_event, get_tool_name, get_tool_result
+from _lib.output import allow_with_reason
+
 METRICS_DIR = Path.home() / ".claude" / "metrics"
 
 
 def main():
-    try:
-        event = json.load(sys.stdin)
-    except (json.JSONDecodeError, ValueError):
+    event = parse_event()
+    if not event:
         return
 
-    tool_name = event.get("tool_name", "")
-    if tool_name != "Skill":
+    if get_tool_name(event) != "Skill":
         return
 
     tool_input = event.get("tool_input", {})
@@ -33,11 +35,7 @@ def main():
 
     skill_name = tool_input.get("skill_name", tool_input.get("skill", "unknown"))
 
-    result_str = ""
-    if isinstance(tool_result, dict):
-        result_str = tool_result.get("stdout", "") + tool_result.get("stderr", "")
-    elif isinstance(tool_result, str):
-        result_str = tool_result
+    result_str = get_tool_result(event)
 
     has_output = len(result_str.strip()) > 0
     has_error = False
@@ -73,20 +71,18 @@ def main():
         pass
 
     if has_error:
-        msg = (
+        allow_with_reason(
             f"QUALITY GATE: Skill '{skill_name}' errored. Do NOT accept output without verifying every deliverable. "
             f"Known rationalization: 'The error is non-fatal, output is mostly correct' — partial output from errored skills contains silent omissions. "
             f"Re-dispatch using the Skill tool with a narrower prompt or escalated model tier."
         )
-        print(json.dumps({"decision": "allow", "reason": msg}))
         return
 
     if not has_output:
-        msg = (
+        allow_with_reason(
             f"QUALITY GATE: Skill '{skill_name}' produced no output — likely silent failure. "
             f"Re-dispatch using the Skill tool. Do not assume the task completed."
         )
-        print(json.dumps({"decision": "allow", "reason": msg}))
         return
 
 

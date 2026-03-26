@@ -1,10 +1,15 @@
 #!/usr/bin/env python3
 """PostToolUse hook: warn when agent output covers fewer findings than input specified."""
 import json
+import os
 import re
 import sys
 import time
 from pathlib import Path
+
+sys.path.insert(0, os.path.dirname(__file__))
+from _lib.event import parse_event, get_tool_name, get_tool_input, get_tool_result
+from _lib.output import advisory
 
 SESSION_FILE = Path("/tmp/coding-team-session.json")
 MAX_AGE_SECONDS = 7200  # 2 hours
@@ -27,28 +32,22 @@ def extract_finding_numbers(text: str) -> set[str]:
 
 
 def main():
-    try:
-        data = json.load(sys.stdin)
-    except (json.JSONDecodeError, ValueError):
+    data = parse_event()
+    if not data:
         return
 
-    if data.get("tool_name") != "Agent":
+    if get_tool_name(data) != "Agent":
         return
 
     if not is_session_active():
         return
 
-    prompt = data.get("tool_input", {}).get("prompt", "")
+    prompt = get_tool_input(data).get("prompt", "")
     input_findings = extract_finding_numbers(prompt)
     if not input_findings:
         return
 
-    # Normalize tool_result to string (can be str or dict with stdout/stderr)
-    result = data.get("tool_result", "")
-    if isinstance(result, dict):
-        result = result.get("stdout", "") + " " + result.get("stderr", "")
-    elif not isinstance(result, str):
-        result = str(result)
+    result = get_tool_result(data)
     if not result:
         return
 
@@ -58,15 +57,12 @@ def main():
 
     if len(found) < len(input_findings):
         missing_list = ", ".join(f"F{n}" for n in missing)
-        print(json.dumps({
-            "decision": "allow",
-            "reason": (
-                f"COMPLETENESS GATE: Agent covered {len(found)}/{len(input_findings)} findings. "
-                f"Missing: {missing_list}. Re-dispatch the Agent tool for missing findings specifically — "
-                f"do not accept partial coverage. "
-                f"Known rationalization: 'The missing ones are minor' — all assigned findings must be addressed."
-            ),
-        }))
+        advisory(
+            f"COMPLETENESS GATE: Agent covered {len(found)}/{len(input_findings)} findings. "
+            f"Missing: {missing_list}. Re-dispatch the Agent tool for missing findings specifically — "
+            f"do not accept partial coverage. "
+            f"Known rationalization: 'The missing ones are minor' — all assigned findings must be addressed."
+        )
 
 
 if __name__ == "__main__":

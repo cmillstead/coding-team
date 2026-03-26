@@ -12,10 +12,14 @@ Named rationalization: "It's a minor change" — minor changes to dependencies,
 migrations, or multi-module scope still need awareness.
 """
 
-import json
+import os
 import re
 import sys
 from pathlib import Path
+
+sys.path.insert(0, os.path.dirname(__file__))
+from _lib.event import parse_event, get_tool_name, get_tool_input
+from _lib.output import advisory
 
 # Dependency installation commands
 DEPENDENCY_PATTERNS = [
@@ -83,30 +87,26 @@ def check_file_edit(file_path: str) -> str | None:
 
 
 def main():
-    try:
-        event = json.load(sys.stdin)
-    except (json.JSONDecodeError, ValueError):
+    event = parse_event()
+    if not event:
         return  # malformed input, skip silently
 
-    tool_name = event.get("tool_name", "")
-    tool_input = event.get("tool_input", {})
-    advisory = None
+    tool_name = get_tool_name(event)
+    tool_input = get_tool_input(event)
+    advice = None
 
     if tool_name == "Bash":
         command = tool_input.get("command", "")
         if command:
-            advisory = check_bash_command(command)
+            advice = check_bash_command(command)
 
     elif tool_name in ("Edit", "Write"):
         file_path = tool_input.get("file_path", "")
         if file_path:
-            advisory = check_file_edit(file_path)
+            advice = check_file_edit(file_path)
 
-    if advisory:
-        print(json.dumps({
-            "decision": "allow",
-            "reason": advisory,
-        }))
+    if advice:
+        advisory(advice)
 
 
 if __name__ == "__main__":

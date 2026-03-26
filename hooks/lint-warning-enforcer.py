@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
 """PostToolUse hook: enforce zero warnings from lint/typecheck commands."""
-import json
+import os
 import re
 import sys
+
+sys.path.insert(0, os.path.dirname(__file__))
+from _lib.event import parse_event, get_tool_name, get_command
+from _lib.output import advisory
 
 
 # Commands that this hook cares about
@@ -50,16 +54,14 @@ def has_warning(line: str) -> bool:
 
 
 def main():
-    try:
-        data = json.load(sys.stdin)
-    except (json.JSONDecodeError, ValueError):
+    data = parse_event()
+    if not data:
         return
 
-    tool_name = data.get("tool_name", "")
-    if tool_name != "Bash":
+    if get_tool_name(data) != "Bash":
         return
 
-    command = data.get("tool_input", {}).get("command", "")
+    command = get_command(data)
     if not is_lint_command(command):
         return
 
@@ -75,15 +77,12 @@ def main():
     if warning_lines:
         sample = "\n".join(warning_lines[:5])
         extra = f"\n... and {len(warning_lines) - 5} more" if len(warning_lines) > 5 else ""
-        print(json.dumps({
-            "decision": "allow",
-            "reason": (
-                f"You are a zero-warning engineer. Fix all {len(warning_lines)} warnings before proceeding.\n\n"
-                f"Sample warnings:\n{sample}{extra}\n\n"
-                "The rationalization 'only warnings, no errors' is a compliance failure, "
-                "not engineering judgment. Do not rationalize warnings as acceptable."
-            ),
-        }))
+        advisory(
+            f"You are a zero-warning engineer. Fix all {len(warning_lines)} warnings before proceeding.\n\n"
+            f"Sample warnings:\n{sample}{extra}\n\n"
+            "The rationalization 'only warnings, no errors' is a compliance failure, "
+            "not engineering judgment. Do not rationalize warnings as acceptable."
+        )
         return
 
 
