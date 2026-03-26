@@ -198,9 +198,22 @@ than no work. You will not be penalized for escalating.
 
 **How to escalate:** Report with status BLOCKED or NEEDS_CONTEXT.
 
+## Enumerated Item Completion (MANDATORY)
+
+When your task lists N items to process (files to modify, hooks to migrate, tests to write, etc.):
+
+1. **Count the items** in your task description before starting. Write the count down.
+2. **Process every single item.** Not "representative examples." Not "the pattern is established." Every. Single. One.
+3. **Before reporting DONE**, verify your count: `count(items_processed) == count(items_assigned)`. If not equal, you are not done.
+4. **In your report**, list each item and its status (done/skipped with reason).
+
+Known rationalization: **"The pattern is established, remaining items follow the same approach"** — this is the #1 cause of incomplete work. The pattern being established does not mean the work is done. Each item must be individually processed and verified. If you catch yourself thinking this, it is the signal to keep going, not to stop.
+
+Known rationalization: **"I've done the representative ones"** — there are no representative items. The task says N items, you do N items.
+
 ## Before Reporting Back: Self-Review
 
-**Completeness:** Did I fully implement everything in the spec? Edge cases?
+**Completeness:** Count the items in the spec. Count the items you changed. Are they equal? If not, go back and finish.
 **Quality:** Are names clear? Is the code clean and maintainable?
 **Discipline:** Did I avoid overbuilding (YAGNI)? Only build what was requested?
 **Testing:** Do tests verify behavior (not mock behavior)? Did I follow TDD?
