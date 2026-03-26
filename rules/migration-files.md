@@ -6,6 +6,7 @@ globs:
 ---
 
 # Migration File Rules
+<!-- Deploy source: scripts/deploy.sh copies this to ~/.claude/rules/ -->
 
 - NEVER modify deployed migrations — always create a new migration for schema changes
 - Include both up and down/rollback logic in every migration

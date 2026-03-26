@@ -59,4 +59,24 @@ if [[ -f "$REPO_ROOT/scripts/statusline-command.sh" ]]; then
     deploy "$REPO_ROOT/scripts/statusline-command.sh" "$CLAUDE_DIR/statusline-command.sh"
 fi
 
+# Verify all deployed hooks are registered in settings.json
+echo "Verifying hook registration..."
+SETTINGS="$HOME/.claude/settings.json"
+if [ -f "$SETTINGS" ]; then
+    UNREGISTERED=0
+    for hook in "$CLAUDE_DIR"/hooks/*.py "$CLAUDE_DIR"/hooks/*.sh; do
+        hookname=$(basename "$hook")
+        if [ "$hookname" = "__init__.py" ] || [ "$hookname" = "_lib" ]; then
+            continue
+        fi
+        if ! grep -q "$hookname" "$SETTINGS"; then
+            echo "  WARNING: $hookname deployed but not registered in settings.json"
+            UNREGISTERED=$((UNREGISTERED + 1))
+        fi
+    done
+    if [ "$UNREGISTERED" -eq 0 ]; then
+        echo "  All hooks registered."
+    fi
+fi
+
 echo "Deploy complete."

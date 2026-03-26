@@ -44,7 +44,6 @@ def is_code_work(prompt: str) -> bool:
 SRC_PREFIX = os.path.expanduser("~/src/")
 PROJECT_MARKERS = ("pyproject.toml", "package.json", "Cargo.toml", "go.mod")
 DEBOUNCE_SECONDS = 30
-FALLBACK_BINARY = "/Users/cevin/src/ironmunch/.venv/bin/codesight-mcp"
 
 
 def find_project_root(file_path: str) -> str | None:
@@ -78,13 +77,8 @@ def should_debounce(project_root: str) -> bool:
 
 
 def find_codesight_binary() -> str | None:
-    """Find the codesight-mcp binary, preferring PATH then fallback."""
-    found = shutil.which("codesight-mcp")
-    if found:
-        return found
-    if os.path.isfile(FALLBACK_BINARY) and os.access(FALLBACK_BINARY, os.X_OK):
-        return FALLBACK_BINARY
-    return None
+    """Find the codesight-mcp binary on PATH, or None to gracefully degrade."""
+    return shutil.which("codesight-mcp")
 
 
 def handle_pre_agent(event: dict) -> None:

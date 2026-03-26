@@ -6,6 +6,7 @@ globs:
 ---
 
 # Chunking Large Analysis Tasks
+<!-- Deploy source: scripts/deploy.sh copies this to ~/.claude/rules/ -->
 
 Large taxonomy, disambiguation, or classification tasks must be chunked to avoid context compaction mid-analysis:
 

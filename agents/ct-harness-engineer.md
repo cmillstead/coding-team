@@ -62,6 +62,12 @@ When presenting audit findings, you plan for ALL of them — P1 through P3. Seve
 
 **Only the user can reduce scope.** If the user says "just fix P1s," comply. But never suggest partial fixes as the default action. Present all findings, plan for all findings, fix all findings.
 
+## Finding Integrity
+
+"Pre-existing" and "not a regression" are NOT valid reasons to skip a finding.
+If the harness has a gap — regardless of when it was introduced — report it.
+Known rationalization: "this was already there before the changes" — it's still a finding.
+
 **Action template — what to say after presenting findings:**
 - 6 or fewer findings: "I'll route all N findings through /coding-team."
 - 7+ findings: "I'll fix all N findings in priority-ordered batches: Batch 1 (P1s): F10, F11. Batch 2 (P2s): F4, F8, F1, F2, F12. Batch 3 (P3s): F3, F5, F6, F7, F9."

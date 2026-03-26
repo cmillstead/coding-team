@@ -7,6 +7,7 @@ globs:
 ---
 
 # Skill & CC Instruction File Rules
+<!-- Deploy source: scripts/deploy.sh copies this to ~/.claude/rules/ -->
 
 - Keep skill instructions under 200 lines — context saturation degrades compliance beyond this
 - Use identity framing ("You are the orchestrator") over prohibition ("NEVER write code directly")

@@ -2,6 +2,7 @@
 
 import importlib.util
 import json
+import os
 import subprocess
 import sys
 import textwrap
@@ -215,15 +216,67 @@ class TestCheckExternalHook:
         assert hhc.check_external_hook(script) is None
 
 
+class TestCheckMcpHealth:
+    def test_returns_list(self, hhc):
+        """check_mcp_health always returns a list."""
+        result = hhc.check_mcp_health()
+        assert isinstance(result, list)
+
+    def test_all_issues_mention_binary_names(self, hhc):
+        """Every issue string references a known MCP binary name."""
+        result = hhc.check_mcp_health()
+        known_names = {"codesight-mcp", "qmd"}
+        for issue in result:
+            assert any(name in issue for name in known_names), (
+                f"Issue does not reference a known binary: {issue}"
+            )
+
+    def test_found_binary_not_in_issues(self, hhc, tmp_path):
+        """A binary that exists on disk is not reported as missing."""
+        import shutil
+
+        # Create a real binary in tmp_path and prepend to PATH
+        fake_bin = tmp_path / "codesight-mcp"
+        fake_bin.write_text("#!/bin/bash\necho ok")
+        fake_bin.chmod(0o755)
+        original_path = os.environ.get("PATH", "")
+        os.environ["PATH"] = f"{tmp_path}:{original_path}"
+        try:
+            result = hhc.check_mcp_health()
+            codesight_issues = [i for i in result if "codesight-mcp" in i]
+            assert len(codesight_issues) == 0
+        finally:
+            os.environ["PATH"] = original_path
+
+    def test_missing_binary_with_empty_path(self, hhc):
+        """With an empty PATH and no common paths, binaries are reported missing."""
+        original_path = os.environ.get("PATH", "")
+        os.environ["PATH"] = "/nonexistent-test-path-that-does-not-exist"
+        try:
+            result = hhc.check_mcp_health()
+            # At minimum one binary should be missing
+            assert len(result) >= 1
+            all_text = " ".join(result)
+            assert "not found" in all_text
+        finally:
+            os.environ["PATH"] = original_path
+
+    def test_issues_are_strings(self, hhc):
+        """All returned issues are strings."""
+        result = hhc.check_mcp_health()
+        for issue in result:
+            assert isinstance(issue, str)
+
+
 class TestIntegration:
     def test_no_output_when_hooks_healthy(self, run_hook):
         """Full hook produces no output when all hooks are healthy."""
         result = run_hook("hook-health-check.py", {})
         # If all hooks in ~/.claude/hooks/ are healthy, output should be empty.
-        # If some are unhealthy, we still verify valid JSON structure.
+        # If some are unhealthy or MCP servers unavailable, verify valid JSON.
         if result.stdout.strip():
             parsed = json.loads(result.stdout)
             assert parsed["decision"] == "allow"
-            assert "unhealthy" in parsed["reason"].lower()
+            assert "unhealthy" in parsed["reason"].lower() or "mcp" in parsed["reason"].lower()
         else:
             assert result.stdout.strip() == ""

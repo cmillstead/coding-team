@@ -64,3 +64,29 @@ to use /coding-team. If you're constructing a reason why an edit
 **Quantify thresholds.** "Large tasks" is ambiguous. "Tasks touching 8+ files" is mechanical.
 
 **Tables beat prose for routing.** CC scans tables faster than paragraphs. Use tables for any decision with discrete inputs and outputs. When the agent doesn't know what to do (CI failures, error classification, model selection), a classification table with signal keywords and actions is often the right first answer.
+
+**Replacement behaviors must accompany prohibitions.** Every "NEVER do X" must include "Instead, do Y." A prohibition without a replacement behavior creates either paralysis (agent doesn't know what to do) or agent-invented workarounds (which may be worse than the original behavior).
+
+```markdown
+# BAD — prohibition with no alternative
+NEVER suggest fixing only a subset of findings.
+
+# GOOD — prohibition with explicit replacement
+NEVER suggest fixing only a subset of findings. Instead, present all
+findings in priority-ordered batches: Batch 1 (P1s), Batch 2 (P2s),
+Batch 3 (P3s).
+```
+
+**Position determines survival under pressure.** Critical instructions placed near the top of a file survive context pressure. Instructions past line 200 are the first to degrade. The MANDATORY block in ct-implementer.md works because it's at the top — the Enumerated Item Completion section at line 201 is at risk.
+
+Guideline: Front-load the 3-5 most critical rules in any agent prompt. If a rule is important enough to name, it's important enough to place in the top 100 lines.
+
+**Standard blocks for standard problems.** Reusable template blocks (Finding Integrity, MCP Resilience, Enumerated Completion) are more reliable than ad-hoc instructions. They're battle-tested across 12 audit cycles and consistent across agents. When a known pattern applies, use the standard block from `patterns-catalog.md` rather than writing a one-off instruction.
+
+```markdown
+# BAD — ad-hoc instruction for a solved problem
+Make sure to report all findings, even pre-existing ones.
+
+# GOOD — use the battle-tested standard block
+Use the Finding Integrity block verbatim from patterns-catalog.md.
+```

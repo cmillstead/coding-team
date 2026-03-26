@@ -14,6 +14,7 @@ by the pytest suite in hooks/tests/. A hook that passes health check but has a
 logic bug will still be caught by the test suite.
 """
 import json
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -142,6 +143,36 @@ def check_external_hook(hook_path: Path) -> str | None:
         return None  # Unknown type, skip silently
 
 
+def check_mcp_health() -> list[str]:
+    """Probe configured MCP servers for availability.
+
+    Checks whether codesight-mcp and qmd binaries are reachable via PATH
+    or common install locations. Returns a list of warning strings for
+    any servers that cannot be found.
+    """
+    issues = []
+
+    # Check codesight-mcp binary availability
+    if not shutil.which("codesight-mcp"):
+        common_paths = [
+            Path.home() / ".local" / "bin" / "codesight-mcp",
+            Path("/usr/local/bin/codesight-mcp"),
+        ]
+        if not any(p.exists() for p in common_paths):
+            issues.append("codesight-mcp binary not found in PATH or common locations")
+
+    # Check qmd binary availability
+    if not shutil.which("qmd"):
+        common_paths = [
+            Path("/opt/homebrew/bin/qmd"),
+            Path("/usr/local/bin/qmd"),
+        ]
+        if not any(p.exists() for p in common_paths):
+            issues.append("qmd binary not found in PATH or common locations")
+
+    return issues
+
+
 def main():
     if not HOOKS_DIR.is_dir():
         return
@@ -166,15 +197,28 @@ def main():
         if error:
             unhealthy.append(f"  - [external] {ext_path}: {error}")
 
-    if not unhealthy:
-        return  # All hooks healthy — silent success
+    # Check MCP server availability (advisory warnings, not blockers)
+    mcp_issues = check_mcp_health()
 
-    msg = (
-        f"Hook health check: {len(unhealthy)} unhealthy hook(s) detected.\n"
-        "These hooks may silently fail to protect you:\n"
-        + "\n".join(unhealthy)
-        + "\n\nFix or remove broken hooks to restore protection."
-    )
+    if not unhealthy and not mcp_issues:
+        return  # All healthy — silent success
+
+    parts = []
+    if unhealthy:
+        parts.append(
+            f"Hook health check: {len(unhealthy)} unhealthy hook(s) detected.\n"
+            "These hooks may silently fail to protect you:\n"
+            + "\n".join(unhealthy)
+            + "\n\nFix or remove broken hooks to restore protection."
+        )
+    if mcp_issues:
+        parts.append(
+            f"MCP health check: {len(mcp_issues)} server(s) unavailable.\n"
+            "Agents will waste tool calls discovering this at first use:\n"
+            + "\n".join(f"  - {issue}" for issue in mcp_issues)
+        )
+
+    msg = "\n\n".join(parts)
     print(json.dumps({"decision": "allow", "reason": msg}))
 
 

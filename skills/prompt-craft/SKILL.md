@@ -68,6 +68,27 @@ Seven patterns that control CC behavior. Summary (read `skills/prompt-craft/lang
 
 After writing, evaluate with the audit checklist (see Audit section below).
 
+### 6. Agent Template (standard structure)
+
+After 12 audit cycles, agents converge on this 13-step structure. Use as a checklist when creating new agents:
+
+1. **Frontmatter** — name, description, model, tools
+2. **Dispatch Context** — how it's invoked (standalone vs pipeline)
+3. **Identity Block** — what you ARE, what your JOB is (Pattern 9: Identity-Negative)
+4. **Pipeline Isolation** — "You are INSIDE /coding-team... Do NOT invoke..."
+5. **MANDATORY block** — non-negotiable requirements (near the top — Rule 9)
+6. **Core Protocol** — what to check, how to check it
+7. **Code Intelligence table** — tool-to-use mapping (if MCP tools available)
+8. **MCP Resilience block** — Pattern 4 (if MCP tools available)
+9. **Project-Specific Criteria slot** — "[INSERT...]" placeholder
+10. **Calibration** — what severity bar to apply
+11. **When You Cannot Complete** — BLOCKED status, no guessing
+12. **Finding Integrity** — Pattern 3 (for read-only auditors)
+13. **Named Rationalizations** — agent-specific bypasses as compliance triggers
+14. **Output Format** — structured report template
+
+See `skills/prompt-craft/patterns-catalog.md` for templates of steps 8, 11, 12, and 13.
+
 ---
 
 ## Diagnose — Why CC Isn't Following Instructions
@@ -95,6 +116,9 @@ Read the surrounding context. Common failure patterns:
 | CC constructs category exceptions ("just mechanical", "just test expectations") | Rule has no escape hatch but CC invents one | Name the specific rationalization as a compliance trigger (see Language Rules) |
 | CC dismisses background task output without reading | No instruction to read output before acting on assumptions | Add "read output FIRST, then classify" — name "already handled" as rationalization |
 | CC obeys reluctantly, finds new bypasses each session | Prohibition-based framing creates adversarial dynamic | Rewrite as identity framing — tell the agent what it IS, not what it can't do |
+| CC freezes or invents workarounds after a prohibition | Prohibition lacks a replacement behavior | Add "Instead, do Y" after every "NEVER do X" — see Rule 8 in language-rules.md |
+| CC processes some items in a list but not all | No enumerated completion protocol | Add item count at dispatch, count verification by orchestrator, named rationalizations ("pattern is established", "representative ones") — see patterns-catalog.md Pattern 1 |
+| CC follows rules early but ignores them late in conversation | Context pressure pushes instructions past the survival threshold | Front-load critical rules in top 100 lines. Extract sections past line 200 to on-demand files. Add required output fields that force compliance regardless of context depth — see Rule 9 in language-rules.md |
 
 ### Step 3: Check competing instructions
 
@@ -144,6 +168,7 @@ In the next session where the behavior could recur, check:
 ## Audit — Evaluate an Existing Skill or Prompt
 
 Read the skill/prompt file completely, then evaluate against this checklist:
+For standard block templates, see `skills/prompt-craft/patterns-catalog.md`.
 
 ### Behavioral alignment
 
@@ -170,6 +195,15 @@ Read the skill/prompt file completely, then evaluate against this checklist:
 - [ ] Do decision points have explicit routing? (tables or if/then, not "consider")
 - [ ] Are examples provided for ambiguous patterns?
 - [ ] Is rationale separated from instruction? (CC follows instructions, skims rationale)
+
+### Standard blocks
+
+- [ ] Does the file have enumerated-item-completion protection? (for any agent processing a list)
+- [ ] Are replacement behaviors provided for every prohibition? ("NEVER X" must have "Instead, Y")
+- [ ] Is the file under 200 lines? (context saturation threshold — see `patterns-catalog.md` tier table)
+- [ ] Does the file have a "When You Cannot Complete" block? (for any agent that can get stuck)
+- [ ] Is there a Finding Integrity block? (for any read-only auditor)
+- [ ] Are escalation paths explicit? (BLOCKED, NEEDS_CONTEXT statuses defined)
 
 ### Prompt template quality (for `prompts/*.md`)
 
@@ -201,35 +235,7 @@ CONTEXT:
 
 ## Taxonomy — Skill Discovery Maintenance
 
-The skill taxonomy (`~/.claude/skills/skill-taxonomy.yml`) maps skills to specialist worker roles so the Phase 2 Team Leader can pass relevant skills to each worker.
-
-### Adding a skill
-
-1. Determine which category the skill fits (debugging, verification, git-workflow, etc.)
-2. If no category fits, create a new one with:
-   - Category description
-   - Role mappings (which specialist workers should see this skill)
-3. Add the skill entry:
-
-```yaml
-category-name:
-  skills:
-    - name: skill-name
-      path: skill-path
-      description: "One-line description"
-      use-when: "Trigger description"
-  roles: [Senior Coder, Tester, ...]
-```
-
-### Removing a skill
-
-Remove the entry. If the category is now empty, remove the category.
-
-### Auditing the taxonomy
-
-- Does every installed skill appear in the taxonomy?
-- Are role mappings accurate? (would these workers actually benefit from this skill?)
-- Are descriptions current? (skills evolve, taxonomy entries go stale)
+For taxonomy operations (adding/removing skills, auditing the taxonomy), read `skills/prompt-craft/taxonomy.md`.
 
 ---
 

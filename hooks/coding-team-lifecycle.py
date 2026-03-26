@@ -73,6 +73,13 @@ def main():
                 os.remove(ACTIVE_FILE)
         except OSError:
             pass
+        # Clean up session phase file if it exists
+        session_file = "/tmp/coding-team-session.json"
+        try:
+            if os.path.exists(session_file):
+                os.remove(session_file)
+        except OSError:
+            pass
         return
 
     # PreToolUse: check for recursion, then activate
