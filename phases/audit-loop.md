@@ -14,7 +14,7 @@ After the completeness check passes and implementer reports DONE or DONE_WITH_CO
    c. Harden auditor (see ~/.claude/agents/ct-harden-auditor.md) — "what would an attacker try?"
    d. Prompt-craft auditor (see ~/.claude/agents/ct-prompt-craft-auditor.md) — triggers when BOTH:
       (i) Task has PROMPT_CRAFT_ADVISORY annotation, AND
-      (ii) Modified files include at least 1 file matching: `phases/*.md`, `prompts/*.md`, `skills/*/SKILL.md`, `SKILL.md`, `CLAUDE.md`, `memory/*.md`
+      (ii) Modified files include at least 1 file matching: `phases/*.md`, `agents/*.md`, `prompts/*.md`, `skills/*/SKILL.md`, `SKILL.md`, `CLAUDE.md`, `memory/*.md`
       Both conditions required (belt and suspenders). If either is missing, skip this auditor.
    e. Harness engineer (see ~/.claude/agents/ct-harness-engineer.md) — triggers when modified files include at least 1 file matching: `settings.json`, `hooks/*`, `rules/*`, `*.claude/CLAUDE.md`, `agents/*.md`
       Dispatch as general-purpose (needs Bash for hook inspection). If no harness files in the diff, skip.

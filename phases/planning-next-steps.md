@@ -9,7 +9,7 @@ After the plan passes review and is saved:
 | Plan touches 5+ files | Count files in task list `**Files:**` sections |
 | Plan has opus-tier tasks | Any task with `**Model:** opus` |
 | Plan introduces new security surface | Tasks touch auth, payment, encryption, session, token, CORS, or CSP files |
-| Plan modifies CC instruction files | Tasks touch `phases/*.md`, `skills/*/SKILL.md`, `prompts/*.md`, `CLAUDE.md`, `SKILL.md` |
+| Plan modifies CC instruction files | Tasks touch `phases/*.md`, `agents/*.md`, `skills/*/SKILL.md`, `prompts/*.md`, `CLAUDE.md`, `SKILL.md` |
 | Plan includes database migrations | Tasks create or alter schema, migrations, or indexes |
 | User previously requested Codex review | User said "codex", "second opinion", or "cross-model" in this session |
 

@@ -22,7 +22,7 @@ Before writing tasks, check if any planned work needs specialized skill involvem
 
 | Task modifies... | Category | Include in task annotation |
 |---|---|---|
-| `phases/*.md`, `prompts/*.md`, `skills/*/SKILL.md`, `SKILL.md`, `CLAUDE.md`, `memory/*.md` | prompt-engineering | **Advisory skills:** PROMPT_CRAFT_ADVISORY |
+| `phases/*.md`, `agents/*.md`, `prompts/*.md`, `skills/*/SKILL.md`, `SKILL.md`, `CLAUDE.md`, `memory/*.md` | prompt-engineering | **Advisory skills:** PROMPT_CRAFT_ADVISORY |
 | Test files only (`tests/**`, `*_test.*`, `test_*.*`) | testing | **Advisory skills:** `/tdd` — follow red-green-refactor cycle |
 | Auth, payment, encryption, or data-deletion code paths | security-sensitive | **Advisory skills:** `/second-opinion challenge` recommended after implementation |
 
