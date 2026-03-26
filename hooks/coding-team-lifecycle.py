@@ -15,6 +15,7 @@ PostToolUse on Skill:
 import os, sys
 sys.path.insert(0, os.path.dirname(__file__))
 
+import json
 import time
 from pathlib import Path
 
@@ -94,6 +95,15 @@ def main():
     with open(ACTIVE_FILE, "w") as f:
         f.write(str(time.time()))
 
+    # Create session phase file for execution-phase hooks
+    session_file = "/tmp/coding-team-session.json"
+    try:
+        with open(session_file, "w") as sf:
+            json.dump({"phase": "active", "ts": time.time()}, sf)
+    except OSError:
+        pass
+
 
 if __name__ == "__main__":
     main()
+
