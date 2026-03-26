@@ -76,7 +76,47 @@ def analyze_session(records, session_id):
             " — use Grep tool and Glob tool to verify changes across codebase"
         )
 
+    # High agent dispatch ratio
+    agent_calls = tool_counts.get("Agent", 0)
+    if total > 0 and agent_calls / total > 0.4:
+        pct = agent_calls / total * 100
+        anomalies.append(
+            f"High agent dispatch ratio ({agent_calls}/{total} = {pct:.0f}%)"
+            " — consider consolidating worker prompts"
+        )
+
     return anomalies
+
+
+def summarize_sessions(sessions, current_session, max_sessions=3):
+    """Compute per-session cost summary: total calls, top tools, agent count, skills."""
+    summaries = []
+    for sid, records in sessions.items():
+        if sid == current_session:
+            continue
+        total = len(records)
+        if total == 0:
+            continue
+        tool_counts = Counter(r.get("tool", "unknown") for r in records)
+        top5 = tool_counts.most_common(5)
+        top5_str = ", ".join(f"{tool}:{count}" for tool, count in top5)
+
+        parts = [f"{sid}: {total} calls ({top5_str})"]
+
+        # Collect invoked skills from Skill tool calls
+        skills = set()
+        for r in records:
+            if r.get("tool") == "Skill":
+                skill_name = r.get("skill")
+                if skill_name:
+                    skills.add(skill_name)
+        if skills:
+            parts.append(f"skills: {', '.join(sorted(skills))}")
+
+        summaries.append("- " + ", ".join(parts))
+        if len(summaries) >= max_sessions:
+            break
+    return summaries
 
 
 def main():
@@ -93,6 +133,10 @@ def main():
             sessions[sid] = []
         sessions[sid].append(r)
 
+    # Session cost summaries
+    cost_summaries = summarize_sessions(sessions, current_session)
+
+    # Anomaly detection
     all_anomalies = []
     for sid in sessions:
         if sid == current_session:
@@ -101,14 +145,21 @@ def main():
         if anomalies:
             all_anomalies.extend(anomalies)
 
-    if not all_anomalies:
+    if not cost_summaries and not all_anomalies:
         return
 
-    all_anomalies = all_anomalies[:5]
-    msg = "Metrics review from recent sessions:\n" + "\n".join(
-        f"- {a}" for a in all_anomalies
-    )
-    advisory(msg)
+    parts = []
+    if cost_summaries:
+        parts.append(
+            "Session cost summary (last 3 sessions):\n"
+            + "\n".join(cost_summaries)
+        )
+    if all_anomalies:
+        all_anomalies = all_anomalies[:5]
+        parts.append(
+            "Anomalies:\n" + "\n".join(f"- {a}" for a in all_anomalies)
+        )
+    advisory("\n\n".join(parts))
 
 
 if __name__ == "__main__":
