@@ -19,3 +19,5 @@
 - [feedback-strategy-validation.md](feedback-strategy-validation.md) — Identity framing + named rationalizations confirmed working; zero friction since strategy change (2026-03-22)
 - [feedback-test-coverage-attrition.md](feedback-test-coverage-attrition.md) — Agents claim "all hooks covered" while hooks remain uncovered; took 3 audit cycles despite explicit directives
 - [feedback-partial-fix-still-active.md](feedback-partial-fix-still-active.md) — Harness-engineer offered to fix only P1s, silently dropping P2/P3; selective-fix rationalization persists
+- [feedback-context-survival-gates.md](feedback-context-survival-gates.md) — QA review and second-opinion gates lost to context pressure in long sessions; fixed with mandatory post-execution checklist + codex review syntax fix
+- [feedback-spec-clarity-rationalization.md](feedback-spec-clarity-rationalization.md) — Orchestrator offers self-execution when spec is clear; spec clarity determines model tier not delegation
