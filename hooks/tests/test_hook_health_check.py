@@ -95,6 +95,126 @@ class TestCheckShHook:
         assert "bash syntax error" in result
 
 
+class TestGetExternalHookPaths:
+    def test_extracts_external_paths(self, hhc, tmp_path):
+        """External hook paths from settings.json are extracted."""
+        settings = {
+            "hooks": {
+                "PreToolUse": [
+                    {
+                        "matcher": "mcp__codesight-mcp__.*",
+                        "hooks": [
+                            {"type": "command", "command": "python3 ~/.config/codesight-mcp/pre-notify.py"}
+                        ]
+                    }
+                ],
+                "PostToolUse": [
+                    {
+                        "matcher": "mcp__codesight-mcp__.*",
+                        "hooks": [
+                            {"type": "command", "command": "python3 ~/.config/codesight-mcp/notify.py"}
+                        ]
+                    }
+                ]
+            }
+        }
+        settings_file = tmp_path / "settings.json"
+        settings_file.write_text(json.dumps(settings))
+        # Override SETTINGS_PATH for test
+        original = hhc.SETTINGS_PATH
+        hhc.SETTINGS_PATH = settings_file
+        try:
+            paths = hhc.get_external_hook_paths()
+            path_strs = [str(p) for p in paths]
+            home = str(Path.home())
+            assert f"{home}/.config/codesight-mcp/pre-notify.py" in path_strs
+            assert f"{home}/.config/codesight-mcp/notify.py" in path_strs
+        finally:
+            hhc.SETTINGS_PATH = original
+
+    def test_ignores_internal_hooks(self, hhc, tmp_path):
+        """Paths inside ~/.claude/hooks/ are not returned (already checked)."""
+        settings = {
+            "hooks": {
+                "PreToolUse": [
+                    {
+                        "matcher": "Bash",
+                        "hooks": [
+                            {"type": "command", "command": "python3 ~/.claude/hooks/git-safety-guard.py"}
+                        ]
+                    }
+                ]
+            }
+        }
+        settings_file = tmp_path / "settings.json"
+        settings_file.write_text(json.dumps(settings))
+        original = hhc.SETTINGS_PATH
+        hhc.SETTINGS_PATH = settings_file
+        try:
+            paths = hhc.get_external_hook_paths()
+            assert len(paths) == 0
+        finally:
+            hhc.SETTINGS_PATH = original
+
+    def test_handles_missing_settings(self, hhc, tmp_path):
+        """Missing settings.json returns empty list."""
+        original = hhc.SETTINGS_PATH
+        hhc.SETTINGS_PATH = tmp_path / "nonexistent.json"
+        try:
+            paths = hhc.get_external_hook_paths()
+            assert paths == []
+        finally:
+            hhc.SETTINGS_PATH = original
+
+
+class TestCheckExternalHook:
+    def test_missing_file_returns_error(self, hhc, tmp_path):
+        """Non-existent file returns 'file not found'."""
+        result = hhc.check_external_hook(tmp_path / "nonexistent.py")
+        assert result == "file not found"
+
+    def test_existing_py_hook_checked(self, hhc, tmp_path):
+        """Existing .py file is run through check_hook."""
+        script = tmp_path / "ext_hook.py"
+        script.write_text(textwrap.dedent("""\
+            import json, sys
+            print(json.dumps({"decision": "allow", "reason": "ok"}))
+            sys.exit(0)
+        """))
+        assert hhc.check_external_hook(script) is None
+
+    def test_existing_py_hook_unhealthy(self, hhc, tmp_path):
+        """Unhealthy .py file returns error from check_hook."""
+        script = tmp_path / "bad_ext.py"
+        script.write_text("raise RuntimeError('boom')\n")
+        result = hhc.check_external_hook(script)
+        assert result is not None
+        assert "Traceback" in result or "RuntimeError" in result or "exit code" in result
+
+    def test_existing_sh_hook_checked(self, hhc, tmp_path):
+        """Existing .sh file is run through check_sh_hook."""
+        script = tmp_path / "ext_hook.sh"
+        script.write_text(textwrap.dedent("""\
+            #!/bin/bash
+            echo "hello"
+        """))
+        assert hhc.check_external_hook(script) is None
+
+    def test_existing_sh_hook_unhealthy(self, hhc, tmp_path):
+        """Unhealthy .sh file returns error from check_sh_hook."""
+        script = tmp_path / "bad_ext.sh"
+        script.write_text("if then else fi while\n((((")
+        result = hhc.check_external_hook(script)
+        assert result is not None
+        assert "bash syntax error" in result
+
+    def test_unknown_extension_returns_none(self, hhc, tmp_path):
+        """Unknown file extension returns None (skip silently)."""
+        script = tmp_path / "hook.rb"
+        script.write_text("puts 'hello'\n")
+        assert hhc.check_external_hook(script) is None
+
+
 class TestIntegration:
     def test_no_output_when_hooks_healthy(self, run_hook):
         """Full hook produces no output when all hooks are healthy."""

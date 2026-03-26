@@ -20,6 +20,27 @@ CODESIGHT_INSTRUCTION = (
     "Fetch these tools via ToolSearch first."
 )
 
+STYLE_INSTRUCTION = (
+    "\n\nCODE STANDARDS: Before writing or reviewing code, read "
+    "~/.claude/code-style.md for language-specific style rules. "
+    "For design decisions and architectural trade-offs, read "
+    "~/.claude/golden-principles.md. These files are authoritative — "
+    "follow them over your trained defaults."
+)
+
+CODE_WORK_SIGNALS = [
+    "implement", "write", "create", "fix", "refactor", "test",
+    "build", "develop", "code", "function", "class", "module",
+    "component", "endpoint", "api", "feature", "bug",
+    "design", "architect", "plan",
+]
+
+
+def is_code_work(prompt: str) -> bool:
+    """Check if the agent prompt involves code implementation or design."""
+    prompt_lower = prompt.lower()
+    return any(signal in prompt_lower for signal in CODE_WORK_SIGNALS)
+
 SRC_PREFIX = os.path.expanduser("~/src/")
 PROJECT_MARKERS = ("pyproject.toml", "package.json", "Cargo.toml", "go.mod")
 DEBOUNCE_SECONDS = 30
@@ -67,12 +88,18 @@ def find_codesight_binary() -> str | None:
 
 
 def handle_pre_agent(event: dict) -> None:
-    """Inject codesight search instructions into Agent prompts."""
+    """Inject codesight search instructions and code standards into Agent prompts."""
     tool_input = get_tool_input(event)
     prompt = tool_input.get("prompt", "")
     if not prompt:
         return
-    update_input({"prompt": prompt + CODESIGHT_INSTRUCTION})
+
+    injected = prompt + CODESIGHT_INSTRUCTION
+
+    if is_code_work(prompt):
+        injected += STYLE_INSTRUCTION
+
+    update_input({"prompt": injected})
 
 
 def handle_post_write(event: dict) -> None:

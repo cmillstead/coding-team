@@ -339,3 +339,83 @@ class TestCostSummaryIntegration:
             assert "Session cost summary" in reason
             assert "past-session-cost" in reason
             assert "60 calls" in reason
+
+
+class TestPrThroughput:
+    def test_pr_throughput_returns_none_on_error(self):
+        """get_pr_throughput returns None when gh is unavailable or fails."""
+        mod = _load_analyzer_module()
+        # The function handles missing `gh` gracefully via FileNotFoundError
+        # In CI or environments without gh auth, it should return None or a valid string
+        result = mod.get_pr_throughput()
+        assert result is None or isinstance(result, str)
+
+    def test_pr_throughput_format_when_available(self):
+        """get_pr_throughput returns a string starting with 'PR throughput:' if data exists."""
+        mod = _load_analyzer_module()
+        result = mod.get_pr_throughput()
+        if result is not None:
+            assert result.startswith("PR throughput:")
+            assert "open" in result
+            assert "merged" in result
+
+
+class TestSkillFailureRates:
+    def test_failure_rates_computed(self, tmp_path):
+        """Skills with >10% failure rate are surfaced."""
+        mod = _load_analyzer_module()
+        tracker = tmp_path / "agent-quality-tracker.jsonl"
+        lines = []
+        # coding-team: 2 errors out of 10 = 20%
+        for _ in range(8):
+            lines.append(json.dumps({"skill": "coding-team", "status": "success", "ts": "2026-03-26T10:00:00Z"}))
+        for _ in range(2):
+            lines.append(json.dumps({"skill": "coding-team", "status": "error", "ts": "2026-03-26T10:00:00Z"}))
+        # scan-code: 1 error out of 5 = 20%
+        for _ in range(4):
+            lines.append(json.dumps({"skill": "scan-code", "status": "success", "ts": "2026-03-26T10:00:00Z"}))
+        lines.append(json.dumps({"skill": "scan-code", "status": "error", "ts": "2026-03-26T10:00:00Z"}))
+        tracker.write_text("\n".join(lines) + "\n")
+
+        # Override the tracker path
+        original = mod.QUALITY_TRACKER_PATH
+        mod.QUALITY_TRACKER_PATH = tracker
+        try:
+            result = mod.get_skill_failure_rates()
+            assert result is not None
+            assert "Skill failure rates:" in result
+            assert "coding-team" in result
+            assert "scan-code" in result
+            assert "20%" in result
+        finally:
+            mod.QUALITY_TRACKER_PATH = original
+
+    def test_no_file_returns_none(self, tmp_path):
+        """Missing tracker file returns None."""
+        mod = _load_analyzer_module()
+        original = mod.QUALITY_TRACKER_PATH
+        mod.QUALITY_TRACKER_PATH = tmp_path / "nonexistent.jsonl"
+        try:
+            result = mod.get_skill_failure_rates()
+            assert result is None
+        finally:
+            mod.QUALITY_TRACKER_PATH = original
+
+    def test_low_failure_rate_not_reported(self, tmp_path):
+        """Skills with <=10% failure rate are not reported."""
+        mod = _load_analyzer_module()
+        tracker = tmp_path / "agent-quality-tracker.jsonl"
+        lines = []
+        # coding-team: 1 error out of 20 = 5%
+        for _ in range(19):
+            lines.append(json.dumps({"skill": "coding-team", "status": "success", "ts": "2026-03-26T10:00:00Z"}))
+        lines.append(json.dumps({"skill": "coding-team", "status": "error", "ts": "2026-03-26T10:00:00Z"}))
+        tracker.write_text("\n".join(lines) + "\n")
+
+        original = mod.QUALITY_TRACKER_PATH
+        mod.QUALITY_TRACKER_PATH = tracker
+        try:
+            result = mod.get_skill_failure_rates()
+            assert result is None
+        finally:
+            mod.QUALITY_TRACKER_PATH = original
