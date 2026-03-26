@@ -33,7 +33,11 @@ NUMBERED_LIST = re.compile(r'^\s*(\d+)\.\s+\S', re.M)
 
 # Completion claims in output
 COMPLETION_CLAIMS = re.compile(
-    r'(?:completed?|done|finished|implemented)\s+(?:all\s+)?(\d+)',
+    r'(?:'
+    r'(?:completed?|done|finished|implemented)\s+(?:all\s+)?(\d+)'
+    r'|all\s+(\d+)\s+(?:tasks?\s+(?:are\s+)?)?(?:handled|processed|addressed)'
+    r'|(?:handled|processed|addressed)\s+all\s+(\d+)'
+    r')',
     re.I,
 )
 
@@ -93,7 +97,10 @@ def extract_completed_count(result: str) -> int | None:
     """Extract how many items the agent claims to have completed."""
     match = COMPLETION_CLAIMS.search(result)
     if match:
-        return int(match.group(1))
+        # Return the first non-None group (alternation produces multiple groups)
+        for group in match.groups():
+            if group is not None:
+                return int(group)
     return None
 
 

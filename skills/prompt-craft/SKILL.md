@@ -68,6 +68,27 @@ Seven patterns that control CC behavior. Summary (read `skills/prompt-craft/lang
 
 After writing, evaluate with the audit checklist (see Audit section below).
 
+### 6. Agent Template (standard structure)
+
+After 12 audit cycles, agents converge on this 13-step structure. Use as a checklist when creating new agents:
+
+1. **Frontmatter** — name, description, model, tools
+2. **Dispatch Context** — how it's invoked (standalone vs pipeline)
+3. **Identity Block** — what you ARE, what your JOB is (Pattern 9: Identity-Negative)
+4. **Pipeline Isolation** — "You are INSIDE /coding-team... Do NOT invoke..."
+5. **MANDATORY block** — non-negotiable requirements (near the top — Rule 9)
+6. **Core Protocol** — what to check, how to check it
+7. **Code Intelligence table** — tool-to-use mapping (if MCP tools available)
+8. **MCP Resilience block** — Pattern 4 (if MCP tools available)
+9. **Project-Specific Criteria slot** — "[INSERT...]" placeholder
+10. **Calibration** — what severity bar to apply
+11. **When You Cannot Complete** — BLOCKED status, no guessing
+12. **Finding Integrity** — Pattern 3 (for read-only auditors)
+13. **Named Rationalizations** — agent-specific bypasses as compliance triggers
+14. **Output Format** — structured report template
+
+See `skills/prompt-craft/patterns-catalog.md` for templates of steps 8, 11, 12, and 13.
+
 ---
 
 ## Diagnose — Why CC Isn't Following Instructions
@@ -214,35 +235,7 @@ CONTEXT:
 
 ## Taxonomy — Skill Discovery Maintenance
 
-The skill taxonomy (`~/.claude/skills/skill-taxonomy.yml`) maps skills to specialist worker roles so the Phase 2 Team Leader can pass relevant skills to each worker.
-
-### Adding a skill
-
-1. Determine which category the skill fits (debugging, verification, git-workflow, etc.)
-2. If no category fits, create a new one with:
-   - Category description
-   - Role mappings (which specialist workers should see this skill)
-3. Add the skill entry:
-
-```yaml
-category-name:
-  skills:
-    - name: skill-name
-      path: skill-path
-      description: "One-line description"
-      use-when: "Trigger description"
-  roles: [Senior Coder, Tester, ...]
-```
-
-### Removing a skill
-
-Remove the entry. If the category is now empty, remove the category.
-
-### Auditing the taxonomy
-
-- Does every installed skill appear in the taxonomy?
-- Are role mappings accurate? (would these workers actually benefit from this skill?)
-- Are descriptions current? (skills evolve, taxonomy entries go stale)
+For taxonomy operations (adding/removing skills, auditing the taxonomy), read `skills/prompt-craft/taxonomy.md`.
 
 ---
 
