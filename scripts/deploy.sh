@@ -33,6 +33,18 @@ for f in "$REPO_ROOT"/agents/ct-*.md; do
     deploy "$f" "$CLAUDE_DIR/agents/$(basename "$f")"
 done
 
+# Rules: *.md
+for f in "$REPO_ROOT"/rules/*.md; do
+    [[ -f "$f" ]] || continue
+    deploy "$f" "$CLAUDE_DIR/rules/$(basename "$f")"
+done
+
+# Global config: CLAUDE.md, golden-principles.md, code-style.md
+for f in "$REPO_ROOT"/config/*.md; do
+    [[ -f "$f" ]] || continue
+    deploy "$f" "$CLAUDE_DIR/$(basename "$f")"
+done
+
 # Scripts (statusline etc)
 if [[ -f "$REPO_ROOT/scripts/statusline-command.sh" ]]; then
     deploy "$REPO_ROOT/scripts/statusline-command.sh" "$CLAUDE_DIR/statusline-command.sh"
