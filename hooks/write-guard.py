@@ -320,6 +320,58 @@ def check_identity_framing(tool_name: str, tool_input: dict) -> str | None:
 
 
 # ---------------------------------------------------------------------------
+# Path safety check constants (Case study #35)
+# ---------------------------------------------------------------------------
+PATH_SAFETY_PATTERNS = [
+    (re.compile(r'(?:str\(|f["\'])\s*\w*path\w*.*\bin\b', re.I), 'string "in" check on path variable'),
+    (re.compile(r'\w*path\w*\.startswith\s*\(', re.I), '.startswith() on path string'),
+    (re.compile(r'["\'][^"\']*[/\\][^"\']*["\']\s+in\s+\w*path', re.I), 'string literal path in check'),
+]
+
+PATH_SAFE_PATTERNS = [
+    re.compile(r'\.is_relative_to\('),
+    re.compile(r'\.parts\b'),
+    re.compile(r'Path\('),
+]
+
+
+def check_path_safety(tool_name: str, tool_input: dict) -> str | None:
+    """Advisory: warn when Python code uses string operations on paths instead of Path API.
+
+    Case study #35: string operations on paths are bypassable via substring collisions.
+    """
+    file_path = tool_input.get("file_path", "")
+    if not file_path or not file_path.endswith(".py"):
+        return None
+
+    if tool_name == "Write":
+        content = tool_input.get("content", "")
+    else:
+        content = tool_input.get("new_string", "")
+
+    if not content:
+        return None
+
+    violations = []
+    for pattern, name in PATH_SAFETY_PATTERNS:
+        if pattern.search(content):
+            # Check if the same content also uses safe Path APIs (allow if so)
+            if any(safe.search(content) for safe in PATH_SAFE_PATTERNS):
+                continue
+            violations.append(name)
+
+    if not violations:
+        return None
+
+    return (
+        f"Path safety advisory: {', '.join(violations)}.\n"
+        f"Case study #35: string operations on paths are bypassable via substring collisions.\n"
+        f"Use Path.is_relative_to(), Path.parts, or Path() for structural path matching.\n"
+        f"Known rationalization: 'startswith is good enough' — it isn't when paths contain '../' or overlapping prefixes."
+    )
+
+
+# ---------------------------------------------------------------------------
 # Main dispatch
 # ---------------------------------------------------------------------------
 def main():
@@ -356,6 +408,11 @@ def main():
 
     # 4. Identity framing check (advisory — runs even if no block occurred)
     reason = check_identity_framing(tool_name, tool_input)
+    if reason:
+        _output.advisory(reason)
+
+    # 5. Path safety check (advisory)
+    reason = check_path_safety(tool_name, tool_input)
     if reason:
         _output.advisory(reason)
 

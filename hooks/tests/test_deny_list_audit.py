@@ -57,6 +57,17 @@ spec = importlib.util.spec_from_file_location(
 mod = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(mod)
 mod.SETTINGS_PATH = Path({settings_path!r})
+
+# Clear suppression to ensure test isolation
+from _lib.suppression import SUPPRESSION_FILE
+try:
+    import json as _json
+    data = _json.loads(SUPPRESSION_FILE.read_text()) if SUPPRESSION_FILE.exists() else {{}}
+    data.pop("deny_list_last_clean", None)
+    SUPPRESSION_FILE.write_text(_json.dumps(data))
+except Exception:
+    pass
+
 mod.main()
 """)
         wrapper_path = wrapper.name
