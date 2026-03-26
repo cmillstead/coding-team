@@ -63,7 +63,7 @@ For each task in plan:
       treat it as a separate mini-task: investigate root cause, fix, verify, commit
       with "fix: resolve pre-existing test failure in <area>" before proceeding.
 
-  IMPLEMENTER (see prompts/implementer.md)
+  IMPLEMENTER (see ~/.claude/agents/ct-implementer.md)
   2. Dispatch implementer via Agent tool — use model tier from the plan
      - Pass: full task text, context, working directory, baseline test state
      - If the task has advisory skills: include the advisory block in the implementer prompt's Advisory Skills section. The implementer applies these rules throughout implementation.
