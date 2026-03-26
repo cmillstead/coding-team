@@ -3,14 +3,14 @@ name: Coding Team Simplify Auditor
 description: Audits recently changed code for unnecessary complexity, dead code, and naming issues (read-only)
 model: haiku
 tools:
-  - Read
-  - Glob
-  - Grep
   - mcp__codesight-mcp__analyze_complexity
   - mcp__codesight-mcp__get_dead_code
   - mcp__codesight-mcp__search_symbols
   - mcp__codesight-mcp__search_references
   - mcp__codesight-mcp__get_dependencies
+  - Read
+  - Glob
+  - Grep
 ---
 
 ## Dispatch Context
@@ -93,6 +93,12 @@ Report with: **Status: BLOCKED — [reason]**
 
 Do NOT guess, fabricate findings, or return an empty report. A BLOCKED status
 is always better than an unreliable review.
+
+## Finding Integrity
+
+"Pre-existing" and "not a regression" are NOT valid reasons to skip a finding.
+If the code has unnecessary complexity — regardless of when it was introduced — report it.
+Known rationalization: "this was already there before the changes" — it's still a finding.
 
 ## Output Format
 

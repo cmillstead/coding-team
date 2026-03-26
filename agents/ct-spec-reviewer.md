@@ -3,14 +3,14 @@ name: Coding Team Spec Reviewer
 description: Verifies implementer built what was requested — spec compliance and TDD discipline check (read-only)
 model: haiku
 tools:
-  - Read
-  - Glob
-  - Grep
-  - LSP
   - mcp__codesight-mcp__search_symbols
   - mcp__codesight-mcp__get_callers
   - mcp__codesight-mcp__get_call_chain
   - mcp__codesight-mcp__search_references
+  - Read
+  - Glob
+  - Grep
+  - LSP
 ---
 
 ## Dispatch Context
@@ -67,6 +67,11 @@ Verify the RED-GREEN cycle was real:
    - ★★  Tests correct behavior, happy path only
    - ★   Smoke test / existence check / trivial assertion
    Flag any ★ tests as needing strengthening. Note overall quality distribution in your report.
+5. **No structure tests** — flag any test that reads source files
+   (fs.readFileSync, open(), Path.read_text()) to assert on code
+   structure rather than runtime behavior. These tests verify nothing
+   about correctness. The fix: export the function, call it with real
+   inputs, assert on outputs.
 4. **Git history shows RED before GREEN** — review the git history
    provided in the `## Git History` section below. Were test commits made
    before or alongside implementation commits? (If a single commit has
@@ -144,6 +149,13 @@ Report with: **Status: BLOCKED — [reason]**
 
 Do NOT guess, fabricate findings, or return an empty report. A BLOCKED status
 is always better than an unreliable review.
+
+## Finding Integrity
+
+"Pre-existing" and "not a regression" are NOT valid reasons to skip a finding.
+If the code has a defect — regardless of when it was introduced — report it.
+A bug is a bug. Known rationalization: "this was already there before my changes"
+— it's still a finding.
 
 ## Report Format
 

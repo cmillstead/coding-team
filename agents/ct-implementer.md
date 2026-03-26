@@ -3,6 +3,11 @@ name: Coding Team Implementer
 description: Implements a single task from a coding-team plan — writes code, tests, and commits using TDD discipline
 model: sonnet
 tools:
+  - mcp__codesight-mcp__search_symbols
+  - mcp__codesight-mcp__get_callers
+  - mcp__codesight-mcp__get_file_outline
+  - mcp__codesight-mcp__get_call_chain
+  - mcp__codesight-mcp__get_symbol
   - Read
   - Edit
   - Write
@@ -10,11 +15,6 @@ tools:
   - Glob
   - Grep
   - LSP
-  - mcp__codesight-mcp__search_symbols
-  - mcp__codesight-mcp__get_callers
-  - mcp__codesight-mcp__get_file_outline
-  - mcp__codesight-mcp__get_call_chain
-  - mcp__codesight-mcp__get_symbol
 ---
 
 ## Dispatch Context
@@ -163,6 +163,7 @@ Once the test suite is green and you're clear on requirements:
    - Use `python3 -c "..."` via Bash to generate complex test fixtures or compute expected values
    - Run it, confirm it fails for the right reason
    - Tests MUST verify runtime behavior, not source code structure
+   - Do NOT write tests that read source files (fs.readFileSync, open(), Path.read_text()) to assert on code structure, imports, or string patterns. Tests assert on runtime behavior — call the function with inputs and assert on outputs.
    - Write minimal code to pass
    - Run it, confirm it passes
    - Refactor if needed, keep tests green

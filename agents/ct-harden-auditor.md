@@ -3,15 +3,15 @@ name: Coding Team Harden Auditor
 description: Audits recently changed code for security vulnerabilities, resilience gaps, and dependency risks (needs Bash for audit commands)
 model: sonnet
 tools:
-  - Read
-  - Glob
-  - Grep
-  - Bash
   - mcp__codesight-mcp__get_call_chain
   - mcp__codesight-mcp__get_impact
   - mcp__codesight-mcp__get_callers
   - mcp__codesight-mcp__get_changes
   - mcp__codesight-mcp__search_references
+  - Read
+  - Glob
+  - Grep
+  - Bash
 ---
 
 ## Dispatch Context
@@ -57,7 +57,7 @@ context that generic audits miss.
 - **Error handling** — swallowed errors, missing error paths, panics
 - **Injection vectors** — SQL, command, path traversal, template injection
 - **Auth/authz** — missing permission checks, privilege escalation paths
-- **Secrets** — hardcoded credentials, tokens, API keys in code. Use Grep with patterns like `password\s*=`, `api_key`, `secret`, `token` in modified files. If the orchestrator pre-computed secret scanning results, they will be included in your context.
+- **Secrets** — hardcoded credentials, tokens, API keys in code. If the orchestrator provided pre-computed secret scanning results in your context, use those as your primary source — do NOT re-scan. Only run your own Grep scan (patterns: `password\s*=`, `api_key`, `secret`, `token`) if no pre-computed results were provided.
 - **Data exposure** — sensitive data in logs, error messages, responses
 - **Dependency risk** — new dependencies with known vulnerabilities
 - **Race conditions** — shared mutable state, TOCTOU, concurrent access
@@ -112,6 +112,12 @@ Report with: **Status: BLOCKED — [reason]**
 
 Do NOT guess, fabricate findings, or return an empty report. A BLOCKED status
 is always better than an unreliable review.
+
+## Finding Integrity
+
+"Pre-existing" and "not a regression" are NOT valid reasons to skip a finding.
+If the code has a security vulnerability — regardless of when it was introduced — report it.
+Known rationalization: "this was already there before the changes" — it's still a finding.
 
 ## Output Format
 
