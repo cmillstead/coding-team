@@ -346,6 +346,200 @@ class TestCheckInstructionFileLengths:
             assert isinstance(item, str)
 
 
+class TestCheckMetrics:
+    """Tests for the merged metrics analysis functionality."""
+
+    def test_no_metrics_returns_empty_list(self, hhc, tmp_path):
+        """When metrics directory does not exist, check_metrics returns []."""
+        original = hhc.METRICS_DIR
+        hhc.METRICS_DIR = tmp_path / "nonexistent"
+        try:
+            result = hhc.check_metrics()
+            assert result == []
+        finally:
+            hhc.METRICS_DIR = original
+
+    def test_empty_metrics_returns_empty_list(self, hhc, tmp_path):
+        """When metrics directory has no JSONL files, check_metrics returns []."""
+        metrics_dir = tmp_path / "metrics"
+        metrics_dir.mkdir()
+        original = hhc.METRICS_DIR
+        hhc.METRICS_DIR = metrics_dir
+        try:
+            result = hhc.check_metrics()
+            assert result == []
+        finally:
+            hhc.METRICS_DIR = original
+
+    def test_anomalies_detected(self, hhc, tmp_path):
+        """Sessions with high edit:read ratio produce anomaly output."""
+        metrics_dir = tmp_path / "metrics"
+        metrics_dir.mkdir()
+        session_id = "past-session-1"
+        records = []
+        for _ in range(10):
+            records.append({"tool": "Edit", "session": session_id})
+        for _ in range(2):
+            records.append({"tool": "Read", "session": session_id})
+        log_file = metrics_dir / "tool-usage-2026-03-26.jsonl"
+        with open(log_file, "w") as f:
+            for record in records:
+                f.write(json.dumps(record) + "\n")
+
+        original_dir = hhc.METRICS_DIR
+        hhc.METRICS_DIR = metrics_dir
+        original_env = os.environ.get("CLAUDE_SESSION_ID")
+        os.environ["CLAUDE_SESSION_ID"] = "current-session"
+        try:
+            result = hhc.check_metrics()
+            assert len(result) > 0
+            combined = "\n".join(result)
+            assert "edit" in combined.lower() or "anomal" in combined.lower()
+        finally:
+            hhc.METRICS_DIR = original_dir
+            if original_env is None:
+                os.environ.pop("CLAUDE_SESSION_ID", None)
+            else:
+                os.environ["CLAUDE_SESSION_ID"] = original_env
+
+    def test_analyze_session_high_agent_ratio(self, hhc):
+        """Agent calls >40% of total triggers consolidation advisory."""
+        records = [{"tool": "Agent", "session": "s1"}] * 50
+        records += [{"tool": "Read", "session": "s1"}] * 20
+        anomalies = hhc.analyze_session(records, "s1")
+        matching = [a for a in anomalies if "agent dispatch ratio" in a.lower()]
+        assert len(matching) == 1
+        assert "consolidating worker prompts" in matching[0].lower()
+
+    def test_analyze_session_low_agent_ratio_no_anomaly(self, hhc):
+        """Agent calls <=40% should not trigger the anomaly."""
+        records = [{"tool": "Agent", "session": "s1"}] * 10
+        records += [{"tool": "Read", "session": "s1"}] * 30
+        anomalies = hhc.analyze_session(records, "s1")
+        matching = [a for a in anomalies if "agent dispatch ratio" in a.lower()]
+        assert len(matching) == 0
+
+    def test_summarize_sessions_basic(self, hhc):
+        """summarize_sessions returns formatted lines with tool breakdown."""
+        sessions = {
+            "session-abc": (
+                [{"tool": "Agent", "session": "session-abc"}] * 32
+                + [{"tool": "Read", "session": "session-abc"}] * 28
+                + [{"tool": "Edit", "session": "session-abc"}] * 22
+                + [{"tool": "Bash", "session": "session-abc"}] * 18
+                + [{"tool": "Grep", "session": "session-abc"}] * 15
+            ),
+        }
+        summaries = hhc.summarize_sessions(sessions, "current-session")
+        assert len(summaries) == 1
+        line = summaries[0]
+        assert "session-abc" in line
+        assert "115 calls" in line
+        assert "Agent:32" in line
+
+    def test_summarize_sessions_skills_included(self, hhc):
+        """Skill tool calls with skill field appear in summary."""
+        records = [{"tool": "Read", "session": "s1"}] * 10
+        records.append({"tool": "Skill", "session": "s1", "skill": "coding-team"})
+        records.append({"tool": "Skill", "session": "s1", "skill": "scan-code"})
+        sessions = {"s1": records}
+        summaries = hhc.summarize_sessions(sessions, "current-session")
+        assert len(summaries) == 1
+        assert "skills:" in summaries[0]
+        assert "coding-team" in summaries[0]
+
+    def test_summarize_sessions_current_excluded(self, hhc):
+        """Current session is excluded from summaries."""
+        sessions = {
+            "current": [{"tool": "Read", "session": "current"}] * 10,
+            "past": [{"tool": "Read", "session": "past"}] * 10,
+        }
+        summaries = hhc.summarize_sessions(sessions, "current")
+        assert len(summaries) == 1
+        assert "past" in summaries[0]
+
+    def test_aggregate_by_branch_groups_correctly(self, hhc):
+        """Records with branch fields grouped; branches with 2+ sessions included."""
+        records = [
+            {"tool": "Read", "session": "s1", "branch": "feat/login"},
+            {"tool": "Edit", "session": "s1", "branch": "feat/login"},
+            {"tool": "Read", "session": "s2", "branch": "feat/login"},
+            {"tool": "Bash", "session": "s2", "branch": "feat/login"},
+            {"tool": "Bash", "session": "s2", "branch": "feat/login"},
+        ]
+        result = hhc.aggregate_by_branch(records)
+        assert "feat/login" in result
+        info = result["feat/login"]
+        assert info["total_calls"] == 5
+        assert info["session_count"] == 2
+
+    def test_aggregate_by_branch_single_session_excluded(self, hhc):
+        """Branches with only 1 session are excluded."""
+        records = [
+            {"tool": "Read", "session": "s1", "branch": "feat/solo"},
+            {"tool": "Edit", "session": "s1", "branch": "feat/solo"},
+        ]
+        result = hhc.aggregate_by_branch(records)
+        assert result == {}
+
+    def test_format_branch_summary_empty(self, hhc):
+        """Empty branch data returns empty string."""
+        assert hhc.format_branch_summary({}) == ""
+
+    def test_format_branch_summary_populated(self, hhc):
+        """Populated branch data returns formatted output."""
+        branch_data = {
+            "feat/login": {
+                "total_calls": 45,
+                "session_count": 3,
+                "top_tools": [("Read", 20), ("Edit", 15), ("Bash", 10)],
+                "sessions": ["s1", "s2", "s3"],
+            }
+        }
+        output = hhc.format_branch_summary(branch_data)
+        assert "Branch cost summary:" in output
+        assert "feat/login" in output
+        assert "45 calls" in output
+
+    def test_get_pr_throughput_returns_none_or_string(self, hhc):
+        """get_pr_throughput returns None when gh unavailable or a valid string."""
+        result = hhc.get_pr_throughput()
+        assert result is None or isinstance(result, str)
+
+    def test_skill_failure_rates_no_dir(self, hhc, tmp_path):
+        """Missing metrics directory returns None."""
+        original = hhc.METRICS_DIR
+        hhc.METRICS_DIR = tmp_path / "nonexistent"
+        try:
+            result = hhc.get_skill_failure_rates()
+            assert result is None
+        finally:
+            hhc.METRICS_DIR = original
+
+    def test_skill_failure_rates_computed(self, hhc, tmp_path):
+        """Skills with >10% failure rate are surfaced."""
+        metrics_dir = tmp_path / "metrics"
+        metrics_dir.mkdir()
+        lines = []
+        for _ in range(8):
+            lines.append(json.dumps({"skill": "coding-team", "status": "success"}))
+        for _ in range(2):
+            lines.append(json.dumps({"skill": "coding-team", "status": "error"}))
+        (metrics_dir / "agent-quality-2026-03-26.jsonl").write_text(
+            "\n".join(lines) + "\n"
+        )
+        original = hhc.METRICS_DIR
+        hhc.METRICS_DIR = metrics_dir
+        try:
+            result = hhc.get_skill_failure_rates()
+            assert result is not None
+            assert "Skill failure rates:" in result
+            assert "coding-team" in result
+            assert "20%" in result
+        finally:
+            hhc.METRICS_DIR = original
+
+
 class TestIntegration:
     def test_no_output_when_hooks_healthy(self, run_hook):
         """Full hook produces no output when all hooks are healthy."""
@@ -360,6 +554,8 @@ class TestIntegration:
                 "unhealthy" in reason_lower
                 or "mcp" in reason_lower
                 or "instruction file" in reason_lower
+                or "session cost" in reason_lower
+                or "anomal" in reason_lower
             )
         else:
             assert result.stdout.strip() == ""
