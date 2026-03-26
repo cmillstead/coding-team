@@ -156,7 +156,7 @@ Each phase reads its detail file on entry. Do not read ahead — load only the a
 - Silently drop findings — every scan finding, review comment, or enumerated issue must be planned (fix, defer with rationale, or false positive) and every planned task must be executed
 - Suggest fixing only a subset of scan findings — all findings are fixed by default. Deferral is the user's decision, not the agent's. Present all findings, plan for all findings, fix all findings. Known rationalization: "Let's focus on the critical ones first" — severity determines execution order, not scope. P1 goes first, but P3 still gets fixed.
 - Present fix recommendations as tiered options, "what I'd skip" lists, or pros/cons for the user to choose from — this is advisor-mode rationalization, a variant of selective-fix that substitutes consultancy reports for action. Present all findings with dispositions (fix/defer/false-positive) and route them through agents. Known rationalization: "Here are three tiers of what I'd recommend" — tiers are just selective-fix wearing a consultancy hat. The default is ALL findings, ALL fixes, routed for implementation.
-- Edit files directly during Phase 5 — the orchestrator dispatches work and reviews results. The only files the orchestrator edits directly during execution are memory files (`memory/`), the Obsidian vault (`~/Documents/obsidian-vault/`), and session notes (`/tmp/`). Everything else — including agent definitions (`agents/`), phase files (`phases/`), prompt templates (`prompts/`), skills (`skills/`), hooks (`hooks/`), plans (`docs/plans/`), and source code — goes through the Agent tool to the appropriate specialist. Known rationalizations: "These are doc-level edits, not code" — file extension does not determine delegation. "The spec is already clear" — spec clarity determines model tier (haiku for clear specs, sonnet for judgment), not whether to delegate. All code changes go through Agent tool regardless of spec clarity. Do NOT offer self-execution as an option to the user — delegation is the default, not a choice.
+- Edit **instruction files** directly during Phase 5 — agent definitions (`agents/`), phase files (`phases/`), prompt templates (`prompts/`), skills (`skills/`), `CLAUDE.md`, and hooks (`hooks/`) ALWAYS go through the Agent tool regardless of change size. These control agent behavior — a 1-line change can cascade. Small source code edits (≤20 lines, 1 file) may be made directly when audit value is low. See "Phase 5 Edit Routing" table for the full routing policy. Known rationalizations: "This instruction file change is trivial" — impact surface determines routing, not perceived complexity. "These are doc-level edits, not code" — file extension does not determine delegation.
 - Bypass or work around a hook that blocks or errors — hooks are structural constraints, not suggestions. If a hook blocks your action, that IS the correct behavior — comply. If a hook errors, STOP and report the error to the user. Known rationalizations: "The hook is broken/buggy, let me try a different approach" — a broken hook means the constraint system needs fixing, not bypassing. "The hook doesn't handle this case correctly" — then the hook needs updating, not circumventing. Escalate to the user, don't work around it.
 - Delete, truncate, or overwrite coding-team session files (`/tmp/coding-team-session.json`, `/tmp/coding-team-active`) — these are structural dependencies for Phase 5 edit guards, completeness checks, and recursion protection. Session cleanup happens automatically through the lifecycle hook at completion. Known rationalization: "The session file is blocking my edits" — that IS the correct behavior. Delegate edits through the Agent tool.
 - Suggest `/ship` (gstack) for deploying or creating PRs — always suggest `/release` (`skills/release/SKILL.md`) instead. Similarly, suggest `/retrospective` not `/retro`, and `/doc-sync` not `/document-release`. Coding-team has its own equivalents for these gstack skills.
@@ -172,19 +172,23 @@ Each phase reads its detail file on entry. Do not read ahead — load only the a
 
 ## Phase 5 Edit Routing
 
-During execution, the orchestrator routes edits by file type:
+During execution, the orchestrator routes edits by **impact surface**, not line count:
 
-| File pattern | Route |
-|---|---|
-| `agents/*.md`, `phases/*.md`, `prompts/*.md` | Agent tool — dispatch with PROMPT_CRAFT_ADVISORY |
-| `skills/**/*.md`, `CLAUDE.md`, `hooks/*` | Agent tool — dispatch with PROMPT_CRAFT_ADVISORY |
-| `docs/plans/*.md` | Agent tool — dispatch to implementer |
-| `memory/*.md` | Orchestrator edits directly |
-| `~/Documents/obsidian-vault/**` | Orchestrator edits directly |
-| `/tmp/*` session notes | Orchestrator edits directly |
-| All other files | Agent tool — dispatch to implementer |
+| File pattern | Route | Why |
+|---|---|---|
+| `agents/*.md`, `phases/*.md`, `prompts/*.md` | Agent tool — PROMPT_CRAFT_ADVISORY | Controls agent behavior — any change can cascade |
+| `skills/**/*.md`, `CLAUDE.md` | Agent tool — PROMPT_CRAFT_ADVISORY | Controls agent behavior |
+| `hooks/*` | Agent tool — dispatch to implementer | Safety-critical enforcement code |
+| `docs/plans/*.md` | Agent tool — dispatch to implementer | Shared reference |
+| `memory/*.md` | Orchestrator edits directly | Low impact, orchestrator-owned |
+| `~/Documents/obsidian-vault/**` | Orchestrator edits directly | Low impact, orchestrator-owned |
+| `/tmp/*` session notes | Orchestrator edits directly | Ephemeral |
+| Source code, ≤20 lines, 1 file | Orchestrator may edit directly | Low audit value — delegation overhead exceeds benefit |
+| Source code, >20 lines or multi-file | Agent tool — dispatch to implementer | High audit value — worth the overhead |
 
-This table supersedes any inference about "code vs docs." If the file is not in the orchestrator-editable rows, it goes through an agent.
+**The threshold principle**: delegate when audit value is high, allow direct edits when audit value is low. Instruction files (agents, phases, prompts, skills, hooks, CLAUDE.md) ALWAYS have high audit value regardless of change size — a 1-line change to an agent prompt can break the pipeline. Source code has audit value proportional to change complexity. The 20-line/1-file threshold is the crossover point where delegation overhead exceeds audit benefit.
+
+Known rationalization: "This instruction file change is trivial" — impact surface determines routing, not perceived complexity. Instruction files always delegate.
 
 ---
 
