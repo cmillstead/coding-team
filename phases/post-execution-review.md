@@ -9,7 +9,7 @@ After all tasks are executed and verified:
    b. If count is 5+, gate fires.
    c. Check for security-sensitive files: `git diff $(git merge-base HEAD main) --name-only | grep -iE "auth|payment|encrypt|session|token|cors|csp"`
    d. If any output, gate fires.
-   e. Check for CC instruction files: `git diff $(git merge-base HEAD main) --name-only | grep -iE "phases/|skills/|prompts/|CLAUDE.md|SKILL.md"`
+   e. Check for CC instruction files: `git diff $(git merge-base HEAD main) --name-only | grep -iE "phases/|agents/|skills/|prompts/|CLAUDE.md|SKILL.md"`
    f. If any output, gate fires.
 
 2. Run: `command -v codex >/dev/null 2>&1` to check if Codex CLI is available.
