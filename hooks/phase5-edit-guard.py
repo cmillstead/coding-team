@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
-"""Claude Code PreToolUse hook: warn when orchestrator edits code files during Phase 5.
+"""Claude Code PreToolUse hook: warn when orchestrator edits non-allowlisted files during Phase 5.
 
-During the execution phase, code changes should be delegated to agents.
-The orchestrator may edit docs/memory/.md files directly, but editing
-source code files suggests the orchestrator is bypassing delegation.
+During the execution phase, all file edits should be delegated to agents.
+The orchestrator may only edit memory files (memory/), the Obsidian vault
+(~/Documents/obsidian-vault/), and /tmp/ session files directly.
+Everything else — including agents/, phases/, prompts/, skills/, hooks/,
+docs/plans/, and source code — must go through the Agent tool.
 
 State file: /tmp/coding-team-session.json
 Format: {"phase": "execution", "ts": 1234567890}
@@ -20,24 +22,36 @@ SESSION_FILE = Path("/tmp/coding-team-session.json")
 MAX_AGE_SECONDS = 2 * 60 * 60  # 2 hours
 
 
-def is_docs_or_md(file_path: str) -> bool:
-    """Return True if the file is markdown or a file under top-level docs/memory dirs.
+def is_orchestrator_file(file_path: str) -> bool:
+    """Return True only for files the orchestrator may edit during Phase 5.
 
-    Only exempts .md files unconditionally. For docs/ and memory/ directories,
-    requires the segment to appear as a top-level directory (first real path
-    component after any leading / or drive) to avoid false positives on paths
-    like src/memory/cache.py or pkg/docs/parser.py.
+    Allowlist: memory/, ~/Documents/obsidian-vault/, /tmp/ session files.
+    Everything else (agents/, phases/, prompts/, skills/, hooks/, docs/plans/,
+    source code) must be dispatched to agents via the Agent tool.
     """
+    path_str = str(file_path)
+
+    # /tmp/ session files are always allowed
+    if path_str.startswith("/tmp"):
+        return True
+
+    # Obsidian vault is allowed
+    if "/Documents/obsidian-vault/" in path_str:
+        return True
+
     p = Path(file_path)
-    if p.suffix == ".md":
-        return True
-    # Only exempt if docs or memory is a top-level directory segment
-    # (i.e., the path starts with docs/ or memory/ relative to the working dir)
     parts = p.parts
-    # For absolute paths, check index 1 (after '/'); for relative, check index 0
     top_index = 1 if parts and parts[0] == "/" else 0
-    if len(parts) > top_index and parts[top_index] in ("docs", "memory"):
+
+    if len(parts) <= top_index:
+        return False
+
+    top_dir = parts[top_index]
+
+    # memory/ directory is allowed
+    if top_dir == "memory":
         return True
+
     return False
 
 
@@ -103,17 +117,19 @@ def main():
     if not file_path:
         return
 
-    if is_docs_or_md(file_path):
-        # Docs/memory/md files are fine for orchestrator to edit directly
+    if is_orchestrator_file(file_path):
+        # Memory/vault/tmp files are fine for orchestrator to edit directly
         return
 
     # Code file during execution phase — warn
     print(json.dumps({
         "decision": "allow",
         "reason": (
-            f"You are the orchestrator. During execution phase, you delegate code changes — you do not make them directly. "
+            f"You are the orchestrator. During execution phase, you delegate all file edits — you do not make them directly. "
             f"Use the Agent tool to dispatch this edit of {file_path}. "
-            f"Known rationalization: 'It's a small change, faster to do it myself' — size does not exempt delegation rules."
+            f"For agent/phase/prompt/skill files, include PROMPT_CRAFT_ADVISORY in the agent prompt. "
+            f"Known rationalization: 'These are doc-level edits, not code' — file extension does not determine delegation. "
+            f"Only memory/, ~/Documents/obsidian-vault/, and /tmp/ are orchestrator-editable during Phase 5."
         ),
     }))
 
