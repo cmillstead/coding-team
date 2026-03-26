@@ -18,6 +18,9 @@ import time
 STATE_DIR = "/tmp"
 STALE_SECONDS = 7200  # 2 hours
 
+# Allowed commit message prefixes (conventional commits)
+COMMIT_PREFIXES = ["feat:", "fix:", "test:", "docs:", "refactor:", "chore:"]
+
 # Commands that count as verification
 VERIFICATION_PATTERNS = [
     r'\bnpm\s+test\b',
@@ -78,6 +81,24 @@ def is_verification(command: str) -> bool:
 
 def is_commit(command: str) -> bool:
     return any(re.search(p, command) for p in COMMIT_PATTERNS)
+
+
+def extract_commit_message(command: str) -> str | None:
+    """Extract the commit message from a git commit -m command.
+
+    Returns the message string, or None if no -m flag found.
+    """
+    # Match -m "message", -m 'message', or -m message
+    patterns = [
+        re.compile(r'-m\s+"([^"]*)"'),
+        re.compile(r"-m\s+'([^']*)'"),
+        re.compile(r'-m\s+(\S+)'),
+    ]
+    for pattern in patterns:
+        match = pattern.search(command)
+        if match:
+            return match.group(1)
+    return None
 
 
 def main():
@@ -191,6 +212,28 @@ def main():
                 "reason": msg,
             }))
             return
+
+        # Check commit message format (only for git commit, not git push)
+        if re.search(r'\bgit\s+commit\b', command):
+            msg_text = extract_commit_message(command)
+            if msg_text is not None:
+                has_prefix = any(msg_text.startswith(prefix) for prefix in COMMIT_PREFIXES)
+                if not has_prefix:
+                    first_word = msg_text.split()[0] if msg_text.strip() else "(empty)"
+                    prefixes_str = ", ".join(COMMIT_PREFIXES)
+                    print(json.dumps({
+                        "decision": "block",
+                        "reason": (
+                            "COMMIT MESSAGE FORMAT ERROR\n\n"
+                            "Message must start with a conventional prefix.\n"
+                            f"Allowed: {prefixes_str}\n"
+                            f"Got: '{first_word}'\n\n"
+                            'Example: git commit -m "feat: add user authentication"\n\n'
+                            "Known rationalization: 'It's just a WIP commit' — "
+                            "WIP commits still need prefixes for git log readability."
+                        ),
+                    }))
+                    return
 
 
 if __name__ == "__main__":
