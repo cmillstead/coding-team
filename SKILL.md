@@ -183,7 +183,8 @@ Each phase reads its detail file on entry. Do not read ahead — load only the a
 | `/worktree` | `skills/worktree/SKILL.md` | Git worktree setup and cleanup |
 | `/parallel-fix` | `skills/parallel-fix/SKILL.md` | Parallel agent dispatch for independent failures |
 | `/tdd` | `skills/tdd/SKILL.md` | Test-driven development cycle |
-| `/prompt-craft` | `skills/prompt-craft/SKILL.md` | Skill & prompt engineering, diagnosis, audit |
+| `/prompt-craft` | `skills/prompt-craft/SKILL.md` | Skill & prompt engineering, diagnosis, audit. For instruction text quality — not harness infrastructure. |
+| `/harness-engineer` | `skills/harness-engineer/SKILL.md` | Harness infrastructure: hooks, rules, settings, constraint promotion, maturity assessment. For systems design — not instruction text. |
 | `/second-opinion` | `skills/second-opinion/SKILL.md` | Cross-model second opinion via OpenAI Codex CLI |
 | `/scope-lock` | `skills/scope-lock/SKILL.md` | Restrict edits to a directory during debugging |
 | `/scope-unlock` | `skills/scope-unlock/SKILL.md` | Remove scope-lock edit restriction |
@@ -215,15 +216,16 @@ Each phase reads its detail file on entry. Do not read ahead — load only the a
 | `phases/plan-format.md` | planning.md | Plan document template and task structure |
 | `phases/planning-next-steps.md` | planning.md | Risk signals and second-opinion gate |
 
-**Agent prompt templates** (used by the execution loop):
+**Agent definitions** (used by the execution loop):
 
 | File | Purpose |
 |------|---------|
-| `prompts/implementer.md` | Implementer (task team member) prompt template |
-| `prompts/spec-reviewer.md` | Spec compliance + TDD verification (read-only) |
-| `prompts/simplify-auditor.md` | Simplify auditor — clarity and complexity (read-only) |
-| `prompts/harden-auditor.md` | Harden auditor — security and resilience (read-only) |
-| `prompts/prompt-craft-auditor.md` | Prompt-craft auditor — CC instruction quality (read-only, conditional) |
+| `~/.claude/agents/ct-implementer.md` | Implementer (task team member) prompt template |
+| `~/.claude/agents/ct-spec-reviewer.md` | Spec compliance + TDD verification (read-only) |
+| `~/.claude/agents/ct-simplify-auditor.md` | Simplify auditor — clarity and complexity (read-only) |
+| `~/.claude/agents/ct-harden-auditor.md` | Harden auditor — security and resilience (read-only) |
+| `~/.claude/agents/ct-prompt-craft-auditor.md` | Prompt-craft auditor — CC instruction quality (read-only, conditional) |
+| `~/.claude/agents/ct-harness-engineer.md` | Harness engineer — hooks, rules, settings, constraint promotion, maturity (read-write for audit commands) |
 | `prompts/quality-reviewer.md` | Legacy quality reviewer (use simplify + harden instead) |
-| `prompts/spec-doc-reviewer.md` | Design doc reviewer template |
-| `prompts/plan-doc-reviewer.md` | Plan doc reviewer template |
+| `~/.claude/agents/ct-spec-doc-reviewer.md` | Design doc reviewer template |
+| `~/.claude/agents/ct-plan-doc-reviewer.md` | Plan doc reviewer template |

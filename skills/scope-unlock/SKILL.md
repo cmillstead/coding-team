@@ -1,6 +1,6 @@
 ---
 name: scope-unlock
-description: "Use to remove a /scope-lock edit restriction. Allows edits to all directories again. Run after debugging is complete or when you need to widen edit scope."
+description: "Remove a /scope-lock edit restriction (coding-team pipeline). For removing a /freeze restriction, use /unfreeze instead."
 ---
 
 # /scope-unlock — Remove Edit Restriction

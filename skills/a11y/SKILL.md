@@ -1,6 +1,6 @@
 ---
 name: a11y
-description: "Use when auditing UI for WCAG compliance, keyboard navigation, screen reader support, or inclusive design. Covers 'accessibility audit', 'check a11y', 'WCAG check', 'keyboard navigation', 'screen reader testing'. Do NOT use for visual design review (/design-review) or general UX review (/scan-product)."
+description: "WCAG 2.1 AA source code audit — reviews HTML/templates for semantic markup, ARIA usage, keyboard navigation, contrast, and focus management. For assistive technology testing of a running app, use /agency-testing-accessibility-auditor. For visual design QA, use /design-review. For general UX review, use /scan-product."
 ---
 
 # /a11y — Accessibility Audit

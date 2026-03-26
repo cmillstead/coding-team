@@ -1,6 +1,6 @@
 ---
 name: retrospective
-description: "Use after shipping a feature or after a difficult debug session for an engineering retrospective. Analyzes commit history, work patterns, audit findings, and code quality. Produces a structured retro with what went well, what to improve, and recurring patterns."
+description: "Per-feature retrospective within the coding-team pipeline. Analyzes this feature's commit history, audit findings, and shipping patterns. Produces a structured retro with what went well, what to improve, and recurring patterns. For weekly/sprint-level team retros, use /retro instead."
 ---
 
 # /retrospective — Engineering Retrospective

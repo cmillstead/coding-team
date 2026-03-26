@@ -1,6 +1,6 @@
 ---
 name: release
-description: "Use when ready to ship code. Automated release workflow: sync base branch, run tests, review diff, push, create PR with summary and test plan. Use instead of manual Phase 6 completion for a more thorough automated flow."
+description: "Push and create PR from within the coding-team pipeline — syncs branch, runs tests, reviews diff, pushes, creates PR. Does NOT version bump or update CHANGELOG. For full ship with version bump and CHANGELOG, use /ship instead."
 ---
 
 # /release — Automated Release Workflow

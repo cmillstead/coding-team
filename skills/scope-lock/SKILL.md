@@ -1,6 +1,6 @@
 ---
 name: scope-lock
-description: "Use when debugging or investigating to restrict file edits to a specific directory. Prevents accidentally modifying unrelated code while focused on one module. Run /scope-unlock to remove the restriction."
+description: "Restrict file edits to a specific directory within the coding-team pipeline. Prevents accidentally modifying unrelated code while debugging. Run /scope-unlock to remove. For standalone edit restriction outside coding-team, use /freeze."
 ---
 
 # /scope-lock — Restrict Edits to a Directory
