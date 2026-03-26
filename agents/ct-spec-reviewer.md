@@ -145,6 +145,13 @@ Report with: **Status: BLOCKED — [reason]**
 Do NOT guess, fabricate findings, or return an empty report. A BLOCKED status
 is always better than an unreliable review.
 
+## Finding Integrity
+
+"Pre-existing" and "not a regression" are NOT valid reasons to skip a finding.
+If the code has a defect — regardless of when it was introduced — report it.
+A bug is a bug. Known rationalization: "this was already there before my changes"
+— it's still a finding.
+
 ## Report Format
 
 **TDD:** PASS | FAIL [details]
