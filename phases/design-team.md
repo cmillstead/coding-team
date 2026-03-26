@@ -90,6 +90,12 @@ Read `~/.claude/golden-principles.md` using the Read tool. Pass the full content
 
 If the file doesn't exist, skip and note in status: 'Golden principles not available — skipped'
 
+### Code style
+
+Read `~/.claude/code-style.md` using the Read tool. Pass the full contents to the Team Leader as a "## Code Style" section in the context. Design workers making implementation recommendations should be aware of the project's coding conventions.
+
+If the file doesn't exist, skip and note in status: 'Code style not available — skipped'
+
 ### Passing context to workers
 
 The Team Leader includes team memory and episode context in each worker's spawn prompt, after the project context and before the specialist focus areas. Workers treat these as advisory — they inform analysis but don't constrain it.
