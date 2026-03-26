@@ -11,6 +11,7 @@ Signals captured:
 """
 import json
 import os
+import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -20,6 +21,15 @@ from _lib.event import parse_event, get_tool_name, get_tool_result
 from _lib.output import allow_with_reason
 
 METRICS_DIR = Path.home() / ".claude" / "metrics"
+
+# Structure-not-behavior test patterns (Case study #22)
+# Agents write tests that open() source files and assert on string content
+STRUCTURE_TEST_PATTERNS = [
+    re.compile(r'open\([^)]*\.py["\'].*read\(\)', re.I),  # open("file.py").read()
+    re.compile(r'Path\([^)]*\.py["\'].*read_text\(\)', re.I),  # Path("file.py").read_text()
+    re.compile(r'assert\s+["\'][^"\']+["\']\s+in\s+\w*(?:content|source|text|code)', re.I),  # assert "string" in content
+    re.compile(r'(?:grep|rg|cat)\s+.*\.py', re.I),  # shell commands reading source
+]
 
 
 def main():
@@ -82,6 +92,16 @@ def main():
         allow_with_reason(
             f"QUALITY GATE: Skill '{skill_name}' produced no output — likely silent failure. "
             f"Re-dispatch using the Skill tool. Do not assume the task completed."
+        )
+        return
+
+    # Structure-not-behavior test detection (Case study #22)
+    if any(p.search(result_str) for p in STRUCTURE_TEST_PATTERNS):
+        allow_with_reason(
+            f"QUALITY GATE: Skill '{skill_name}' may have written structure-not-behavior tests. "
+            f"Detected patterns like open('file.py').read() or assert 'string' in content. "
+            f"Case study #22: tests must call functions and assert on behavior, not read source files as text. "
+            f"Known rationalization: 'I'm testing the file structure' — test the behavior, not the text."
         )
         return
 

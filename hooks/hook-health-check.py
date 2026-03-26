@@ -143,6 +143,36 @@ def check_external_hook(hook_path: Path) -> str | None:
         return None  # Unknown type, skip silently
 
 
+def check_instruction_file_lengths() -> list[str]:
+    """Check that instruction files (agents, phases, skills) are under 200 lines.
+
+    Case study #24: beyond ~200 lines, MANDATORY labels stop working.
+    Files over 200 lines should be split or have content extracted to on-demand files.
+    """
+    warnings = []
+    repo_root = Path(__file__).parent.parent
+
+    instruction_globs = [
+        "agents/*.md",
+        "phases/*.md",
+        "skills/*/SKILL.md",
+    ]
+
+    for pattern in instruction_globs:
+        for filepath in repo_root.glob(pattern):
+            try:
+                line_count = len(filepath.read_text().splitlines())
+                if line_count > 200:
+                    warnings.append(
+                        f"{filepath.relative_to(repo_root)} is {line_count} lines "
+                        f"(threshold: 200). Consider extracting content to on-demand files."
+                    )
+            except OSError:
+                continue
+
+    return warnings
+
+
 def check_mcp_health() -> list[str]:
     """Probe configured MCP servers for availability.
 
@@ -200,7 +230,10 @@ def main():
     # Check MCP server availability (advisory warnings, not blockers)
     mcp_issues = check_mcp_health()
 
-    if not unhealthy and not mcp_issues:
+    # Check instruction file lengths (case study #24: context saturation)
+    length_warnings = check_instruction_file_lengths()
+
+    if not unhealthy and not mcp_issues and not length_warnings:
         return  # All healthy — silent success
 
     parts = []
@@ -216,6 +249,12 @@ def main():
             f"MCP health check: {len(mcp_issues)} server(s) unavailable.\n"
             "Agents will waste tool calls discovering this at first use:\n"
             + "\n".join(f"  - {issue}" for issue in mcp_issues)
+        )
+    if length_warnings:
+        parts.append(
+            f"Instruction file length check: {len(length_warnings)} file(s) over 200 lines.\n"
+            "Context saturation degrades compliance beyond ~200 lines:\n"
+            + "\n".join(f"  - {w}" for w in length_warnings)
         )
 
     msg = "\n\n".join(parts)

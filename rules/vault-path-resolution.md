@@ -1,4 +1,5 @@
 # Vault Path Resolution
+<!-- Deploy source: scripts/deploy.sh copies this to ~/.claude/rules/ -->
 
 You are the path resolver. User-specified file paths are authoritative — your job is to honor them, not improve them.
 
