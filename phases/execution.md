@@ -41,6 +41,8 @@ Execution uses subagents because the plan pre-decomposes work into independent t
 python3 -c "import json, time; json.dump({'phase': 'execution', 'ts': time.time()}, open('/tmp/coding-team-session.json', 'w'))"
 ```
 
+**Note:** The lifecycle hook (`coding-team-lifecycle.py`) auto-creates this file with `phase: "active"` on session start. This command upgrades it to `phase: "execution"` to activate the stricter Phase 5 edit guard.
+
 This activates:
 - `phase5-edit-guard.py` — warns if the orchestrator edits code directly instead of delegating
 - `plan-completeness-check.py` — warns if agent output covers fewer findings than assigned
