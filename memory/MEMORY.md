@@ -13,6 +13,8 @@
 - [feedback-dispatch-ordering.md](feedback-dispatch-ordering.md) — Dispatch agent work before self-executable tasks to maximize parallelism
 - [feedback-ship-vs-release.md](feedback-ship-vs-release.md) — Always suggest /release not /ship; coding-team has its own equivalents for gstack skills
 - [feedback-rationalization-bypass.md](feedback-rationalization-bypass.md) — CC invents "mechanical" exceptions to bypass the all-code-through-coding-team rule
+- [feedback-size-rationalization-bypass.md](feedback-size-rationalization-bypass.md) — Main agent edits code directly by rationalizing individual fixes as "too small" for delegation
+- [feedback-doc-level-edits-rationalization.md](feedback-doc-level-edits-rationalization.md) — Orchestrator classifies hook/phase/prompt files as "documentation" to bypass delegation
 - [feedback-context-weight.md](feedback-context-weight.md) — SKILL.md and execution.md too heavy; memory files should consolidate; direct embedding > propagation
 - [feedback-no-pause-between-phases.md](feedback-no-pause-between-phases.md) — Don't pause between severity phases in scan-fix workflows; auto-continue with progress summaries
 - [feedback-ci-infra-failures.md](feedback-ci-infra-failures.md) — Agents waste cycles on non-code CI failures; added failure classification protocol
@@ -21,3 +23,7 @@
 - [feedback-partial-fix-still-active.md](feedback-partial-fix-still-active.md) — Harness-engineer offered to fix only P1s, silently dropping P2/P3; selective-fix rationalization persists
 - [feedback-context-survival-gates.md](feedback-context-survival-gates.md) — QA review and second-opinion gates lost to context pressure in long sessions; fixed with mandatory post-execution checklist + codex review syntax fix
 - [feedback-spec-clarity-rationalization.md](feedback-spec-clarity-rationalization.md) — Orchestrator offers self-execution when spec is clear; spec clarity determines model tier not delegation
+
+## Project History (not loaded by default)
+
+- [project-cycle14-audit-2026-03-26.md](project-cycle14-audit-2026-03-26.md) — Cycle 14: deploy drift critical, ENFORCEMENT_MAP 13→24, context survival gates, codex CLI fix
