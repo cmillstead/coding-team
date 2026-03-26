@@ -34,6 +34,18 @@ Execution uses subagents because the plan pre-decomposes work into independent t
 
 **Pre-flight: Feature branch.** Before dispatching the first implementer, verify the current branch is not main/master. If on main, create a feature branch: `git checkout -b <feature-name>`. All Phase 5 work happens on this branch.
 
+**Pre-flight: Session state.** Write the session state file so execution-phase hooks activate:
+
+```bash
+python3 -c "import json, time; json.dump({'phase': 'execution', 'ts': time.time()}, open('/tmp/coding-team-session.json', 'w'))"
+```
+
+This activates:
+- `phase5-edit-guard.py` — warns if the orchestrator edits code directly instead of delegating
+- `plan-completeness-check.py` — warns if agent output covers fewer findings than assigned
+
+The file auto-expires after 2 hours. Clean up is not required but can be done in Phase 6.
+
 ## Execution Loop
 
 ```
