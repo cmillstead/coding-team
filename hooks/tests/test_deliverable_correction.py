@@ -175,3 +175,114 @@ class TestNoCompletionClaim:
             assert result.stdout.strip() == ""
         finally:
             _deactivate_session()
+
+
+class TestPlaceholderDetection:
+    def test_todo_in_output_triggers_correction(self, run_hook, make_event):
+        """Agent output with TODO should trigger placeholder correction."""
+        _activate_session()
+        try:
+            event = make_event(
+                "Agent",
+                prompt="Implement the login feature.",
+                tool_result="Added the login form. TODO: finish this validation logic.",
+            )
+            result = run_hook("deliverable-correction.py", event)
+            assert result.parsed is not None
+            assert "CORRECTION" in result.parsed["reason"]
+            assert "TODO" in result.parsed["reason"]
+        finally:
+            _deactivate_session()
+
+    def test_fixme_in_output_triggers_correction(self, run_hook, make_event):
+        """Agent output with FIXME should trigger placeholder correction."""
+        _activate_session()
+        try:
+            event = make_event(
+                "Agent",
+                prompt="Implement the login feature.",
+                tool_result="Added the login form. FIXME: broken edge case here.",
+            )
+            result = run_hook("deliverable-correction.py", event)
+            assert result.parsed is not None
+            assert "CORRECTION" in result.parsed["reason"]
+            assert "FIXME" in result.parsed["reason"]
+        finally:
+            _deactivate_session()
+
+    def test_hack_in_output_triggers_correction(self, run_hook, make_event):
+        """Agent output with HACK should trigger placeholder correction."""
+        _activate_session()
+        try:
+            event = make_event(
+                "Agent",
+                prompt="Implement the login feature.",
+                tool_result="Added the login form. HACK: temporary workaround for auth.",
+            )
+            result = run_hook("deliverable-correction.py", event)
+            assert result.parsed is not None
+            assert "CORRECTION" in result.parsed["reason"]
+            assert "HACK" in result.parsed["reason"]
+        finally:
+            _deactivate_session()
+
+    def test_placeholder_in_output_triggers_correction(self, run_hook, make_event):
+        """Agent output with 'placeholder' should trigger correction."""
+        _activate_session()
+        try:
+            event = make_event(
+                "Agent",
+                prompt="Implement the login feature.",
+                tool_result="Added a placeholder text for the error message.",
+            )
+            result = run_hook("deliverable-correction.py", event)
+            assert result.parsed is not None
+            assert "CORRECTION" in result.parsed["reason"]
+            assert "placeholder" in result.parsed["reason"]
+        finally:
+            _deactivate_session()
+
+    def test_clean_output_no_correction(self, run_hook, make_event):
+        """Agent output with no markers should produce no output."""
+        _activate_session()
+        try:
+            event = make_event(
+                "Agent",
+                prompt="Implement the login feature.",
+                tool_result="Successfully implemented the login feature with full validation.",
+            )
+            result = run_hook("deliverable-correction.py", event)
+            assert result.stdout.strip() == ""
+        finally:
+            _deactivate_session()
+
+    def test_placeholder_fires_without_task_count(self, run_hook, make_event):
+        """Placeholder detection fires even when prompt has no task count."""
+        _activate_session()
+        try:
+            event = make_event(
+                "Agent",
+                prompt="Please review this code.",
+                tool_result="Reviewed the code. TODO: check edge cases still.",
+            )
+            result = run_hook("deliverable-correction.py", event)
+            assert result.parsed is not None
+            assert "CORRECTION" in result.parsed["reason"]
+            assert "TODO" in result.parsed["reason"]
+        finally:
+            _deactivate_session()
+
+    def test_placeholder_includes_rationalization(self, run_hook, make_event):
+        """Placeholder correction must include the named rationalization."""
+        _activate_session()
+        try:
+            event = make_event(
+                "Agent",
+                prompt="Implement the login feature.",
+                tool_result="Done. TODO: add error handling later.",
+            )
+            result = run_hook("deliverable-correction.py", event)
+            assert result.parsed is not None
+            assert "follow-up" in result.parsed["reason"]
+        finally:
+            _deactivate_session()

@@ -19,6 +19,7 @@ import sys
 from pathlib import Path
 
 HOOKS_DIR = Path.home() / ".claude" / "hooks"
+SETTINGS_PATH = Path.home() / ".claude" / "settings.json"
 TIMEOUT_SECONDS = 5
 
 
@@ -76,6 +77,71 @@ def check_sh_hook(hook_path: Path) -> str | None:
         return f"OSError: {e}"
 
 
+def get_external_hook_paths() -> list[Path]:
+    """Extract hook file paths from settings.json that are outside ~/.claude/hooks/.
+
+    Parses all hook entries across SessionStart, PreToolUse, PostToolUse and
+    extracts command paths. Returns unique paths that are NOT inside HOOKS_DIR
+    (those are already checked by the main loop).
+    """
+    if not SETTINGS_PATH.is_file():
+        return []
+
+    try:
+        settings = json.loads(SETTINGS_PATH.read_text())
+    except (json.JSONDecodeError, OSError):
+        return []
+
+    hooks_config = settings.get("hooks", {})
+    seen = set()
+    external_paths = []
+
+    for event_type in ("SessionStart", "PreToolUse", "PostToolUse"):
+        for matcher_block in hooks_config.get(event_type, []):
+            for hook_entry in matcher_block.get("hooks", []):
+                command = hook_entry.get("command", "")
+                if not command:
+                    continue
+                # Extract the file path from commands like "python3 ~/.config/foo.py"
+                # or "bash ~/.claude/hooks/bar.sh"
+                parts = command.split()
+                if len(parts) < 2:
+                    continue
+                # The file path is typically the last argument
+                file_str = parts[-1]
+                # Expand ~ to home directory
+                file_path = Path(file_str).expanduser().resolve()
+                # Skip paths inside HOOKS_DIR (already checked by main loop)
+                try:
+                    file_path.relative_to(HOOKS_DIR.resolve())
+                    continue  # Inside HOOKS_DIR, skip
+                except ValueError:
+                    pass  # Outside HOOKS_DIR, include
+                if file_path not in seen:
+                    seen.add(file_path)
+                    external_paths.append(file_path)
+
+    return external_paths
+
+
+def check_external_hook(hook_path: Path) -> str | None:
+    """Check an external hook file for health.
+
+    Returns an error message if unhealthy, None if OK.
+    Delegates to check_hook() for .py files and check_sh_hook() for .sh files.
+    """
+    if not hook_path.is_file():
+        return "file not found"
+
+    suffix = hook_path.suffix.lower()
+    if suffix == ".py":
+        return check_hook(hook_path)
+    elif suffix == ".sh":
+        return check_sh_hook(hook_path)
+    else:
+        return None  # Unknown type, skip silently
+
+
 def main():
     if not HOOKS_DIR.is_dir():
         return
@@ -93,6 +159,12 @@ def main():
         error = check_sh_hook(hook_path)
         if error:
             unhealthy.append(f"  - {hook_path.name}: {error}")
+
+    # Check external hooks registered in settings.json
+    for ext_path in get_external_hook_paths():
+        error = check_external_hook(ext_path)
+        if error:
+            unhealthy.append(f"  - [external] {ext_path}: {error}")
 
     if not unhealthy:
         return  # All hooks healthy — silent success

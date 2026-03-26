@@ -15,11 +15,14 @@ Usage: python3 hooks/feedback-promotion-checker.py
 
 import json
 import re
+import subprocess
 from pathlib import Path
 
 MEMORY_DIR = Path(__file__).parent.parent / "memory"
 HOOKS_DIR = Path(__file__).parent
 RULES_DIR = Path.home() / ".claude" / "rules"
+REPO = "cmillstead/claude-skills-coding-team"
+ISSUE_TRACKER_FILE = Path("/tmp/harness-promotion-issues.json")
 
 # Keywords that suggest mechanical detectability
 MECHANICAL_KEYWORDS = [
@@ -92,6 +95,65 @@ def check_already_enforced(name: str, content: str, hooks: set[str], rules: set[
     return None
 
 
+def get_already_filed() -> set[str]:
+    """Load set of feedback names that already have filed issues."""
+    try:
+        data = json.loads(ISSUE_TRACKER_FILE.read_text())
+        return set(data.get("filed", []))
+    except (json.JSONDecodeError, OSError):
+        return set()
+
+
+def mark_as_filed(name: str) -> None:
+    """Record that an issue was filed for this feedback."""
+    filed = get_already_filed()
+    filed.add(name)
+    ISSUE_TRACKER_FILE.write_text(json.dumps({"filed": sorted(filed)}))
+
+
+def create_promotion_issue(candidate: dict, content: str) -> bool:
+    """Create a GitHub issue for a promotion candidate.
+
+    Returns True if issue was created successfully.
+    """
+    name = candidate["name"]
+
+    # Skip if already filed
+    if name in get_already_filed():
+        return False
+
+    title = f"[harness-promotion] {name.replace('feedback-', '')}"
+    body = (
+        f"## Feedback Promotion Candidate\n\n"
+        f"**Source:** `memory/{name}.md`\n"
+        f"**Mechanical score:** {candidate['mechanical_score']}\n"
+        f"**Behavioral score:** {candidate['behavioral_score']}\n\n"
+        f"### Content\n\n{content[:500]}\n\n"
+        f"### Suggested enforcement\n\n"
+        f"This feedback describes a mechanically detectable pattern that could be "
+        f"promoted from prompt-level enforcement to a hook or rule.\n\n"
+        f"---\n*Auto-created by feedback-promotion-checker.py*"
+    )
+
+    try:
+        result = subprocess.run(
+            ["gh", "issue", "create",
+             "--repo", REPO,
+             "--title", title,
+             "--body", body,
+             "--label", "harness-promotion"],
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+        if result.returncode == 0:
+            mark_as_filed(name)
+            return True
+        return False
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+        return False
+
+
 def analyze() -> list[dict]:
     """Analyze feedback files and return promotion candidates."""
     feedbacks = load_feedback_files()
@@ -128,6 +190,19 @@ def main():
     enforced = [c for c in candidates if c["status"] == "enforced"]
     behavioral = [c for c in candidates if c["status"] == "behavioral"]
 
+    # Auto-create issues for high-scoring promotion candidates
+    high_score_candidates = [c for c in promotable if c["mechanical_score"] >= 4]
+    issues_created = 0
+    for c in high_score_candidates:
+        fb_path = MEMORY_DIR / f"{c['name']}.md"
+        content = ""
+        try:
+            content = fb_path.read_text()
+        except OSError:
+            pass
+        if create_promotion_issue(c, content):
+            issues_created += 1
+
     print(f"Feedback promotion analysis: {len(candidates)} total")
     print(f"  Already enforced: {len(enforced)}")
     print(f"  Promotion candidates: {len(promotable)}")
@@ -150,6 +225,9 @@ def main():
         print("=== BEHAVIORAL (prompt-level OK) ===")
         for c in behavioral:
             print(f"  {c['name']}")
+
+    if issues_created:
+        print(f"\nAuto-created {issues_created} GitHub issue(s) for promotion candidates.")
 
     # Output as JSON for programmatic consumption
     print("\n--- JSON ---")

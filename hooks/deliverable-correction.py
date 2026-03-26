@@ -37,6 +37,28 @@ COMPLETION_CLAIMS = re.compile(
     re.I,
 )
 
+# Placeholder markers that indicate unfinished work
+PLACEHOLDER_PATTERNS = [
+    re.compile(r'\bTODO\b', re.I),
+    re.compile(r'\bFIXME\b', re.I),
+    re.compile(r'\bHACK\b', re.I),
+    re.compile(r'\bplaceholder\b', re.I),
+    re.compile(r'\bnot implemented\b', re.I),
+    re.compile(r'\bstub\b', re.I),
+    re.compile(r'//\s*\.\.\.', re.I),
+    re.compile(r'pass\s+#\s', re.I),
+]
+
+
+def detect_placeholders(result: str) -> list[str]:
+    """Return a list of placeholder marker strings found in agent output."""
+    found = []
+    for pattern in PLACEHOLDER_PATTERNS:
+        match = pattern.search(result)
+        if match:
+            found.append(match.group(0))
+    return found
+
 
 def is_session_active() -> bool:
     """Check if session file exists and is less than 2 hours old."""
@@ -93,18 +115,29 @@ def main():
         return
 
     expected = extract_expected_count(prompt)
-    if expected is None or expected < 2:
-        return
 
-    completed = extract_completed_count(result)
+    if expected is not None and expected >= 2:
+        completed = extract_completed_count(result)
 
-    if completed is not None and completed < expected:
+        if completed is not None and completed < expected:
+            advisory(
+                f"CORRECTION: Agent completed {completed}/{expected} items. "
+                f"Re-dispatch the Agent tool for the remaining {expected - completed} items. "
+                f"Do NOT accept partial delivery. "
+                f"Known rationalization: 'The pattern is established, remaining items follow the same approach' "
+                f"— this is the #1 cause of incomplete deliverables. Every item must be explicitly completed."
+            )
+
+    # Placeholder detection — catch residual unfinished work
+    placeholders = detect_placeholders(result)
+    if placeholders:
+        markers = ", ".join(placeholders[:5])
         advisory(
-            f"CORRECTION: Agent completed {completed}/{expected} items. "
-            f"Re-dispatch the Agent tool for the remaining {expected - completed} items. "
-            f"Do NOT accept partial delivery. "
-            f"Known rationalization: 'The pattern is established, remaining items follow the same approach' "
-            f"— this is the #1 cause of incomplete deliverables. Every item must be explicitly completed."
+            f"CORRECTION: Agent output contains placeholder markers: {markers}. "
+            f"These indicate unfinished work. Complete all TODO/FIXME/HACK items "
+            f"before claiming completion. "
+            f"Known rationalization: 'I'll clean these up in a follow-up' "
+            f"— placeholders left in delivered code are never cleaned up."
         )
 
 

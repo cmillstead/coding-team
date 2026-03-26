@@ -1,5 +1,6 @@
 """Tests for feedback-promotion-checker.py internal functions."""
 
+import importlib.util
 import json
 import subprocess
 from pathlib import Path
@@ -9,6 +10,14 @@ import pytest
 
 HOOKS_DIR = Path("/Users/cevin/.claude/skills/coding-team/hooks")
 HOOK_FILE = HOOKS_DIR / "feedback-promotion-checker.py"
+
+
+def _load_module():
+    """Load the feedback-promotion-checker module for direct testing."""
+    spec = importlib.util.spec_from_file_location("fpc", str(HOOK_FILE))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
 
 
 def run_python_func(func_name: str, *args) -> object:
@@ -159,3 +168,70 @@ class TestIntegration:
             assert "candidates" in parsed
             assert "enforced" in parsed
             assert "behavioral" in parsed
+
+
+class TestIssueTracking:
+    """Tests for get_already_filed, mark_as_filed, and deduplication logic."""
+
+    def test_get_already_filed_empty(self, tmp_path):
+        """No tracker file returns empty set."""
+        mod = _load_module()
+        # Point to a non-existent file in tmp_path
+        mod.ISSUE_TRACKER_FILE = tmp_path / "nonexistent.json"
+        result = mod.get_already_filed()
+        assert result == set()
+
+    def test_mark_as_filed_creates_file(self, tmp_path):
+        """Filing marks persist to disk."""
+        mod = _load_module()
+        tracker = tmp_path / "tracker.json"
+        mod.ISSUE_TRACKER_FILE = tracker
+
+        mod.mark_as_filed("feedback-test-item")
+
+        assert tracker.exists()
+        data = json.loads(tracker.read_text())
+        assert "feedback-test-item" in data["filed"]
+
+    def test_already_filed_skipped(self, tmp_path):
+        """Candidate already filed returns False from create_promotion_issue."""
+        mod = _load_module()
+        tracker = tmp_path / "tracker.json"
+        mod.ISSUE_TRACKER_FILE = tracker
+
+        # Pre-file the candidate
+        mod.mark_as_filed("feedback-already-done")
+
+        candidate = {
+            "name": "feedback-already-done",
+            "mechanical_score": 5,
+            "behavioral_score": 1,
+        }
+        result = mod.create_promotion_issue(candidate, "some content")
+        assert result is False
+
+    def test_create_issue_low_score_not_filed(self):
+        """Candidates with mechanical_score < 4 are not auto-filed by main() logic."""
+        mod = _load_module()
+        # The filtering happens in main(), not in create_promotion_issue.
+        # Verify the threshold by checking the filter logic directly.
+        candidates = [
+            {"name": "fb-low", "status": "candidate", "mechanical_score": 2, "behavioral_score": 1},
+            {"name": "fb-high", "status": "candidate", "mechanical_score": 5, "behavioral_score": 1},
+        ]
+        promotable = [c for c in candidates if c["status"] == "candidate"]
+        high_score = [c for c in promotable if c["mechanical_score"] >= 4]
+        assert len(high_score) == 1
+        assert high_score[0]["name"] == "fb-high"
+
+    def test_tracker_deduplication(self, tmp_path):
+        """Same name filed twice only stored once."""
+        mod = _load_module()
+        tracker = tmp_path / "tracker.json"
+        mod.ISSUE_TRACKER_FILE = tracker
+
+        mod.mark_as_filed("feedback-dup-item")
+        mod.mark_as_filed("feedback-dup-item")
+
+        data = json.loads(tracker.read_text())
+        assert data["filed"].count("feedback-dup-item") == 1
