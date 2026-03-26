@@ -8,17 +8,17 @@
       "Bash(gh pr:*)",
       "Bash(find:*)",
       "Bash(chmod +x:*)",
-      "Bash(python3 -m json.tool)",
+      "Bash(python3:*)",
       "Bash(npm:*)",
       "Bash(codex:*)",
       "Bash(engram:*)",
       "Bash(claude mcp:*)",
+      "Bash(bash scripts/deploy.sh --dry-run)",
       "Read(//Users/cevin/.claude/**)",
       "Read(//Users/cevin/src/**)",
+      "Read(//private/tmp/**)",
       "mcp__plugin_github_github__create_repository",
-      "Bash(for agent:*)",
-      "Bash(for hook:*)",
-      "Bash(bash scripts/deploy.sh --dry-run)"
+      "Bash(echo \"Exit: $?\")"
     ]
   }
 }

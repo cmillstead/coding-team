@@ -47,6 +47,30 @@ def check_hook(hook_path: Path) -> str | None:
         return f"OSError: {e}"
 
 
+def check_sh_hook(hook_path: Path) -> str | None:
+    """Run bash -n on a shell hook to check for syntax errors.
+
+    Returns an error message string if the hook is unhealthy, None if OK.
+    """
+    try:
+        result = subprocess.run(
+            ["bash", "-n", str(hook_path)],
+            capture_output=True,
+            text=True,
+            timeout=TIMEOUT_SECONDS,
+        )
+        if result.returncode != 0:
+            stderr_snippet = result.stderr.strip()[:200] if result.stderr else "syntax error"
+            return f"bash syntax error: {stderr_snippet}"
+        return None
+    except subprocess.TimeoutExpired:
+        return f"timeout after {TIMEOUT_SECONDS}s"
+    except FileNotFoundError:
+        return "bash not found"
+    except OSError as e:
+        return f"OSError: {e}"
+
+
 def main():
     if not HOOKS_DIR.is_dir():
         return
@@ -57,6 +81,11 @@ def main():
         if hook_path.name == "hook-health-check.py":
             continue
         error = check_hook(hook_path)
+        if error:
+            unhealthy.append(f"  - {hook_path.name}: {error}")
+
+    for hook_path in sorted(HOOKS_DIR.glob("*.sh")):
+        error = check_sh_hook(hook_path)
         if error:
             unhealthy.append(f"  - {hook_path.name}: {error}")
 
