@@ -119,6 +119,66 @@ def summarize_sessions(sessions, current_session, max_sessions=3):
     return summaries
 
 
+def aggregate_by_branch(records):
+    """Group sessions by git branch and compute aggregate stats.
+
+    Returns a dict mapping branch name to:
+      - total_calls: int
+      - session_count: int
+      - top_tools: list of (tool, count) tuples (top 5)
+      - sessions: list of session IDs
+    Only branches with 2+ sessions are included.
+    """
+    branch_sessions = {}
+    for r in records:
+        branch = r.get("branch")
+        if not branch:
+            continue
+        sid = r.get("session", "unknown")
+        if branch not in branch_sessions:
+            branch_sessions[branch] = {}
+        if sid not in branch_sessions[branch]:
+            branch_sessions[branch][sid] = []
+        branch_sessions[branch][sid].append(r)
+
+    result = {}
+    for branch, sessions in branch_sessions.items():
+        if len(sessions) < 2:
+            continue
+        all_records = []
+        for sid_records in sessions.values():
+            all_records.extend(sid_records)
+        tool_counts = Counter(r.get("tool", "unknown") for r in all_records)
+        result[branch] = {
+            "total_calls": len(all_records),
+            "session_count": len(sessions),
+            "top_tools": tool_counts.most_common(5),
+            "sessions": sorted(sessions.keys()),
+        }
+    return result
+
+
+def format_branch_summary(branch_data):
+    """Format branch aggregation data into a human-readable string.
+
+    Args:
+        branch_data: dict from aggregate_by_branch()
+
+    Returns:
+        Formatted string, or empty string if no data.
+    """
+    if not branch_data:
+        return ""
+    lines = []
+    for branch, info in sorted(branch_data.items()):
+        top_str = ", ".join(f"{t}:{c}" for t, c in info["top_tools"])
+        lines.append(
+            f"- {branch}: {info['total_calls']} calls across "
+            f"{info['session_count']} sessions ({top_str})"
+        )
+    return "Branch cost summary:\n" + "\n".join(lines)
+
+
 def main():
     records = load_recent_metrics()
     if not records:
@@ -145,7 +205,11 @@ def main():
         if anomalies:
             all_anomalies.extend(anomalies)
 
-    if not cost_summaries and not all_anomalies:
+    # Branch/PR-level aggregation
+    branch_data = aggregate_by_branch(records)
+    branch_summary = format_branch_summary(branch_data)
+
+    if not cost_summaries and not all_anomalies and not branch_summary:
         return
 
     parts = []
@@ -159,6 +223,8 @@ def main():
         parts.append(
             "Anomalies:\n" + "\n".join(f"- {a}" for a in all_anomalies)
         )
+    if branch_summary:
+        parts.append(branch_summary)
     advisory("\n\n".join(parts))
 
 
