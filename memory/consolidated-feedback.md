@@ -1,35 +1,60 @@
 ---
-name: Consolidated behavioral rules
-description: Distilled rules from all feedback files — load this instead of individual files
+name: Consolidated behavioral rules and case study principles
+description: Hard-won rules from feedback + 30 failure patterns from harness-debugging-case-studies — loaded at session start to prevent known failure modes
 type: feedback
 ---
 
 # Behavioral Rules (consolidated)
 
+> Rules that exist only at the prompt level — no hook or rule-file enforcement. Promoted rules have been removed (see hooks/, rules/, and CLAUDE.md for structural enforcement).
+
 1. Dispatch agent work BEFORE doing self-executable tasks (memory saves, doc writes). Agent work takes longer.
 2. NEVER suggest /ship — always suggest /release. Same for /retrospective not /retro, /doc-sync not /document-release.
-3. NEVER write code directly. ALL code changes go through /coding-team. The thought "this is too simple" is the signal to use /coding-team.
-4. "Pre-existing" is never a reason to skip. Fix lint warnings in modified files. "Only warnings, no errors" is NOT a reason to skip — warnings are defects.
-5. NEVER commit to main/master. Always use feature branches + PRs.
-6. Agents silently drop findings — require completeness gates. count(inputs) must equal count(outputs).
-7. Main agent is the orchestrator in Phase 5. NEVER use Edit/Write/Bash for tests directly.
-8. Agent teams when COORDINATION=yes. Subagents when independent work.
-9. Use /prompt-craft audit before writing or modifying skill instructions.
-10. Update symlinks in ~/.claude/skills/ when renaming or creating standalone skills.
-11. List docs/plans/ directory first when resuming work — never guess filenames.
-12. Direct embedding > propagation through intermediaries. Put tools in worker descriptions, not Team Leader instructions.
-13. Codesight-mcp is preferred for code analysis when available. Reindex stale indexes. Grep/Read are fallbacks when MCP is unavailable or calls fail.
-14. CI failures require classification before action. Non-code failures (infra/billing/permissions) go to the user immediately — NEVER attempt code fixes.
-15. When a background CI watcher completes, read its output before dismissing. "Already handled" is a rationalization — read the log, then decide.
-16. Re-read files immediately before editing if the user may have modified them externally. Do not rely on stale reads from earlier in the conversation.
-17. Never retry a failed MCP tool more than once. Mark it unavailable for the session, degrade to built-in tools (Glob, Grep, Read). "Maybe it's back up now" — it isn't.
-18. Chunk large taxonomy/disambiguation work into clusters of 5-8 items per agent call. Never process 30+ items in a single context window — compaction loses precision.
-19. Run multi-pass audits with distinct focus per pass: (1) agent-internal, (2) cross-file consistency, (3) behavioral executability, (4) migration residue. Stop when a pass comes back clean.
-20. Track agents and hooks in their team repo, not just ~/.claude/. Repo copies are source of truth; ~/.claude/ copies are runtime deployment.
-21. Use identity framing ("you are the orchestrator") over prohibition ("NEVER write code") for behavioral shaping. Reserve prohibition for safety rails only.
-22. Subagent prompts must explicitly override inherited CLAUDE.md rules that conflict with the subagent's role. Agents cannot infer exemptions from context.
-23. Pre-compute external intelligence (dep audit, secret scanning, CVE search) at the orchestrator level before dispatching workers. Workers under context pressure skip external tool calls.
-24. Keep skill files under 200 lines. Extract workers to workers/ dirs and phases to phases/ dirs, loaded on demand. Context saturation defeats MANDATORY labels beyond this threshold.
-25. Check for dark features after implementation: exported functions with zero external callers, routes defined but not registered, event handlers declared but not subscribed.
-26. Do not pause for user confirmation between severity phases during scan-fix workflows. Print a progress summary, then continue automatically. User has Esc to interrupt.
-27. When diagnosing behavioral issues, try identity framing and named rationalizations first (prompt-craft tiers 1-2). Only escalate to prohibitions and restructuring if those don't hold.
+3. Agent teams when COORDINATION=yes. Subagents when independent work.
+4. Use /prompt-craft audit before writing or modifying skill instructions.
+5. Update symlinks in ~/.claude/skills/ when renaming or creating standalone skills.
+6. List docs/plans/ directory first when resuming work — never guess filenames.
+7. Direct embedding > propagation through intermediaries. Put tools in worker descriptions, not Team Leader instructions.
+8. Codesight-mcp is preferred for code analysis when available. Reindex stale indexes. Grep/Read are fallbacks when MCP is unavailable or calls fail.
+9. CI failures require classification before action. Non-code failures (infra/billing/permissions) go to the user immediately — NEVER attempt code fixes.
+10. When a background CI watcher completes, read its output before dismissing. "Already handled" is a rationalization — read the log, then decide.
+11. Never retry a failed MCP tool more than once. Mark it unavailable for the session, degrade to built-in tools (Glob, Grep, Read). "Maybe it's back up now" — it isn't.
+12. Run multi-pass audits with distinct focus per pass: (1) agent-internal, (2) cross-file consistency, (3) behavioral executability, (4) migration residue. Stop when a pass comes back clean.
+13. Subagent prompts must explicitly override inherited CLAUDE.md rules that conflict with the subagent's role. Agents cannot infer exemptions from context.
+14. Do not pause for user confirmation between severity phases during scan-fix workflows. Print a progress summary, then continue automatically. User has Esc to interrupt.
+15. When diagnosing behavioral issues, try identity framing and named rationalizations first (prompt-craft tiers 1-2). Only escalate to prohibitions and restructuring if those don't hold.
+
+## Case Study Principles
+
+> From harness-debugging-case-studies.md — 30 failure patterns and their fixes.
+
+1. **Permission language** — Scattered "skip/directly/simple" lines compound into escape hatches. One exemption, one location, explicit scope. (Case 1)
+2. **Category gaps** — Rules covering one category ("test failures") leave adjacent categories ("review findings") unblocked. Write rules for intent, not instance. (Case 2)
+3. **Split-audience files** — One instruction file serving two roles (orchestrator + worker) serves neither well. Split by audience, progressive disclosure. (Case 3)
+4. **Format-vs-function** — Define exceptions by purpose (documentation vs config), not format (.md). Agents classify ambiguously in whichever direction is easier. (Case 4)
+5. **Context inheritance** — Shared reference files (style guides, principles, memory) must be audited as a matrix: agents × files. Every code-touching agent needs the style guide. (Case 5)
+6. **Serialization anti-pattern** — Agents do easy self-tasks first. Rule: dispatch long-running work first, lightweight work second. (Case 6)
+7. **Rationalization override** — When rules are explicit and agent still bypasses, name the specific rationalization and make it a compliance trigger. (Case 7)
+8. **Tool reversion** — Agents revert to trained defaults (Read/Grep/Bash) under pressure. Frame new tools as primary, trained tools as fallback. First-mentioned wins. (Case 8)
+9. **Structural demotion** — Tools in a separate "Additional" section are treated as optional. Colocate all mandatory items in the same block. Separation = demotion. (Case 9)
+10. **Silent drop** — Agents can't self-verify completeness. External verification with hard count from dispatcher is the only reliable pattern. (Case 10)
+11. **Competing namespace** — When multiple skill frameworks coexist, explicitly prohibit competing commands by name. Agent follows the structurally louder signal. (Case 11)
+12. **Filename guessing** — After context loss, agents must discover filesystem state by listing, not inference. Never construct expected filenames. (Case 12)
+13. **Task misclassification** — Content controlling agent behavior is prompt engineering regardless of format. Route CC instruction file edits through /prompt-craft. (Case 13)
+14. **Infrastructure orphan** — Tasks with side effects beyond files (symlinks, env vars, configs) must list those side effects explicitly. Agents don't know about operational dependencies. (Case 14)
+15. **Friction mismatch** — Auto-continue at progress points, pause only at genuine decision points. User has Esc. (Case 15)
+16. **Cross-layer propagation** — Fixes at the orchestrator layer must propagate to every worker prompt that encounters the same category. Audit fixes across the full dispatch chain. (Case 16)
+17. **Missing branch policy** — "Always use feature branches" feels too obvious to state. It isn't. Encode every workflow assumption explicitly. (Case 17)
+18. **Propagation failure** — Every indirection layer between instruction and executor is lossy. Embed tools directly in each worker's description. Direct > propagation. (Case 18)
+19. **Recursive invocation** — Global routing rules leak into worker contexts. Workers need identity statements overriding global rules: "You ARE the delegate." (Case 19)
+20. **Severity downgrade** — Tool severity tiers (warning/error) become inaction justification. Override tool classification explicitly: "We treat warnings as errors." (Case 20)
+21. **Orphaned resource** — Workflows creating external resources (PRs, infra) need cleanup paths for session abandonment: retry cap + cleanup + session-resume detection. (Case 21)
+22. **Structure-not-behavior tests** — Agents write tests that read source files and check strings. Require behavioral assertions: call function, assert output. (Case 22)
+23. **Unpropagated fix** — Fixing one instance doesn't fix the class. After fixing a vulnerability, search for the same pattern at all analogous sites. (Case 23)
+24. **Context saturation** — Beyond ~300-400 lines, MANDATORY labels stop working. Fix structurally: required output fields, checkpoints at headroom layer, pre-computation. (Case 24)
+25. **Incomplete refactor** — Add new pattern, verify it works, REMOVE the old pattern. Skipping step 3 creates contradictory instructions. (Case 25)
+26. **Tool overload** — 21 tools in one prompt creates selection ambiguity. Cap at 5-6 primary tools, pre-compute results from secondary tools at orchestrator level. (Case 26)
+27. **Trust inversion** — Verification gates defaulting to trust are decoration. Invert: verify always, skip under narrow explicit conditions. (Case 27)
+28. **Exemption accumulation** — Same permission in multiple places amplifies beyond intended scope. One exemption, one canonical location, explicit scope boundary. (Case 28)
+29. **Configuration drift** — Agent capabilities defined in two places will drift. Establish single source of truth for dispatch type. (Case 29)
+30. **Identity reframe** — When enforcement escalates through multiple rounds, the problem is misaligned identity. Reframe so desired behavior is what the agent's self-model wants. (Case 30)
