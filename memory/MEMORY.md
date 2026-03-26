@@ -23,7 +23,9 @@
 - [feedback-partial-fix-still-active.md](feedback-partial-fix-still-active.md) — Harness-engineer offered to fix only P1s, silently dropping P2/P3; selective-fix rationalization persists
 - [feedback-context-survival-gates.md](feedback-context-survival-gates.md) — QA review and second-opinion gates lost to context pressure in long sessions; fixed with mandatory post-execution checklist + codex review syntax fix
 - [feedback-spec-clarity-rationalization.md](feedback-spec-clarity-rationalization.md) — Orchestrator offers self-execution when spec is clear; spec clarity determines model tier not delegation
+- [feedback-hook-accumulation.md](feedback-hook-accumulation.md) — Harness-engineer adds 1-2 hooks per audit cycle without cost/benefit; if >20 hooks, consolidate before adding
 
 ## Project History (not loaded by default)
 
 - [project-cycle14-audit-2026-03-26.md](project-cycle14-audit-2026-03-26.md) — Cycle 14: deploy drift critical, ENFORCEMENT_MAP 13→24, context survival gates, codex CLI fix
+- [project-hook-consolidation-round2-2026-03-26.md](project-hook-consolidation-round2-2026-03-26.md) — Hook consolidation round 2: 23→19 hooks, killed 4, merged metrics-analyzer into hook-health-check
