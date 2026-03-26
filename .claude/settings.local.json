@@ -1,0 +1,26 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git:*)",
+      "Bash(grep:*)",
+      "Bash(wc:*)",
+      "Bash(mkdir:*)",
+      "Bash(gh pr:*)",
+      "Bash(find:*)",
+      "Bash(chmod +x:*)",
+      "Bash(python3 -m json.tool)",
+      "Bash(npm:*)",
+      "Bash(codex:*)",
+      "Bash(engram:*)",
+      "Bash(claude mcp:*)",
+      "Read(//Users/cevin/.claude/**)",
+      "Read(//Users/cevin/src/**)",
+      "mcp__plugin_github_github__create_repository",
+      "Bash(for agent:*)",
+      "Bash(for hook:*)",
+      "Bash(bash scripts/deploy.sh --dry-run)",
+      "Bash(python3 -c \"import ast; ast.parse\\(open\\(''hooks/no-mocks.py''\\).read\\(\\)\\)\")",
+      "Bash(python3 hooks/phase5-edit-guard.py)"
+    ]
+  }
+}
