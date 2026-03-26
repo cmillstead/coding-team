@@ -286,3 +286,99 @@ class TestPlaceholderDetection:
             assert "follow-up" in result.parsed["reason"]
         finally:
             _deactivate_session()
+
+
+class TestIncompleteRefactorDetection:
+    def test_deprecated_marker_triggers_correction(self, run_hook, make_event):
+        """Agent output with DEPRECATED marker should trigger refactor correction."""
+        _activate_session()
+        try:
+            event = make_event(
+                "Agent",
+                prompt="Refactor the auth module.",
+                tool_result="Added new auth handler. DEPRECATED: old auth handler still in place.",
+            )
+            result = run_hook("deliverable-correction.py", event)
+            assert result.parsed is not None
+            assert "CORRECTION" in result.parsed["reason"]
+            assert "deprecated" in result.parsed["reason"].lower()
+            assert "Case study #25" in result.parsed["reason"]
+        finally:
+            _deactivate_session()
+
+    def test_old_comment_triggers_correction(self, run_hook, make_event):
+        """Agent output with '# old:' comment should trigger refactor correction."""
+        _activate_session()
+        try:
+            event = make_event(
+                "Agent",
+                prompt="Update the config parser.",
+                tool_result="New parser implemented.\n# old: previous parser used regex",
+            )
+            result = run_hook("deliverable-correction.py", event)
+            assert result.parsed is not None
+            assert "CORRECTION" in result.parsed["reason"]
+            assert "Case study #25" in result.parsed["reason"]
+        finally:
+            _deactivate_session()
+
+    def test_clean_output_no_refactor_warning(self, run_hook, make_event):
+        """Agent output without deprecated markers should not trigger refactor correction."""
+        _activate_session()
+        try:
+            event = make_event(
+                "Agent",
+                prompt="Refactor the auth module.",
+                tool_result="Replaced the old auth handler with the new implementation. All tests pass.",
+            )
+            result = run_hook("deliverable-correction.py", event)
+            # Should not have any correction (no placeholders, no deprecated markers, no count mismatch)
+            assert result.stdout.strip() == ""
+        finally:
+            _deactivate_session()
+
+    def test_at_deprecated_annotation_triggers_correction(self, run_hook, make_event):
+        """Agent output with @deprecated annotation should trigger refactor correction."""
+        _activate_session()
+        try:
+            event = make_event(
+                "Agent",
+                prompt="Update the API endpoints.",
+                tool_result="Added new v2 endpoints. Left @deprecated on old v1 endpoints.",
+            )
+            result = run_hook("deliverable-correction.py", event)
+            assert result.parsed is not None
+            assert "CORRECTION" in result.parsed["reason"]
+            assert "Case study #25" in result.parsed["reason"]
+        finally:
+            _deactivate_session()
+
+    def test_refactor_includes_rationalization(self, run_hook, make_event):
+        """Refactor correction must include the named rationalization."""
+        _activate_session()
+        try:
+            event = make_event(
+                "Agent",
+                prompt="Refactor the auth module.",
+                tool_result="New auth handler added. DEPRECATED old handler kept for reference.",
+            )
+            result = run_hook("deliverable-correction.py", event)
+            assert result.parsed is not None
+            assert "left the old code as a reference" in result.parsed["reason"]
+        finally:
+            _deactivate_session()
+
+    def test_legacy_coexistence_triggers_correction(self, run_hook, make_event):
+        """Agent output with old_xxx and new_xxx coexisting should trigger correction."""
+        _activate_session()
+        try:
+            event = make_event(
+                "Agent",
+                prompt="Rename the handler functions.",
+                tool_result="Renamed: old_handler still exists alongside new_handler.",
+            )
+            result = run_hook("deliverable-correction.py", event)
+            assert result.parsed is not None
+            assert "CORRECTION" in result.parsed["reason"]
+        finally:
+            _deactivate_session()

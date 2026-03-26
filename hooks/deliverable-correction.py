@@ -41,6 +41,16 @@ COMPLETION_CLAIMS = re.compile(
     re.I,
 )
 
+# Patterns that suggest old code was left alongside new code
+DEPRECATED_COEXISTENCE_PATTERNS = [
+    # Deprecated marker near new implementation
+    re.compile(r'(?:DEPRECATED|deprecated|@deprecated)', re.I),
+    # "old" and "new" versions coexisting
+    re.compile(r'(?:old|legacy|previous)_\w+.*(?:new|updated|current)_\w+', re.I),
+    # Commented-out code blocks (# old implementation, // removed, etc.)
+    re.compile(r'#\s*(?:old|removed|deprecated|was|previously):', re.I),
+]
+
 # Placeholder markers that indicate unfinished work
 PLACEHOLDER_PATTERNS = [
     re.compile(r'\bTODO\b', re.I),
@@ -62,6 +72,20 @@ def detect_placeholders(result: str) -> list[str]:
         if match:
             found.append(match.group(0))
     return found
+
+
+def detect_incomplete_refactor(result: str) -> list[str]:
+    """Detect signs of incomplete refactoring — old and new patterns coexisting.
+
+    Case study #25: agents add new patterns but forget to remove the old ones,
+    creating contradictory instructions or dead code.
+    """
+    signals = []
+    for pattern in DEPRECATED_COEXISTENCE_PATTERNS:
+        matches = pattern.findall(result)
+        if matches:
+            signals.append(matches[0] if isinstance(matches[0], str) else matches[0][0])
+    return signals
 
 
 def is_session_active() -> bool:
@@ -145,6 +169,18 @@ def main():
             f"before claiming completion. "
             f"Known rationalization: 'I'll clean these up in a follow-up' "
             f"— placeholders left in delivered code are never cleaned up."
+        )
+
+    # Incomplete refactor detection — catch old+new pattern coexistence
+    refactor_signals = detect_incomplete_refactor(result)
+    if refactor_signals:
+        markers = ", ".join(refactor_signals[:3])
+        advisory(
+            f"CORRECTION: Agent output contains deprecated/legacy markers: {markers}. "
+            f"Case study #25: incomplete refactor — new code added but old code not removed. "
+            f"Verify the old pattern was removed, not just the new one added alongside it. "
+            f"Known rationalization: 'I left the old code as a reference' "
+            f"— old code left alongside new code creates contradictory instructions."
         )
 
 
