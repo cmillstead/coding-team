@@ -62,7 +62,7 @@ Use codesight-mcp tools for deeper simplification analysis:
 
 All tool names above are prefixed `mcp__codesight-mcp__` when calling.
 
-If codesight-mcp tools are not available, fall back to Grep for symbol searches. Do NOT skip duplicate detection.
+If ANY codesight-mcp tool call returns a connection error, timeout, or API error: do NOT retry it. Mark the tool unavailable for this session and fall back to Grep/Read for symbol searches. Known rationalization: "maybe it's back up now" — it isn't. One retry is the maximum. Do NOT skip duplicate detection.
 
 ## Project-Specific Criteria
 
