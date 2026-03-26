@@ -45,7 +45,12 @@ def main():
         exit_code = tool_result.get("exit_code")
         if exit_code is not None and exit_code != 0:
             has_error = True
-    if any(marker in result_str.lower() for marker in ["error", "traceback", "exception"]):
+        elif exit_code is None:
+            # No exit code available — fall back to keyword detection
+            if any(marker in result_str.lower() for marker in ["error", "traceback", "exception"]):
+                has_error = True
+        # If exit_code == 0, trust the exit code over keywords
+    elif any(marker in result_str.lower() for marker in ["error", "traceback", "exception"]):
         has_error = True
 
     METRICS_DIR.mkdir(parents=True, exist_ok=True)
@@ -66,6 +71,25 @@ def main():
             f.write(json.dumps(record) + "\n")
     except OSError:
         pass
+
+    if has_error:
+        msg = (
+            f"QUALITY ALERT: Skill '{skill_name}' produced error output. "
+            f"Review the result before accepting. If the skill failed due to "
+            f"context pressure, consider re-dispatching with a simpler prompt "
+            f"or a more capable model."
+        )
+        print(json.dumps({"decision": "allow", "reason": msg}))
+        return
+
+    if not has_output:
+        msg = (
+            f"QUALITY ALERT: Skill '{skill_name}' produced no output. "
+            f"This may indicate silent failure. Check if the skill completed "
+            f"its task or if it needs to be re-dispatched."
+        )
+        print(json.dumps({"decision": "allow", "reason": msg}))
+        return
 
 
 if __name__ == "__main__":

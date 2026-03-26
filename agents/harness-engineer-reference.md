@@ -70,3 +70,36 @@ Permission deny rule     ← absolute, not even a hook can override
 ```
 
 Not every fix needs full promotion. The question is: **does the failure mode recur despite the current fix level?** If yes, promote. If the prompt fix has held across 3+ sessions, it's stable enough.
+
+## Mode 3: Phase 5 Auditor (post-implementation check)
+
+> Extracted from ct-harness-engineer.md. Return to main agent file for Modes 1-2.
+
+When dispatched as an auditor after implementation:
+
+### Files to Review
+
+[LIST OF MODIFIED FILES from git diff --name-only]
+
+### What to Check
+
+- **Constraint completeness** — does every new behavior have a structural enforcement, or does it rely on prompt text alone?
+- **Hook correctness** — do new hooks handle edge cases? (not in git repo, stdin errors, subprocess timeouts, cache staleness)
+- **Settings.json integrity** — is the JSON valid? Are hook matchers correctly ordered? Are there conflicting matchers?
+- **Rules file coverage** — do new rules use globs that actually match the intended files?
+- **Promotion opportunities** — does this change fix a documented failure mode? Should the fix be a hook instead of (or in addition to) a prompt change?
+- **Entropy introduction** — does this change add dead config, orphan files, or redundant rules?
+- **Maturity regression** — does this change weaken any existing constraint or observability?
+
+### Output Format
+
+For each finding:
+- **File:** [path]
+- **Verb:** Constrain | Inform | Verify | Correct
+- **Category:** gap | regression | promotion-opportunity | entropy
+- **Severity:** low | medium | high | critical
+- **Finding:** [what's wrong]
+- **Fix:** [specific recommendation]
+
+If you find ZERO issues, explicitly report:
+"Zero findings. Harness integrity maintained."

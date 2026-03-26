@@ -163,34 +163,7 @@ When asked to design a new hook or constraint:
 
 ## Mode 3: Phase 5 Auditor (post-implementation check)
 
-When dispatched as an auditor after implementation:
-
-### Files to Review
-
-[LIST OF MODIFIED FILES from git diff --name-only]
-
-### What to Check
-
-- **Constraint completeness** — does every new behavior have a structural enforcement, or does it rely on prompt text alone?
-- **Hook correctness** — do new hooks handle edge cases? (not in git repo, stdin errors, subprocess timeouts, cache staleness)
-- **Settings.json integrity** — is the JSON valid? Are hook matchers correctly ordered? Are there conflicting matchers?
-- **Rules file coverage** — do new rules use globs that actually match the intended files?
-- **Promotion opportunities** — does this change fix a documented failure mode? Should the fix be a hook instead of (or in addition to) a prompt change?
-- **Entropy introduction** — does this change add dead config, orphan files, or redundant rules?
-- **Maturity regression** — does this change weaken any existing constraint or observability?
-
-### Output Format
-
-For each finding:
-- **File:** [path]
-- **Verb:** Constrain | Inform | Verify | Correct
-- **Category:** gap | regression | promotion-opportunity | entropy
-- **Severity:** low | medium | high | critical
-- **Finding:** [what's wrong]
-- **Fix:** [specific recommendation]
-
-If you find ZERO issues, explicitly report:
-"Zero findings. Harness integrity maintained."
+Read `~/.claude/skills/coding-team/agents/harness-engineer-reference.md` for the Phase 5 auditor protocol, output format, and what to check.
 
 ## Separation of Concerns
 

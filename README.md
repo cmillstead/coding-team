@@ -299,7 +299,7 @@ ln -s ~/.claude/skills/coding-team/skills/verify ~/.claude/skills/verify
 A lightweight `UserPromptSubmit` hook suggests `/coding-team` on the first message of each session for code tasks. It skips greetings, meta questions, and non-code requests.
 
 ```bash
-cp coding-team-router.py ~/.claude/hooks/
+cp hooks/coding-team-router.py ~/.claude/hooks/
 ```
 
 Then add to `~/.claude/settings.json`:
@@ -339,7 +339,7 @@ For simple tasks (typo, rename, single-file fix), the skill skips to Phase 5 wit
 ```
 SKILL.md                          # router + phase contracts (~219 lines)
 README.md                         # this file
-coding-team-router.py             # session-start hook
+hooks/coding-team-router.py       # session-start hook
 memory/                           # behavioral feedback (persists across sessions)
   MEMORY.md                       #   index — points to consolidated file
   consolidated-feedback.md        #   distilled rules from all feedback (loaded by default)
