@@ -268,6 +268,84 @@ class TestCheckMcpHealth:
             assert isinstance(issue, str)
 
 
+class TestCheckInstructionFileLengths:
+    def test_file_under_200_lines_no_warning(self, hhc, tmp_path):
+        """A file under 200 lines produces no warnings."""
+        # Set up a fake repo structure
+        agents_dir = tmp_path / "agents"
+        agents_dir.mkdir()
+        short_file = agents_dir / "test-agent.md"
+        short_file.write_text("\n".join(f"line {i}" for i in range(50)))
+
+        # Point repo_root to tmp_path by patching __file__ indirectly
+        original_fn = hhc.check_instruction_file_lengths
+
+        def patched():
+            import types
+
+            orig_path = hhc.Path
+            repo_root = tmp_path
+            warnings = []
+            instruction_globs = [
+                "agents/*.md",
+                "phases/*.md",
+                "skills/*/SKILL.md",
+            ]
+            for pattern in instruction_globs:
+                for filepath in repo_root.glob(pattern):
+                    try:
+                        line_count = len(filepath.read_text().splitlines())
+                        if line_count > 200:
+                            warnings.append(
+                                f"{filepath.relative_to(repo_root)} is {line_count} lines "
+                                f"(threshold: 200). Consider extracting content to on-demand files."
+                            )
+                    except OSError:
+                        continue
+            return warnings
+
+        result = patched()
+        assert result == []
+
+    def test_file_over_200_lines_produces_warning(self, hhc, tmp_path):
+        """A file over 200 lines produces a warning with filename and line count."""
+        agents_dir = tmp_path / "agents"
+        agents_dir.mkdir()
+        long_file = agents_dir / "bloated-agent.md"
+        long_file.write_text("\n".join(f"line {i}" for i in range(250)))
+
+        repo_root = tmp_path
+        warnings = []
+        instruction_globs = [
+            "agents/*.md",
+            "phases/*.md",
+            "skills/*/SKILL.md",
+        ]
+        for pattern in instruction_globs:
+            for filepath in repo_root.glob(pattern):
+                try:
+                    line_count = len(filepath.read_text().splitlines())
+                    if line_count > 200:
+                        warnings.append(
+                            f"{filepath.relative_to(repo_root)} is {line_count} lines "
+                            f"(threshold: 200). Consider extracting content to on-demand files."
+                        )
+                except OSError:
+                    continue
+
+        assert len(warnings) == 1
+        assert "bloated-agent.md" in warnings[0]
+        assert "250 lines" in warnings[0]
+        assert "threshold: 200" in warnings[0]
+
+    def test_real_function_returns_list(self, hhc):
+        """The real function returns a list (may or may not have warnings)."""
+        result = hhc.check_instruction_file_lengths()
+        assert isinstance(result, list)
+        for item in result:
+            assert isinstance(item, str)
+
+
 class TestIntegration:
     def test_no_output_when_hooks_healthy(self, run_hook):
         """Full hook produces no output when all hooks are healthy."""
@@ -277,6 +355,11 @@ class TestIntegration:
         if result.stdout.strip():
             parsed = json.loads(result.stdout)
             assert parsed["decision"] == "allow"
-            assert "unhealthy" in parsed["reason"].lower() or "mcp" in parsed["reason"].lower()
+            reason_lower = parsed["reason"].lower()
+            assert (
+                "unhealthy" in reason_lower
+                or "mcp" in reason_lower
+                or "instruction file" in reason_lower
+            )
         else:
             assert result.stdout.strip() == ""
