@@ -46,6 +46,10 @@ Loaded on demand by the skill router. Not needed during active phase work.
 | `phases/memory-nudge.md` | completion.md | Session learning extraction |
 | `phases/plan-format.md` | planning.md | Plan document template and task structure |
 | `phases/planning-next-steps.md` | planning.md | Risk signals and second-opinion gate |
+| `phases/design-team-context-retrieval.md` | design-team.md | Episode & context retrieval for design workers |
+| `phases/reference-files.md` | SKILL.md | Standalone skills, phase details, on-demand files, agent definitions |
+| `agents/implementer-reference.md` | ct-implementer.md | Code exploration, CI fix context, escalation guidance |
+| `agents/harness-engineer-reference.md` | ct-harness-engineer.md | Report template, Phase 5 auditor protocol, hook design protocol |
 
 **Agent definitions** (used by the execution loop):
 
