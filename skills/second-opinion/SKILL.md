@@ -42,27 +42,15 @@ Independent review of a plan or diff. Codex reads the material, classifies findi
 REVIEW_ID=$(uuidgen | tr '[:upper:]' '[:lower:]' | head -c 8)
 
 # Run built-in code review against main branch, capture output
-codex review --base main \
-  "Review this diff. Focus on:
-1. Correctness — will these changes achieve the stated goals?
-2. Bugs — race conditions, null propagation, off-by-ones, stale state
-3. Security — trust boundaries, injection, auth bypass, secrets exposure
-4. Edge cases — what inputs or states would break this?
-5. Missing work — anything the diff should have changed but didn't?
-
-Classify each finding as P1 (critical), P2 (high), or P3 (medium).
-Any P1 finding = FAIL.
-
-End with exactly: VERDICT: PASS or VERDICT: FAIL" \
-  2>&1 | tee /tmp/second-opinion-review-${REVIEW_ID}.txt
+codex review --base main 2>&1 | tee /tmp/second-opinion-review-${REVIEW_ID}.txt
 ```
+
+`codex review` runs an opinionated code review automatically — custom review instructions cannot be passed alongside `--base`. For custom-prompted reviews, use Mode 3 (consult) with an explicit `git diff` command.
 
 To review uncommitted changes instead of the branch diff:
 
 ```bash
-codex review --uncommitted \
-  "Review these uncommitted changes. [same instructions as above]" \
-  2>&1 | tee /tmp/second-opinion-review-${REVIEW_ID}.txt
+codex review --uncommitted 2>&1 | tee /tmp/second-opinion-review-${REVIEW_ID}.txt
 ```
 
 ### For a plan file

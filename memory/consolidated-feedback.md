@@ -23,6 +23,7 @@ type: feedback
 13. Subagent prompts must explicitly override inherited CLAUDE.md rules that conflict with the subagent's role. Agents cannot infer exemptions from context.
 14. Do not pause for user confirmation between severity phases during scan-fix workflows. Print a progress summary, then continue automatically. User has Esc to interrupt.
 15. When diagnosing behavioral issues, try identity framing and named rationalizations first (prompt-craft tiers 1-2). Only escalate to prohibitions and restructuring if those don't hold.
+16. Delegation is the default, not a choice. Do NOT offer self-execution as an option ("should I just execute directly?"). Spec clarity determines model tier (haiku vs sonnet), not whether to delegate. Named rationalization: "the spec is already clear."
 
 ## Case Study Principles
 

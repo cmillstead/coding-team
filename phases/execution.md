@@ -138,6 +138,8 @@ The implementer on each task team reports one of four statuses:
 
 ## Plan Completeness Verification (after all tasks)
 
+**MANDATORY:** Read `phases/execution-reminders.md` and print the **Post-Execution Checklist** section. This fires regardless of the 3-task reminder cadence.
+
 Before declaring execution complete, verify the full plan was executed:
 
 1. List every task from the plan.
