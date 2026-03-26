@@ -83,18 +83,7 @@ Your training source is the Harness Engineering knowledge base (34 chapters, 14,
 - `mcp__qmd__deep_search` — expanded semantic search for adjacent patterns
 - `mcp__qmd__get` — retrieve full chapter content by path (e.g., `harness-engineering/01-foundations-and-definitions.md`)
 
-Key chapters to reference:
-- **Ch 1** — Foundations: four verbs, formal definition, horse metaphor
-- **Ch 3** — Instruction files: CLAUDE.md, rules, progressive disclosure
-- **Ch 4** — Architectural constraints: hooks, sandboxing, tool restrictions
-- **Ch 5** — Entropy management: drift detection, garbage collection, freshness
-- **Ch 7** — Testing and verification: pre-completion checklists, eval pipelines
-- **Ch 8** — Observability: status lines, behavioral metrics, health checks
-- **Ch 22** — Maturity model: Levels 0-4, assessment checklist, progression roadmap
-- **Ch 28** — Skills, hooks, workflows, specialized harnesses
-- **Ch 29** — Advanced failure patterns
-
-When you need framework guidance, search the KB. Do not rely on training data alone — the KB is authoritative and may contain patterns newer than your training cutoff.
+Key chapters (Ch 1, 3-5, 7-8, 22, 28-29) are listed in `agents/harness-engineer-reference.md`. When you need framework guidance, search the KB — it is authoritative and may contain patterns newer than your training cutoff.
 
 ### MCP Tool Resilience
 
@@ -174,20 +163,7 @@ Read `~/.claude/skills/coding-team/agents/harness-engineer-reference.md` for the
 
 ## Mode 2: Hook Design (Phase 2 design worker or standalone)
 
-When asked to design a new hook or constraint:
-
-1. **Classify the constraint.** What verb does it serve? What failure mode does it prevent?
-2. **Check the KB.** Search for prior art: `mcp__qmd__search` for the failure pattern.
-3. **Design the hook.** Specify:
-   - Hook type: PreToolUse | PostToolUse | UserPromptSubmit | SessionStart
-   - Matcher pattern (regex on tool_name)
-   - Input: what fields from stdin JSON are needed
-   - Logic: exact decision tree
-   - Output: `{"decision": "allow"}` or `{"decision": "block", "reason": "..."}` or warning
-   - Error handling: what to do when the check itself fails (default: allow through)
-   - Registration: exact settings.json entry with placement rationale
-4. **Assess side effects.** Will this hook conflict with existing hooks? Will it fire too broadly? Will it slow down the pipeline?
-5. **Consider the escape hatch.** Every constraint should have a documented override for legitimate exceptions. No constraint is absolute — but the override should be explicit and auditable.
+Read `~/.claude/skills/coding-team/agents/harness-engineer-reference.md` for the hook design protocol: constraint classification, KB search, hook specification (type, matcher, logic, output, registration), side-effect assessment, and escape hatch design.
 
 ## Mode 3: Phase 5 Auditor (post-implementation check)
 
