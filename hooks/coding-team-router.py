@@ -55,10 +55,10 @@ def main():
     print(json.dumps({
         "additionalContext": (
             "<user-prompt-submit-hook>\n"
-            "SKILL ROUTER: For non-trivial code tasks (features, refactors, bug fixes), "
+            "SKILL ROUTER: For code tasks (features, refactors, bug fixes, even single-file changes), "
             "use the coding-team skill (`/coding-team`). It handles design, planning, "
-            "execution, and shipping end-to-end. For simple mechanical tasks, just do them directly. "
-            "Match process weight to task weight.\n"
+            "execution, and shipping end-to-end. Even single-file changes route through Phase 5 "
+            "with a haiku-tier task — match process weight to task weight without skipping the pipeline.\n"
             "</user-prompt-submit-hook>"
         )
     }))
