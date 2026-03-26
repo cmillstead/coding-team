@@ -13,14 +13,16 @@ Main Claude presents the synthesized design doc. Get explicit approval. Revise i
 
 1. Run: `command -v codex >/dev/null 2>&1` to check if Codex CLI is available.
 2. Check if the spec introduces new architecture: new services, new data flows, new external integrations, or new database schemas.
-3. If Codex is available AND new architecture detected, offer:
+3. **If Codex is available**, ALWAYS offer — architecture signals determine the framing, not whether to ask:
 
-> `/second-opinion consult` on the spec before planning? Catching architectural issues here is cheaper than after the plan is written. (Y/n)
+> [If new architecture detected: "This spec introduces new [services/data flows/integrations]. "]
+> [If no new architecture: ""]
+> `/second-opinion consult` on the spec before planning? Catching issues here is cheaper than after the plan is written. (Y/n)
 
    - User says yes: run `/second-opinion consult "Review this design spec for architectural risks, missing edge cases, and unstated assumptions: <spec-file-path>"`. After review, continue to step 5.
    - User says no: continue to step 5.
 
-If Codex is not available or no new architecture detected, skip silently.
+If Codex is not available, skip silently.
 
 5. Only proceed to Phase 4 after user confirms the written spec
 

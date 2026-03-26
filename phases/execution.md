@@ -86,12 +86,16 @@ For each task in plan:
      - Do NOT make implementer read plan file — provide full text
   3. Handle implementer status (see Implementer Status Protocol below)
 
-  COMPLETENESS CHECK
-  4. Compare implementer's output against every step in the task.
-     For each step: was it done, skipped, or partially done?
-     If ANY step was skipped or partially done without explanation:
-     → re-dispatch implementer with "you missed steps X, Y — complete them"
+  COMPLETENESS CHECK (MANDATORY — do NOT skip under context pressure)
+  4. Compare implementer's output against every step AND every enumerated item in the task.
+     a. Count the items in the task spec (files to modify, hooks to migrate, tests to write, etc.)
+     b. Count the items the implementer reports as completed
+     c. If report_count < spec_count: re-dispatch with "you processed M of N items — complete the remaining: [list missing items]"
+     d. For each step: was it done, skipped, or partially done?
+     e. If ANY step was skipped or partially done without explanation:
+        → re-dispatch implementer with "you missed steps X, Y — complete them"
      Do NOT proceed to audit with incomplete work.
+     Known rationalization: "The agent reported DONE so it must be complete" — DONE is a claim, not evidence. Verify the count.
 
   AUDIT PASS
   Read `phases/audit-loop.md` and follow its instructions for the audit pass.

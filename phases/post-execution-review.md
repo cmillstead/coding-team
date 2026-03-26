@@ -14,13 +14,14 @@ After all tasks are executed and verified:
 
 2. Run: `command -v codex >/dev/null 2>&1` to check if Codex CLI is available.
 
-3. **If ANY risk signal fired AND Codex is available**, print this VERBATIM (substitute actual values), then STOP — do not print anything after this block. Your next message depends on the user's answer:
+3. **If Codex is available**, ALWAYS offer second opinion — risk signals determine the framing, not whether to ask. Print this VERBATIM (substitute actual values), then STOP — do not print anything after this block. Your next message depends on the user's answer:
 
 > ---
 >
 > **All tasks executed and verified.**
 >
-> This diff [changes N files / touches security-sensitive code / modifies CC instructions / etc.].
+> [If risk signals fired: "This diff [changes N files / touches security-sensitive code / modifies CC instructions / etc.]."]
+> [If no risk signals: "Clean diff — N files changed."]
 >
 > Run Codex on the full diff? Options: **review** / **challenge** (adversarial — recommended for security-sensitive changes) / **both** / **skip**
 >
@@ -38,7 +39,7 @@ After all tasks are executed and verified:
    - After fixes, re-run Codex to verify. Only proceed when findings are resolved.
    - If no P1/P2 findings (only P3 or clean): continue with step 4.
 
-4. **If no risk signals fired OR Codex not available OR Codex review done with findings resolved**, print this VERBATIM:
+4. **If Codex not available OR Codex review done with findings resolved**, print this VERBATIM:
 
 > ---
 >
