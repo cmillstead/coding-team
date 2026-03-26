@@ -6,11 +6,19 @@ When an Edit is attempted on a file not Read in the last 30 tool calls,
 emits an advisory warning. Never blocks — decision is always "allow".
 """
 
+import hashlib
 import json
-import sys
 import os
+import sys
 
-STATE_FILE = '/tmp/claude-reread-tracker.json'
+
+def _get_state_file():
+    session_id = os.environ.get("CLAUDE_SESSION_ID", os.environ.get("SESSION_ID", "default"))
+    h = hashlib.sha256(session_id.encode()).hexdigest()[:12]
+    return f'/tmp/claude-reread-tracker-{h}.json'
+
+
+STATE_FILE = _get_state_file()
 STALENESS_THRESHOLD = 30
 
 

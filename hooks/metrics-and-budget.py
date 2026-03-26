@@ -1,42 +1,93 @@
 #!/usr/bin/env python3
-"""Claude Code PostToolUse hook: warn when context budget is high.
+"""Claude Code PostToolUse hook: log tool usage metrics and warn on context budget.
 
-Monitors context utilization percentage and injects warnings about
-compaction and context management when thresholds are exceeded.
+Consolidates metrics-logger.py and context-budget-warning.py into a single hook.
 
-Thresholds (from Ch. 3 of The Harness Engineering Playbook):
-- 70%: gentle reminder to be concise
+Metrics logging runs first (always, never blocks, never fails).
+Context budget check runs second and emits advisory warnings at thresholds.
+
+Context budget thresholds:
+- 50%: gentle reminder to be concise
+- 70%: stronger conciseness reminder
 - 85%: strong warning, suggest compaction
 - 95%: critical, demand immediate compaction
 
-Data sources checked (in priority order):
-1. Event payload fields (e.g., context_window_usage, token_count) — from stdin JSON
+Context data sources (in priority order):
+1. Event payload fields (future-proofing)
 2. Environment variables: CLAUDE_CONTEXT_PERCENT, CONTEXT_PERCENT, CLAUDE_CONTEXT_USAGE
-3. Temp file: /tmp/claude-context-percent.txt (written by external tooling)
-4. Tool call count heuristic — counts tool calls in metrics-logger JSONL for the
-   current session and maps to an estimated context percentage.
-
-KNOWN_LIMITATION:
-    As of March 2026, Claude Code does not expose context window usage to hooks
-    via the event payload, environment variables, or any documented mechanism.
-    Sources 1-3 will return None in practice. Source 4 provides an imprecise but
-    working heuristic based on tool call count, giving the hook a live signal
-    even without official context exposure.
+3. Temp file: /tmp/claude-context-percent.txt
+4. Tool call count heuristic from metrics JSONL
 """
+
+import os, sys
+sys.path.insert(0, os.path.dirname(__file__))
 
 import hashlib
 import json
-import os
-import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+
+from _lib import event as _event
+from _lib import output as _output
 
 # Skip-interval: only re-parse JSONL every 10th tool call to avoid O(n^2)
 _CACHE_RECOMPUTE_INTERVAL = 10
 
 
-def _cache_path() -> Path | None:
+# ---------------------------------------------------------------------------
+# Metrics logging
+# ---------------------------------------------------------------------------
+
+def _extract_file(tool_input):
+    """Extract file path from tool_input if available."""
+    if not tool_input or not isinstance(tool_input, dict):
+        return None
+    # Direct file_path field (Read, Edit, Write)
+    if "file_path" in tool_input:
+        return tool_input["file_path"]
+    # Command field — extract first path-like argument
+    if "command" in tool_input:
+        parts = tool_input["command"].split()
+        for part in parts:
+            if part.startswith("/"):
+                return part
+    # Pattern field (Glob)
+    if "pattern" in tool_input and "path" in tool_input:
+        return tool_input["path"]
+    return None
+
+
+def _log_metrics(event_data):
+    """Write JSONL metric record. Wraps entire body in try/except — must never fail."""
+    try:
+        tool_name = event_data.get("tool_name", "unknown")
+        tool_input = event_data.get("tool_input", {})
+
+        metrics_dir = os.path.expanduser("~/.claude/metrics")
+        os.makedirs(metrics_dir, exist_ok=True)
+
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        log_path = os.path.join(metrics_dir, f"tool-usage-{today}.jsonl")
+
+        record = {
+            "ts": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "tool": tool_name,
+            "file": _extract_file(tool_input),
+            "session": os.environ.get("CLAUDE_SESSION_ID", "unknown"),
+        }
+
+        with open(log_path, "a") as f:
+            f.write(json.dumps(record) + "\n")
+    except Exception:
+        pass
+
+
+# ---------------------------------------------------------------------------
+# Context budget warning
+# ---------------------------------------------------------------------------
+
+def _cache_path():
     """Return session-specific cache file path, or None if no session."""
     session_id = os.environ.get("CLAUDE_SESSION_ID", "")
     if not session_id:
@@ -45,7 +96,7 @@ def _cache_path() -> Path | None:
     return Path(f"/tmp/claude-context-budget-cache-{session_hash}.json")
 
 
-def _read_cache(cache_file: Path) -> dict | None:
+def _read_cache(cache_file):
     """Read cached estimate if it exists and is valid JSON."""
     try:
         with open(cache_file) as f:
@@ -54,7 +105,7 @@ def _read_cache(cache_file: Path) -> dict | None:
         return None
 
 
-def _write_cache(cache_file: Path, estimate: float, tool_count: int) -> None:
+def _write_cache(cache_file, estimate, tool_count):
     """Write estimate to cache file."""
     try:
         with open(cache_file, "w") as f:
@@ -63,20 +114,16 @@ def _write_cache(cache_file: Path, estimate: float, tool_count: int) -> None:
         pass  # cache write failure is non-fatal
 
 
-def estimate_from_tool_count() -> float | None:
+def _estimate_from_tool_count():
     """Estimate context usage from tool call count in current session.
 
     Uses a skip-interval cache: only re-parses the JSONL file every 10th
-    tool call. Between parses, returns the cached estimate. This reduces
-    the cost from O(n^2) over a session to O(n).
+    tool call. Between parses, returns the cached estimate.
 
     Calibration assumptions (1M token window, Opus 4.6):
     - Average tool call consumes ~1000 tokens (input + output + reasoning)
-    - 200 calls ~ 20% (200K tokens)
-    - 500 calls ~ 50% (500K tokens)
-    - 700 calls ~ 70% (700K tokens)
-    - 850 calls ~ 85% (850K tokens)
-    - 950 calls ~ 95% (approaching limit)
+    - 200 calls ~ 20%, 500 calls ~ 50%, 700 calls ~ 70%
+    - 850 calls ~ 85%, 950 calls ~ 95%
 
     Returns None if metrics directory doesn't exist or no data for session.
     """
@@ -94,9 +141,6 @@ def estimate_from_tool_count() -> float | None:
         cached = _read_cache(cache_file)
         if cached is not None:
             cached_count = cached.get("tool_count", 0)
-            # Return cached value if fewer than 10 calls since last compute.
-            # We don't know the exact current count yet, but we can use a
-            # lightweight line count as a proxy to decide whether to recompute.
             today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
             log_path = metrics_dir / f"tool-usage-{today}.jsonl"
             if log_path.exists():
@@ -135,7 +179,6 @@ def estimate_from_tool_count() -> float | None:
         return None  # too few calls to estimate meaningfully
 
     # Linear mapping: 0 calls = 0%, 1000 calls = 95% (calibrated for 1M token window)
-    # Capped at 95% since we can't know the exact limit
     estimated = min(95.0, (count / 1000.0) * 95.0)
 
     # Save to cache for skip-interval optimization
@@ -145,30 +188,18 @@ def estimate_from_tool_count() -> float | None:
     return estimated
 
 
-def get_context_percent(event: dict) -> float | None:
+def _get_context_percent(event_data):
     """Try to read context utilization from available sources.
 
-    Args:
-        event: The PostToolUse event payload from stdin.
-
-    Returns:
-        Context usage as a float percentage (0-100), or None if unavailable.
-
     Sources checked (in order):
-        1. Event payload — future-proofing for when Claude Code exposes context
-           usage in hook events. Checks: context_window_usage, context_percent,
-           token_usage.percent, session.context_percent.
-        2. Environment variables — CLAUDE_CONTEXT_PERCENT, CONTEXT_PERCENT,
-           CLAUDE_CONTEXT_USAGE. Not currently set by Claude Code.
-        3. Temp file — /tmp/claude-context-percent.txt. Can be written by
-           external monitoring (e.g., statusline scripts).
-        4. Tool call count heuristic — counts tool calls from metrics-logger
-           JSONL for the current session. Imprecise but provides a working
-           signal when no other source is available.
+        1. Event payload fields
+        2. Environment variables
+        3. Temp file /tmp/claude-context-percent.txt
+        4. Tool call count heuristic
     """
     # Source 1: Event payload fields (not currently populated by Claude Code)
     for field in ["context_window_usage", "context_percent", "context_usage"]:
-        val = event.get(field)
+        val = event_data.get(field)
         if val is not None:
             try:
                 return float(val)
@@ -176,7 +207,7 @@ def get_context_percent(event: dict) -> float | None:
                 continue
 
     # Check nested structures that Claude Code might use in the future
-    token_usage = event.get("token_usage", {})
+    token_usage = event_data.get("token_usage", {})
     if isinstance(token_usage, dict):
         pct = token_usage.get("percent")
         if pct is not None:
@@ -185,7 +216,7 @@ def get_context_percent(event: dict) -> float | None:
             except (TypeError, ValueError):
                 pass
 
-    session = event.get("session", {})
+    session = event_data.get("session", {})
     if isinstance(session, dict):
         pct = session.get("context_percent")
         if pct is not None:
@@ -210,60 +241,56 @@ def get_context_percent(event: dict) -> float | None:
     except (FileNotFoundError, ValueError):
         pass
 
-    # Source 4: Heuristic from tool call count (via metrics-logger JSONL)
-    # Imprecise but provides a working signal when no other source is available.
-    # Calibration: based on 1M context window (Opus 4.6), ~1K tokens per tool call average.
-    estimated = estimate_from_tool_count()
+    # Source 4: Heuristic from tool call count (via metrics JSONL)
+    estimated = _estimate_from_tool_count()
     if estimated is not None:
         return estimated
 
     return None
 
 
-def main():
-    try:
-        event = json.load(sys.stdin)
-    except (json.JSONDecodeError, ValueError):
-        return  # malformed input, skip silently
-
-    pct = get_context_percent(event)
+def _check_context_budget(event_data):
+    """Check context budget and emit advisory warning if threshold exceeded."""
+    pct = _get_context_percent(event_data)
     if pct is None:
         return  # can't determine context usage, skip silently
 
     if pct >= 95:
-        print(json.dumps({
-            "decision": "allow",
-            "reason": (
-                "You are a context-preservation agent. Context at {:.0f}% — output quality is actively degrading.\n\n"
-                "Write a handoff file to /tmp/claude-handoff-{{session}}.md containing: current task, files modified, decisions made, what remains.\n\n"
-                "Known rationalization: 'I'm almost done, one more edit' — this is the #1 cause of incoherent output. Stop and preserve state now."
-            ).format(pct),
-        }))
+        _output.advisory(
+            "You are a context-preservation agent. Context at {:.0f}% — output quality is actively degrading.\n\n"
+            "Write a handoff file to /tmp/claude-handoff-{{session}}.md containing: current task, files modified, decisions made, what remains.\n\n"
+            "Known rationalization: 'I'm almost done, one more edit' — this is the #1 cause of incoherent output. Stop and preserve state now.".format(pct)
+        )
     elif pct >= 85:
-        print(json.dumps({
-            "decision": "allow",
-            "reason": (
-                "You are a context-preservation agent. Context at {:.0f}% — write critical state to /tmp/claude-handoff-{{session}}.md now: "
-                "current task, files modified, decisions made, what remains. "
-                "Delegate remaining exploratory work to subagents via the Agent tool to avoid filling this window."
-            ).format(pct),
-        }))
+        _output.advisory(
+            "You are a context-preservation agent. Context at {:.0f}% — write critical state to /tmp/claude-handoff-{{session}}.md now: "
+            "current task, files modified, decisions made, what remains. "
+            "Delegate remaining exploratory work to subagents via the Agent tool to avoid filling this window.".format(pct)
+        )
     elif pct >= 70:
-        print(json.dumps({
-            "decision": "allow",
-            "reason": (
-                "You are a concise communicator. Context at {:.0f}% — no recaps, no restating what the user said. "
-                "Use codesight-mcp search_text instead of the Read tool for targeted lookups."
-            ).format(pct),
-        }))
+        _output.advisory(
+            "You are a concise communicator. Context at {:.0f}% — no recaps, no restating what the user said. "
+            "Use codesight-mcp search_text instead of the Read tool for targeted lookups.".format(pct)
+        )
     elif pct >= 50:
-        print(json.dumps({
-            "decision": "allow",
-            "reason": (
-                "You are a concise communicator. Context at {:.0f}% — start being concise. "
-                "Shorter explanations, less recapping, no restating what the user said."
-            ).format(pct),
-        }))
+        _output.advisory(
+            "You are a concise communicator. Context at {:.0f}% — start being concise. "
+            "Shorter explanations, less recapping, no restating what the user said.".format(pct)
+        )
+
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
+
+def main():
+    event_data = _event.parse_event()
+
+    # Metrics logging runs first — always, never blocks, never fails
+    _log_metrics(event_data)
+
+    # Context budget check — emits advisory warnings at thresholds
+    _check_context_budget(event_data)
 
 
 if __name__ == "__main__":

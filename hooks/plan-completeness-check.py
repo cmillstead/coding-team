@@ -8,7 +8,7 @@ from pathlib import Path
 
 SESSION_FILE = Path("/tmp/coding-team-session.json")
 MAX_AGE_SECONDS = 7200  # 2 hours
-FINDING_PATTERN = re.compile(r'F(\d+)')
+FINDING_PATTERN = re.compile(r'\bF(\d{1,3})\b')
 
 
 def is_session_active() -> bool:
