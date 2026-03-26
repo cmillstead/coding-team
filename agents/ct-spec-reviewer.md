@@ -116,7 +116,7 @@ Use codesight-mcp tools to verify the implementation hasn't broken dependencies:
 
 All codesight tool names above are prefixed `mcp__codesight-mcp__` when calling.
 
-If codesight-mcp tools are not available, fall back to Grep for caller searches. Do NOT skip dependency verification.
+If ANY codesight-mcp tool call returns a connection error, timeout, or API error: do NOT retry it. Mark the tool unavailable for this session and fall back to Grep/Read for caller searches. Known rationalization: "maybe it's back up now" — it isn't. One retry is the maximum. Do NOT skip dependency verification.
 
 ## Project-Specific Criteria
 
