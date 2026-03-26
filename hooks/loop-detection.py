@@ -112,22 +112,35 @@ def classify_failure(stdout, stderr):
 
 
 def build_recovery_message(pattern, count, category):
-    header = f"DOOM LOOP DETECTED: '{pattern}' failed {count} times in 5 minutes.\n\nSTOP RETRYING the same approach."
+    header = (
+        f"You are a recovery strategist. '{pattern}' has failed {count} times in 5 minutes "
+        f"— retrying the same approach will fail again.\n\n"
+        f"Known rationalization: 'This attempt is slightly different' — it is not. "
+        f"The failure pattern is identical."
+    )
     if category != "unknown" and category in FAILURE_PATTERNS:
         strategies = "\n".join(FAILURE_PATTERNS[category]["strategies"])
-        return f"{header}\n\nFailure type: {category.upper()}\n\nTry these alternatives:\n{strategies}\n\nIf none of these work after 1 attempt each, ask the user for guidance."
+        return (
+            f"{header}\n\nFailure type: {category.upper()}\n\n"
+            f"Your next action MUST be one of these alternatives:\n{strategies}\n\n"
+            f"If none work after 1 attempt each, ask the user."
+        )
     return (
-        f"{header}\n\nFailure type: UNKNOWN\n\nRecovery steps:\n"
+        f"{header}\n\nFailure type: UNKNOWN\n\n"
+        f"Your next action MUST be one of:\n"
         f"1. Describe what you were trying to achieve (the GOAL, not the command)\n"
         f"2. List the {count} approaches you already tried\n"
         f"3. Identify what changed between working and broken state\n"
         f"4. Try ONE different approach (different tool, different path, different method)\n"
-        f"5. If that fails too, ask the user for guidance — do not guess further"
+        f"5. If that fails too, ask the user — do not guess further"
     )
 
 
 def main():
-    event = json.load(sys.stdin)
+    try:
+        event = json.load(sys.stdin)
+    except (json.JSONDecodeError, ValueError):
+        return
     tool_name = event.get("tool_name", "")
     if tool_name != "Bash":
         return

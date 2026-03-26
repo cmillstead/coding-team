@@ -24,19 +24,51 @@ KNOWN_LIMITATION:
     even without official context exposure.
 """
 
+import hashlib
 import json
 import os
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
+
+# Skip-interval: only re-parse JSONL every 10th tool call to avoid O(n^2)
+_CACHE_RECOMPUTE_INTERVAL = 10
+
+
+def _cache_path() -> Path | None:
+    """Return session-specific cache file path, or None if no session."""
+    session_id = os.environ.get("CLAUDE_SESSION_ID", "")
+    if not session_id:
+        return None
+    session_hash = hashlib.sha256(session_id.encode()).hexdigest()[:12]
+    return Path(f"/tmp/claude-context-budget-cache-{session_hash}.json")
+
+
+def _read_cache(cache_file: Path) -> dict | None:
+    """Read cached estimate if it exists and is valid JSON."""
+    try:
+        with open(cache_file) as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return None
+
+
+def _write_cache(cache_file: Path, estimate: float, tool_count: int) -> None:
+    """Write estimate to cache file."""
+    try:
+        with open(cache_file, "w") as f:
+            json.dump({"estimate": estimate, "tool_count": tool_count, "ts": int(time.time())}, f)
+    except OSError:
+        pass  # cache write failure is non-fatal
 
 
 def estimate_from_tool_count() -> float | None:
     """Estimate context usage from tool call count in current session.
 
-    Reads metrics-logger JSONL for today, counts tool calls matching
-    the current session ID. Maps count to estimated percentage using
-    a conservative linear model.
+    Uses a skip-interval cache: only re-parses the JSONL file every 10th
+    tool call. Between parses, returns the cached estimate. This reduces
+    the cost from O(n^2) over a session to O(n).
 
     Calibration assumptions (200K token window):
     - Average tool call consumes ~1000 tokens (input + output + reasoning)
@@ -54,6 +86,27 @@ def estimate_from_tool_count() -> float | None:
     session_id = os.environ.get("CLAUDE_SESSION_ID", "")
     if not session_id:
         return None
+
+    # Check cache before expensive JSONL parse
+    cache_file = _cache_path()
+    if cache_file is not None:
+        cached = _read_cache(cache_file)
+        if cached is not None:
+            cached_count = cached.get("tool_count", 0)
+            # Return cached value if fewer than 10 calls since last compute.
+            # We don't know the exact current count yet, but we can use a
+            # lightweight line count as a proxy to decide whether to recompute.
+            today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+            log_path = metrics_dir / f"tool-usage-{today}.jsonl"
+            if log_path.exists():
+                try:
+                    with open(log_path) as f:
+                        # Count lines cheaply (no JSON parsing)
+                        line_count = sum(1 for _ in f)
+                    if line_count - cached_count < _CACHE_RECOMPUTE_INTERVAL:
+                        return cached.get("estimate")
+                except OSError:
+                    pass
 
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     log_path = metrics_dir / f"tool-usage-{today}.jsonl"
@@ -83,6 +136,11 @@ def estimate_from_tool_count() -> float | None:
     # Linear mapping: 0 calls = 0%, 200 calls = 95%
     # Capped at 95% since we can't know the exact limit
     estimated = min(95.0, (count / 200.0) * 95.0)
+
+    # Save to cache for skip-interval optimization
+    if cache_file is not None:
+        _write_cache(cache_file, estimated, count)
+
     return estimated
 
 
@@ -175,29 +233,26 @@ def main():
         print(json.dumps({
             "decision": "allow",
             "reason": (
-                "CRITICAL: Context window is at {:.0f}%. You are about to lose coherence.\n\n"
-                "IMMEDIATELY:\n"
-                "1. Write key decisions and current state to a NOTES.md or PLANS.md file\n"
-                "2. Request /compact or manual compaction\n"
-                "3. After compaction, re-read NOTES.md to restore context\n\n"
-                "Do NOT continue working without compaction — context rot is degrading your output quality."
+                "You are a context-preservation agent. Context at {:.0f}% — output quality is actively degrading.\n\n"
+                "Write a handoff file to /tmp/claude-handoff-{{session}}.md containing: current task, files modified, decisions made, what remains.\n\n"
+                "Known rationalization: 'I'm almost done, one more edit' — this is the #1 cause of incoherent output. Stop and preserve state now."
             ).format(pct),
         }))
     elif pct >= 85:
         print(json.dumps({
             "decision": "allow",
             "reason": (
-                "WARNING: Context window at {:.0f}%. Quality may degrade.\n"
-                "Consider: save important state to a file, then compact. "
-                "Use sub-agents for remaining exploratory work to avoid filling this window further."
+                "You are a context-preservation agent. Context at {:.0f}% — write critical state to /tmp/claude-handoff-{{session}}.md now: "
+                "current task, files modified, decisions made, what remains. "
+                "Delegate remaining exploratory work to subagents via the Agent tool to avoid filling this window."
             ).format(pct),
         }))
     elif pct >= 70:
         print(json.dumps({
             "decision": "allow",
             "reason": (
-                "Context at {:.0f}%. Be concise — avoid loading unnecessary files. "
-                "Use codesight-mcp tools instead of reading full files when possible."
+                "You are a concise communicator. Context at {:.0f}% — no recaps, no restating what the user said. "
+                "Use codesight-mcp search_text instead of the Read tool for targeted lookups."
             ).format(pct),
         }))
 

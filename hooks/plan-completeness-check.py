@@ -61,8 +61,10 @@ def main():
         print(json.dumps({
             "decision": "allow",
             "reason": (
-                f"COMPLETENESS WARNING: Agent output covers {len(found)}/{len(input_findings)} "
-                f"findings. Missing: {missing_list}. Re-check agent output before accepting."
+                f"COMPLETENESS GATE: Agent covered {len(found)}/{len(input_findings)} findings. "
+                f"Missing: {missing_list}. Re-dispatch the Agent tool for missing findings specifically — "
+                f"do not accept partial coverage. "
+                f"Known rationalization: 'The missing ones are minor' — all assigned findings must be addressed."
             ),
         }))
 

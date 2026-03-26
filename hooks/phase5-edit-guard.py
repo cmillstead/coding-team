@@ -110,7 +110,11 @@ def main():
     # Code file during execution phase — warn
     print(json.dumps({
         "decision": "allow",
-        "reason": f"WARNING: Orchestrator is using {tool_name} on code file during Phase 5 (execution). Code changes should be delegated to agents. File: {file_path}"
+        "reason": (
+            f"You are the orchestrator. During execution phase, you delegate code changes — you do not make them directly. "
+            f"Use the Agent tool to dispatch this edit of {file_path}. "
+            f"Known rationalization: 'It's a small change, faster to do it myself' — size does not exempt delegation rules."
+        ),
     }))
 
 
