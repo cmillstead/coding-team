@@ -81,3 +81,67 @@ class TestSkillWithEmptyOutput:
         assert result.parsed is not None
         assert result.parsed["decision"] == "allow"
         assert "no output" in result.parsed["reason"].lower() or "silent failure" in result.parsed["reason"].lower()
+
+
+class TestStructureNotBehaviorDetection:
+    """Case study #22: detect tests that read source files as text instead of calling functions."""
+
+    def test_open_read_triggers_warning(self, run_hook, make_event):
+        """Output containing open('module.py').read() should trigger structure-not-behavior advisory."""
+        event = make_event(
+            "Skill",
+            skill="coding-team",
+            tool_result={
+                "stdout": 'content = open("module.py", "r").read()\nassert "def main" in content',
+                "exit_code": 0,
+            },
+        )
+        result = run_hook("agent-quality-tracker.py", event)
+        assert result.parsed is not None
+        assert result.parsed["decision"] == "allow"
+        assert "structure-not-behavior" in result.parsed["reason"].lower()
+        assert "Case study #22" in result.parsed["reason"]
+
+    def test_path_read_text_triggers_warning(self, run_hook, make_event):
+        """Output containing Path('src/foo.py').read_text() should trigger advisory."""
+        event = make_event(
+            "Skill",
+            skill="coding-team",
+            tool_result={
+                "stdout": 'source = Path("src/foo.py").read_text()\nassert "class Foo" in source',
+                "exit_code": 0,
+            },
+        )
+        result = run_hook("agent-quality-tracker.py", event)
+        assert result.parsed is not None
+        assert result.parsed["decision"] == "allow"
+        assert "structure-not-behavior" in result.parsed["reason"].lower()
+
+    def test_normal_behavioral_assert_no_warning(self, run_hook, make_event):
+        """Output with normal assert result == expected should NOT trigger the warning."""
+        event = make_event(
+            "Skill",
+            skill="coding-team",
+            tool_result={
+                "stdout": "result = add(2, 3)\nassert result == 5\nAll tests passed.",
+                "exit_code": 0,
+            },
+        )
+        result = run_hook("agent-quality-tracker.py", event)
+        # Should be silent — no advisory for behavioral tests
+        assert result.parsed is None or "structure-not-behavior" not in (result.parsed or {}).get("reason", "").lower()
+
+    def test_assert_string_in_content_triggers_warning(self, run_hook, make_event):
+        """Output containing assert 'def main' in content should trigger advisory."""
+        event = make_event(
+            "Skill",
+            skill="coding-team",
+            tool_result={
+                "stdout": 'content = read_file("app.py")\nassert "def main" in content',
+                "exit_code": 0,
+            },
+        )
+        result = run_hook("agent-quality-tracker.py", event)
+        assert result.parsed is not None
+        assert result.parsed["decision"] == "allow"
+        assert "structure-not-behavior" in result.parsed["reason"].lower()
