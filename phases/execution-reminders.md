@@ -52,7 +52,7 @@ After the LAST task in the plan passes its audit, print this checklist VERBATIM 
 > **All {N} tasks complete.** Before Phase 6, these steps are MANDATORY:
 >
 > 1. **Full-suite verification** — Run complete test suite + linter. All must pass.
-> 2. **Feature-Level QA Review** — Dispatch `ct-qa-reviewer` per `execution.md` lines 150-170. Skip ONLY if 1 task AND ≤3 files changed.
+> 2. **Feature-Level QA Review** — Dispatch `ct-qa-reviewer` per the "Feature-Level QA Review" section in `execution.md`. Skip ONLY if 1 task AND ≤3 files changed.
 > 3. **Doc-drift scan** — Read `phases/doc-drift-scan.md` and follow.
 > 4. **Post-execution review** — Read `phases/post-execution-review.md` and follow (risk signals + second-opinion gate).
 >

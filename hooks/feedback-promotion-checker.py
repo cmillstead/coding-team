@@ -51,6 +51,17 @@ ENFORCEMENT_MAP = {
     "feedback-mcp-retry-spiral": "rule:mcp-resilience",
     "feedback-enumerated-item-completion": "hook:deliverable-correction",
     "feedback-context-saturation": "hook:context-budget-warning",
+    "feedback-dark-features": "rule:dark-features",
+    "feedback-precomputation": "rule:precomputation",
+    "feedback-chunk-taxonomy-work": "rule:chunk-taxonomy-work",
+    "feedback-multi-pass-audit-pattern": "rule:multi-pass-audit",
+    "feedback-doc-level-edits-rationalization": "hook:write-guard",
+    "feedback-track-artifacts-in-repo": "hook:track-artifacts-in-repo",
+    "feedback-user-path-authority": "rule:vault-path-resolution",
+    "feedback-selective-fix-rationalization": "consolidated-feedback+agent-prompt",
+    "feedback-ship-vs-release": "SKILL.md:red-flags",
+    "feedback-rationalization-bypass": "hook:write-guard",
+    "feedback-agent-laziness": "hook:deliverable-correction+plan-completeness-check",
 }
 
 

@@ -167,10 +167,11 @@ class TestCheckAlreadyEnforced:
 
 class TestEnforcementMap:
     def test_all_map_entries_have_correct_prefix(self):
-        """Every ENFORCEMENT_MAP value must start with 'hook:' or 'rule:'."""
+        """Every ENFORCEMENT_MAP value must reference a known enforcer type."""
         mod = _load_module()
+        valid_prefixes = ("hook:", "rule:", "consolidated-feedback", "SKILL.md:")
         for name, enforcer in mod.ENFORCEMENT_MAP.items():
-            assert enforcer.startswith("hook:") or enforcer.startswith("rule:"), (
+            assert any(enforcer.startswith(p) for p in valid_prefixes), (
                 f"{name} has invalid enforcer prefix: {enforcer}"
             )
 
@@ -181,9 +182,9 @@ class TestEnforcementMap:
             assert name.startswith("feedback-"), f"Key missing feedback- prefix: {name}"
 
     def test_map_has_expected_size(self):
-        """ENFORCEMENT_MAP should have 13 entries."""
+        """ENFORCEMENT_MAP should have 24 entries."""
         mod = _load_module()
-        assert len(mod.ENFORCEMENT_MAP) == 13
+        assert len(mod.ENFORCEMENT_MAP) == 24
 
 
 class TestIntegration:
