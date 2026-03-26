@@ -161,6 +161,7 @@ def has_project_infrastructure() -> bool:
     return any(glob.glob(os.path.join(cwd, g)) for g in GLOB_MARKERS)
 
 
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------

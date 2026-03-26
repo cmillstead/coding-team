@@ -106,6 +106,42 @@ class TestIdentityFramingAdvisory:
                 assert "identity" in parsed["reason"].lower()
 
 
+class TestSessionTamperDetection:
+    """Test that write-guard detects session file deletion mid-session."""
+
+    def test_blocks_when_active_marker_exists_but_session_missing(self, run_hook, make_event, tmp_path):
+        """If active marker exists but session JSON is missing, block."""
+        active_marker = Path("/tmp/coding-team-active")
+        session_file = Path("/tmp/coding-team-session.json")
+
+        # Create active marker, ensure session file doesn't exist
+        active_marker.touch()
+        if session_file.exists():
+            session_file.unlink()
+
+        try:
+            event = make_event("Edit", file_path="/some/code/file.py", old_string="x", new_string="y")
+            result = run_hook("write-guard.py", event)
+            assert result.parsed is not None
+            assert result.parsed["decision"] == "block"
+            assert "session file is missing" in result.parsed["reason"].lower() or "session marker" in result.parsed["reason"].lower()
+        finally:
+            active_marker.unlink(missing_ok=True)
+
+    def test_allows_when_neither_marker_nor_session_exists(self, run_hook, make_event):
+        """If neither active marker nor session file exists, allow."""
+        active_marker = Path("/tmp/coding-team-active")
+        session_file = Path("/tmp/coding-team-session.json")
+        active_marker.unlink(missing_ok=True)
+        session_file.unlink(missing_ok=True)
+
+        event = make_event("Edit", file_path="/some/code/file.py", old_string="x", new_string="y")
+        result = run_hook("write-guard.py", event)
+        # Should not block (no session active)
+        if result.parsed:
+            assert result.parsed.get("decision") != "block" or "session" not in result.parsed.get("reason", "").lower()
+
+
 class TestNormalFileAllowed:
     def test_allows_edit_to_normal_python_file(self, run_hook, make_event):
         event = make_event(

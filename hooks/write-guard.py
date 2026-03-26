@@ -26,6 +26,7 @@ from _lib import output as _output
 # ---------------------------------------------------------------------------
 SESSION_FILE = Path("/tmp/coding-team-session.json")
 MAX_AGE_SECONDS = 2 * 60 * 60  # 2 hours
+ACTIVE_MARKER = Path("/tmp/coding-team-active")
 
 
 def is_orchestrator_file(file_path: str) -> bool:
@@ -68,6 +69,9 @@ def check_phase5(file_path: str) -> str | None:
 
     Blocks orchestrator edits to non-allowlisted files during ANY active
     coding-team session (phase 'execution' or 'active').
+
+    Tamper detection: if the active marker exists but the session JSON is
+    missing, the session file was deleted mid-session — block to maintain safety.
     """
     session, had_error = read_session()
     if had_error:
@@ -77,6 +81,17 @@ def check_phase5(file_path: str) -> str | None:
             "Delete /tmp/coding-team-session.json if no coding-team session is active."
         )
     if session is None:
+        # Session file missing — check if a session SHOULD be active
+        if ACTIVE_MARKER.exists():
+            return (
+                "BLOCKED: coding-team session file is missing but the session marker "
+                "(/tmp/coding-team-active) still exists. This suggests the session file "
+                "was deleted mid-session — blocking to maintain safety.\n\n"
+                "If the session is genuinely over, complete it through Phase 6 "
+                "(which cleans up both files via the lifecycle hook).\n\n"
+                "Known rationalization: 'The session file is blocking my edits' — "
+                "that IS the correct behavior. Delegate edits through the Agent tool."
+            )
         return None
     if session["phase"] not in ("execution", "active"):
         return None
