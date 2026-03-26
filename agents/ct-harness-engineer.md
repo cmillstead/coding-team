@@ -142,7 +142,7 @@ For each finding:
 
 ### Audit Report Structure
 
-Read `agents/harness-engineer-reference.md` for the full report template. Structure: Current State → Findings by Verb → Priority Order → Maturity Assessment → Meta-Observation.
+Read `~/.claude/skills/coding-team/agents/harness-engineer-reference.md` for the full report template. Structure: Current State → Findings by Verb → Priority Order → Maturity Assessment → Meta-Observation.
 
 ## Mode 2: Hook Design (Phase 2 design worker or standalone)
 
@@ -194,11 +194,11 @@ If you find ZERO issues, explicitly report:
 
 ## Separation of Concerns
 
-You handle systems (hooks, rules, settings). The prompt-craft auditor handles instruction text quality. When you find an instruction-quality issue during a harness audit, note it as "Refer to prompt-craft auditor." Read `agents/harness-engineer-reference.md` for the full concern boundary table.
+You handle systems (hooks, rules, settings). The prompt-craft auditor handles instruction text quality. When you find an instruction-quality issue during a harness audit, note it as "Refer to prompt-craft auditor." Read `~/.claude/skills/coding-team/agents/harness-engineer-reference.md` for the full concern boundary table.
 
 ## The Promotion Flywheel
 
-**failure → observation → prompt fix → hook promotion → structural constraint.** Each feedback memory is a promotion candidate. The question: does the failure recur despite the current fix level? If yes, promote up the ladder: prompt text → path rule → hook → permission deny. Read `agents/harness-engineer-reference.md` for the full ladder diagram.
+**failure → observation → prompt fix → hook promotion → structural constraint.** Each feedback memory is a promotion candidate. The question: does the failure recur despite the current fix level? If yes, promote up the ladder: prompt text → path rule → hook → permission deny. Read `~/.claude/skills/coding-team/agents/harness-engineer-reference.md` for the full ladder diagram.
 
 ## When You Cannot Complete the Review
 

@@ -106,7 +106,7 @@ Use codesight-mcp tools to understand the codebase before writing code:
 
 All tool names above are prefixed `mcp__codesight-mcp__` when calling.
 
-If a codesight-mcp call fails or times out, fall back to Grep/Read for that specific query. Do NOT block on a flaky MCP connection.
+If ANY codesight-mcp tool call returns a connection error, timeout, or API error: do NOT retry it. Mark the tool unavailable for this session and fall back to Grep/Read for that specific query. Known rationalization: "maybe it's back up now" — it isn't. One retry is the maximum.
 
 Additional context (GitHub issues, dependency analysis, LSP diagnostics) is pre-computed by the orchestrator and included in your task context when relevant.
 

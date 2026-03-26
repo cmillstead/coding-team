@@ -73,6 +73,15 @@ Work from: [INSERT WORKING DIRECTORY]
    - BAD: "If the failure is a lint issue, run the linter. If it's a type error..."
    - GOOD: A table with columns: Type | Signal keywords | Action
 
+## Project-Specific Criteria
+
+[INSERT PROJECT-SPECIFIC EVAL CRITERIA FROM PLAN — if the plan has a
+"Project-Specific Eval Criteria" section, paste the criteria here.
+If the plan has no such section, write "No project-specific criteria."]
+
+If project-specific criteria are listed above, verify each one against the
+instruction files. Flag violations as HIGH severity.
+
 ## Calibration
 
 Focus on instructions that will produce wrong CC behavior, not stylistic preferences.
