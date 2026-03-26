@@ -67,6 +67,11 @@ Verify the RED-GREEN cycle was real:
    - ★★  Tests correct behavior, happy path only
    - ★   Smoke test / existence check / trivial assertion
    Flag any ★ tests as needing strengthening. Note overall quality distribution in your report.
+5. **No structure tests** — flag any test that reads source files
+   (fs.readFileSync, open(), Path.read_text()) to assert on code
+   structure rather than runtime behavior. These tests verify nothing
+   about correctness. The fix: export the function, call it with real
+   inputs, assert on outputs.
 4. **Git history shows RED before GREEN** — review the git history
    provided in the `## Git History` section below. Were test commits made
    before or alongside implementation commits? (If a single commit has
