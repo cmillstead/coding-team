@@ -18,9 +18,7 @@
       "mcp__plugin_github_github__create_repository",
       "Bash(for agent:*)",
       "Bash(for hook:*)",
-      "Bash(bash scripts/deploy.sh --dry-run)",
-      "Bash(python3 -c \"import ast; ast.parse\\(open\\(''hooks/no-mocks.py''\\).read\\(\\)\\)\")",
-      "Bash(python3 hooks/phase5-edit-guard.py)"
+      "Bash(bash scripts/deploy.sh --dry-run)"
     ]
   }
 }
