@@ -105,7 +105,7 @@ Do NOT attempt code fixes for non-code failures. Do NOT retry. Do NOT dispatch a
 
 ### 3. For code failures: dispatch implementer via Agent tool
 
-Pass to the implementer (see `## CI Fix Context` in `prompts/implementer.md`):
+Pass to the implementer (see `## CI Fix Context` in `~/.claude/agents/ct-implementer.md`):
 - Failing CI step name
 - VERBATIM error output — paste the full log, not a summary
 - Files and lines mentioned in the error
