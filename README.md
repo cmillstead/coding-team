@@ -345,13 +345,15 @@ hooks/                            # Claude Code hooks (deployed to ~/.claude/hoo
   coding-team-active.py           #   marks coding-team session as active
   coding-team-done.py             #   clears active marker on skill completion
   plan-completeness-check.py      #   warns when agent output covers fewer findings than input
-  phase5-edit-guard.py            #   warns when orchestrator edits code during Phase 5
+  phase5-edit-guard.py            #   blocks orchestrator edits to non-allowlisted files during Phase 5
   track-artifacts-in-repo.py      #   reminds to commit deployed files back to repo
   no-mocks.py                     #   blocks mock patterns in test files
   agent-quality-tracker.py        #   logs skill quality + emits correction on error/empty
-  (+ 12 more hooks)               #   see hooks/ directory for full list
+  hook-health-check.py             #   SessionStart — verifies all Python hooks are healthy
+  context-budget-warning.py       #   warns at 70/85/95% context usage (calibrated for 1M tokens)
+  (+ 15 more hooks)               #   see hooks/ directory for full list
 scripts/                          # deployment and infrastructure scripts
-  deploy.sh                       #   sync hooks, agents, scripts from repo to ~/.claude/
+  deploy.sh                       #   sync hooks, agents, rules, config from repo to ~/.claude/
   statusline-command.sh            #   Claude Code status line formatting
 agents/                           # native agent definitions (deployed to ~/.claude/agents/)
   ct-implementer.md               #   implementer agent template
@@ -363,6 +365,19 @@ agents/                           # native agent definitions (deployed to ~/.cla
   ct-spec-doc-reviewer.md         #   design doc reviewer
   ct-plan-doc-reviewer.md         #   plan doc reviewer
   harness-engineer-reference.md   #   on-demand reference for harness engineer
+config/                           # global instruction files (deployed to ~/.claude/)
+  CLAUDE.md                       #   global CLAUDE.md — role, boundaries, workflow prefs
+  golden-principles.md            #   16 tiebreaker principles for ambiguous decisions
+  code-style.md                   #   language-specific style rules (Python, TS, JS, HTML, SCSS, Rust)
+rules/                            # path-specific rules (deployed to ~/.claude/rules/)
+  test-files.md                   #   test file rules — real implementations, no mocks
+  config-files.md                 #   config file rules — no secrets, validate syntax
+  migration-files.md              #   migration rules — never modify deployed, include rollback
+  dark-features.md                #   dark feature detection — verify reachability
+  precomputation.md               #   pre-computation for orchestrators
+  chunk-taxonomy-work.md          #   chunking large analysis tasks
+  skill-files.md                  #   skill & CC instruction file rules
+  vault-path-resolution.md        #   user-specified paths are authoritative
 memory/                           # behavioral feedback (persists across sessions)
   MEMORY.md                       #   index — points to consolidated file
   consolidated-feedback.md        #   distilled rules from all feedback (loaded by default)
