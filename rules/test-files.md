@@ -10,6 +10,7 @@ globs:
 ---
 
 # Test File Rules
+<!-- Deploy source: scripts/deploy.sh copies this to ~/.claude/rules/ -->
 
 - Use real implementations, NEVER mocks — only mock external paid APIs with no test mode
 - Every test must assert something — no empty test bodies or `pass` placeholders

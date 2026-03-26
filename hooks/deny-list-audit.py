@@ -14,6 +14,9 @@ from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(__file__))
 from _lib.output import advisory
+from _lib.suppression import is_recently_clean, mark_clean
+
+SUPPRESSION_KEY = "deny_list_last_clean"
 
 SETTINGS_PATH = Path.home() / ".claude" / "settings.json"
 
@@ -71,7 +74,12 @@ def main():
 
     missing = check_deny_coverage(deny_list)
     if not missing:
+        mark_clean(SUPPRESSION_KEY)
         return  # All required patterns covered — silent success
+
+    # Suppress advisory if check was clean within 24h to reduce fatigue
+    if is_recently_clean(SUPPRESSION_KEY):
+        return
 
     advisory(
         f"Settings deny-list gaps: {len(missing)} sensitive path(s) not covered.\n"

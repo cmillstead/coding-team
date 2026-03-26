@@ -8,6 +8,7 @@ globs:
 ---
 
 # Dark Feature Detection
+<!-- Deploy source: scripts/deploy.sh copies this to ~/.claude/rules/ -->
 
 When reviewing or auditing code, check for implemented-but-unwired features:
 

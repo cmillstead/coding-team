@@ -6,6 +6,7 @@ globs:
 ---
 
 # Pre-computation Rule for Orchestrators
+<!-- Deploy source: scripts/deploy.sh copies this to ~/.claude/rules/ -->
 
 Before dispatching worker agents, pre-compute external data they will need:
 

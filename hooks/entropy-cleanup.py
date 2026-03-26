@@ -13,6 +13,9 @@ from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(__file__))
 from _lib.output import advisory
+from _lib.suppression import is_recently_clean, mark_clean
+
+SUPPRESSION_KEY = "entropy_cleanup_last_clean"
 
 METRICS_DIR = Path.home() / ".claude" / "metrics"
 TMP_DIR = Path("/tmp")
@@ -83,7 +86,12 @@ def main():
         signals.append(f"Orphan session files: {', '.join(orphans)}")
 
     if not signals:
+        mark_clean(SUPPRESSION_KEY)
         return  # Clean — silent success
+
+    # Suppress advisory if check was clean within 24h to reduce fatigue
+    if is_recently_clean(SUPPRESSION_KEY):
+        return
 
     msg = "Entropy signals detected:\n" + "\n".join(f"- {s}" for s in signals)
     msg += "\n\nConsider cleaning up stale files: rm /tmp/claude-*.json /tmp/coding-team-*.json"
