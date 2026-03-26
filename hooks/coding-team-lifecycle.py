@@ -12,7 +12,6 @@ PostToolUse on Skill:
   - If coding-team skill → remove marker, silent return
   - Non-coding-team skill → silent return
 """
-import json as _json
 import os, sys
 sys.path.insert(0, os.path.dirname(__file__))
 
@@ -23,7 +22,6 @@ from _lib.event import parse_event, get_tool_input
 from _lib import output
 
 ACTIVE_FILE = "/tmp/coding-team-active"
-SESSION_FILE = "/tmp/coding-team-session.json"
 SKILLS_DIR = Path.home() / ".claude" / "skills" / "coding-team" / "skills"
 
 FALLBACK_SKILLS = {
@@ -75,10 +73,11 @@ def main():
                 os.remove(ACTIVE_FILE)
         except OSError:
             pass
-        # Clean up session phase file
+        # Clean up session phase file if it exists
+        session_file = "/tmp/coding-team-session.json"
         try:
-            if os.path.exists(SESSION_FILE):
-                os.remove(SESSION_FILE)
+            if os.path.exists(session_file):
+                os.remove(session_file)
         except OSError:
             pass
         return
@@ -94,13 +93,6 @@ def main():
 
     with open(ACTIVE_FILE, "w") as f:
         f.write(str(time.time()))
-
-    # Write session phase file for phase5-edit-guard
-    try:
-        with open(SESSION_FILE, "w") as sf:
-            _json.dump({"phase": "active", "ts": time.time()}, sf)
-    except OSError:
-        pass
 
 
 if __name__ == "__main__":

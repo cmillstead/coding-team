@@ -13,7 +13,7 @@ from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(__file__))
 from _lib.output import advisory
-from _lib.suppression import is_recently_clean, mark_clean
+from _lib.suppression import mark_clean
 
 SUPPRESSION_KEY = "symlink_check_last_clean"
 
@@ -58,10 +58,6 @@ def main():
     if not problems:
         mark_clean(SUPPRESSION_KEY)
         return  # All symlinks healthy — silent success
-
-    # Suppress advisory if check was clean within 24h to reduce fatigue
-    if is_recently_clean(SUPPRESSION_KEY):
-        return
 
     msg = (
         f"Symlink integrity: {len(problems)} issue(s) found.\n"

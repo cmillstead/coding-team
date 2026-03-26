@@ -64,7 +64,7 @@ echo "Verifying hook registration..."
 SETTINGS="$HOME/.claude/settings.json"
 if [ -f "$SETTINGS" ]; then
     UNREGISTERED=0
-    for hook in "$CLAUDE_DIR"/hooks/*.py; do
+    for hook in "$CLAUDE_DIR"/hooks/*.py "$CLAUDE_DIR"/hooks/*.sh; do
         hookname=$(basename "$hook")
         if [ "$hookname" = "__init__.py" ] || [ "$hookname" = "_lib" ]; then
             continue
