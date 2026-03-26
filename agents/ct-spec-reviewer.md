@@ -3,14 +3,14 @@ name: Coding Team Spec Reviewer
 description: Verifies implementer built what was requested — spec compliance and TDD discipline check (read-only)
 model: haiku
 tools:
-  - Read
-  - Glob
-  - Grep
-  - LSP
   - mcp__codesight-mcp__search_symbols
   - mcp__codesight-mcp__get_callers
   - mcp__codesight-mcp__get_call_chain
   - mcp__codesight-mcp__search_references
+  - Read
+  - Glob
+  - Grep
+  - LSP
 ---
 
 ## Dispatch Context

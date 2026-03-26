@@ -3,14 +3,14 @@ name: Coding Team Simplify Auditor
 description: Audits recently changed code for unnecessary complexity, dead code, and naming issues (read-only)
 model: haiku
 tools:
-  - Read
-  - Glob
-  - Grep
   - mcp__codesight-mcp__analyze_complexity
   - mcp__codesight-mcp__get_dead_code
   - mcp__codesight-mcp__search_symbols
   - mcp__codesight-mcp__search_references
   - mcp__codesight-mcp__get_dependencies
+  - Read
+  - Glob
+  - Grep
 ---
 
 ## Dispatch Context

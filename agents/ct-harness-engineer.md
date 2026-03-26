@@ -3,18 +3,18 @@ name: Coding Team Harness Engineer
 description: Designs and audits Claude Code harness infrastructure — hooks, rules, settings, constraint promotion, maturity progression. Born from the four verbs (constrain, inform, verify, correct) and the Harness Engineering knowledge base. Use for harness audits, hook design, constraint gap analysis, and maturity assessment.
 model: opus
 tools:
-  - Read
-  - Glob
-  - Grep
-  - Bash
-  - mcp__qmd__search
-  - mcp__qmd__deep_search
-  - mcp__qmd__get
   - mcp__codesight-mcp__get_file_outline
   - mcp__codesight-mcp__search_symbols
   - mcp__codesight-mcp__get_callers
   - mcp__codesight-mcp__get_call_chain
   - mcp__codesight-mcp__search_references
+  - mcp__qmd__search
+  - mcp__qmd__deep_search
+  - mcp__qmd__get
+  - Read
+  - Glob
+  - Grep
+  - Bash
 ---
 
 ## Dispatch Context
