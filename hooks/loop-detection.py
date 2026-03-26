@@ -7,14 +7,16 @@ prompts with alternative strategies based on the failure type.
 
 Failure categories: build, test, permission, network, unknown.
 """
-import hashlib
-import json
 import os
 import sys
 import time
 
+sys.path.insert(0, os.path.dirname(__file__))
+from _lib.event import parse_event, get_tool_name, get_tool_input
+from _lib.output import advisory as emit_advisory
+from _lib.state import get_state_file, load_state, save_state, is_stale
+
 MAX_RETRIES = 3
-STATE_DIR = "/tmp"
 STALE_SECONDS = 3600
 
 FAILURE_PATTERNS = {
@@ -66,27 +68,20 @@ FAILURE_PATTERNS = {
 }
 
 
-def get_state_file():
-    session_id = os.environ.get("CLAUDE_SESSION_ID", os.environ.get("SESSION_ID", "default"))
-    h = hashlib.sha256(session_id.encode()).hexdigest()[:12]
-    return os.path.join(STATE_DIR, f"claude-loop-detection-{h}.json")
-
-
-def load_state(path):
-    try:
-        with open(path) as f:
-            state = json.load(f)
-        if time.time() - state.get("last_updated", 0) > STALE_SECONDS:
-            return {"failures": [], "last_updated": time.time()}
-        return state
-    except (FileNotFoundError, json.JSONDecodeError):
+def _load_loop_state(path):
+    """Load state, resetting if stale."""
+    state = load_state(path, default={"failures": [], "last_updated": time.time()})
+    if not state.get("failures"):
+        state.setdefault("failures", [])
+    if is_stale(state, max_age=STALE_SECONDS):
         return {"failures": [], "last_updated": time.time()}
+    return state
 
 
-def save_state(path, state):
+def _save_loop_state(path, state):
+    """Save state with updated timestamp."""
     state["last_updated"] = time.time()
-    with open(path, "w") as f:
-        json.dump(state, f)
+    save_state(path, state)
 
 
 def normalize_command(cmd):
@@ -137,15 +132,13 @@ def build_recovery_message(pattern, count, category):
 
 
 def main():
-    try:
-        event = json.load(sys.stdin)
-    except (json.JSONDecodeError, ValueError):
+    event = parse_event()
+    if not event:
         return
-    tool_name = event.get("tool_name", "")
-    if tool_name != "Bash":
+    if get_tool_name(event) != "Bash":
         return
 
-    tool_input = event.get("tool_input", {})
+    tool_input = get_tool_input(event)
     tool_result = event.get("tool_result", {})
     command = tool_input.get("command", "")
     if not command:
@@ -163,27 +156,27 @@ def main():
     elif any(marker in stderr.lower() for marker in ["error", "failed", "failure"]):
         is_failure = True
 
-    state_file = get_state_file()
-    state = load_state(state_file)
+    state_path = get_state_file("claude-loop-detection")
+    state = _load_loop_state(state_path)
 
     if is_failure:
         pattern = normalize_command(command)
         category = classify_failure(stdout, stderr)
         state["failures"].append({"pattern": pattern, "command": command[:200], "category": category, "time": time.time()})
         state["failures"] = state["failures"][-20:]
-        save_state(state_file, state)
+        _save_loop_state(state_path, state)
 
         recent = [f for f in state["failures"] if f["pattern"] == pattern and time.time() - f["time"] < 300]
         if len(recent) >= MAX_RETRIES:
             categories = [f.get("category", "unknown") for f in recent]
             dominant = max(set(categories), key=categories.count)
             msg = build_recovery_message(pattern, len(recent), dominant)
-            print(json.dumps({"decision": "allow", "reason": msg}))
+            emit_advisory(msg)
             return
     else:
         pattern = normalize_command(command)
         state["failures"] = [f for f in state["failures"] if f["pattern"] != pattern]
-        save_state(state_file, state)
+        _save_loop_state(state_path, state)
 
 
 if __name__ == "__main__":

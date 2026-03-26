@@ -6,10 +6,14 @@ Fires on Write|Edit|Bash. If the target file is under ~/.claude/hooks/ or
 Bash tool detection catches `cp` commands targeting those directories.
 """
 import filecmp
-import json
+import os
 import re
 import sys
 from pathlib import Path
+
+sys.path.insert(0, os.path.dirname(__file__))
+from _lib.event import parse_event, get_tool_name, get_tool_input
+from _lib.output import advisory
 
 CLAUDE_DIR = Path.home() / ".claude"
 REPO_ROOT = CLAUDE_DIR / "skills" / "coding-team"
@@ -27,7 +31,7 @@ BASH_CP_PATTERN = re.compile(
 
 def _emit_reminder(msg: str) -> None:
     """Print a structured allow decision with a reminder message."""
-    print(json.dumps({"decision": "allow", "reason": msg}))
+    advisory(msg)
 
 
 def _check_path(target: Path) -> None:
@@ -80,13 +84,12 @@ def _handle_bash(tool_input: dict) -> None:
 
 
 def main():
-    try:
-        event = json.load(sys.stdin)
-    except (json.JSONDecodeError, ValueError):
+    event = parse_event()
+    if not event:
         return
 
-    tool_name = event.get("tool_name", "")
-    tool_input = event.get("tool_input", {})
+    tool_name = get_tool_name(event)
+    tool_input = get_tool_input(event)
 
     if tool_name in ("Write", "Edit"):
         _handle_write_edit(tool_input)

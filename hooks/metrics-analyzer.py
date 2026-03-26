@@ -14,6 +14,9 @@ import sys
 from collections import Counter
 from pathlib import Path
 
+sys.path.insert(0, os.path.dirname(__file__))
+from _lib.output import advisory
+
 METRICS_DIR = Path.home() / ".claude" / "metrics"
 MAX_FILES_TO_CHECK = 3
 
@@ -105,7 +108,7 @@ def main():
     msg = "Metrics review from recent sessions:\n" + "\n".join(
         f"- {a}" for a in all_anomalies
     )
-    print(json.dumps({"decision": "allow", "reason": msg}))
+    advisory(msg)
 
 
 if __name__ == "__main__":

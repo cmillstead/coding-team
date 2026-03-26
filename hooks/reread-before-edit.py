@@ -6,68 +6,53 @@ When an Edit is attempted on a file not Read in the last 30 tool calls,
 emits an advisory warning. Never blocks — decision is always "allow".
 """
 
-import hashlib
-import json
 import os
 import sys
 
+sys.path.insert(0, os.path.dirname(__file__))
+from _lib.event import parse_event, get_tool_name, get_tool_input, get_file_path
+from _lib.output import allow, advisory
+from _lib.state import get_state_file, load_state, save_state
 
-def _get_state_file():
-    session_id = os.environ.get("CLAUDE_SESSION_ID", os.environ.get("SESSION_ID", "default"))
-    h = hashlib.sha256(session_id.encode()).hexdigest()[:12]
-    return f'/tmp/claude-reread-tracker-{h}.json'
 
-
-STATE_FILE = _get_state_file()
+STATE_FILE = get_state_file("claude-reread-tracker")
 STALENESS_THRESHOLD = 30
 
 
-def load_state() -> dict:
+def _load_tracker_state() -> dict:
     """Load tracker state, returning fresh state on any error."""
-    try:
-        with open(STATE_FILE, 'r') as f:
-            state = json.load(f)
-        # Validate structure
-        if not isinstance(state, dict):
-            return {'counter': 0, 'files': {}}
-        if 'counter' not in state or 'files' not in state:
-            return {'counter': 0, 'files': {}}
-        return state
-    except (OSError, json.JSONDecodeError, TypeError):
+    state = load_state(STATE_FILE, default={'counter': 0, 'files': {}})
+    # Validate structure
+    if 'counter' not in state or 'files' not in state:
         return {'counter': 0, 'files': {}}
+    return state
 
 
-def save_state(state: dict) -> None:
-    """Persist tracker state, ignoring write errors."""
-    try:
-        with open(STATE_FILE, 'w') as f:
-            json.dump(state, f)
-    except OSError:
-        pass
+def _save_tracker_state(state: dict) -> None:
+    """Persist tracker state."""
+    save_state(STATE_FILE, state)
 
 
 def main():
-    try:
-        event = json.load(sys.stdin)
-    except (json.JSONDecodeError, TypeError):
+    event = parse_event()
+    if not event:
         # Malformed input — allow silently
-        print(json.dumps({"decision": "allow"}))
+        allow()
         return
 
-    tool_name = event.get('tool_name', '')
-    tool_input = event.get('tool_input', {})
+    tool_name = get_tool_name(event)
 
     # Only care about Read and Edit
     if tool_name not in ('Read', 'Edit'):
         return
 
-    state = load_state()
+    state = _load_tracker_state()
     state['counter'] = state.get('counter', 0) + 1
     counter = state['counter']
 
-    file_path = tool_input.get('file_path', '')
+    file_path = get_file_path(event)
     if not file_path:
-        save_state(state)
+        _save_tracker_state(state)
         return
 
     # Normalize the path
@@ -76,31 +61,29 @@ def main():
     if tool_name == 'Read':
         # Track the Read
         state['files'][file_path] = counter
-        save_state(state)
+        _save_tracker_state(state)
         # Silent allow — no output needed for Read
         return
 
     # tool_name == 'Edit'
     last_read = state.get('files', {}).get(file_path)
-    save_state(state)
+    _save_tracker_state(state)
 
     if last_read is None:
-        print(json.dumps({
-            "decision": "allow",
-            "reason": f"STALE CONTEXT: Editing {file_path} without a prior Read. "
-                      f"Use the Read tool on {file_path} first to avoid overwriting external changes."
-        }))
+        advisory(
+            f"STALE CONTEXT: Editing {file_path} without a prior Read. "
+            f"Use the Read tool on {file_path} first to avoid overwriting external changes."
+        )
     elif (counter - last_read) > STALENESS_THRESHOLD:
         age = counter - last_read
-        print(json.dumps({
-            "decision": "allow",
-            "reason": f"STALE CONTEXT: Last Read of {file_path} was {age} tool calls ago "
-                      f"(threshold: {STALENESS_THRESHOLD}). Use the Read tool on {file_path} before "
-                      f"this Edit to avoid overwriting external changes."
-        }))
+        advisory(
+            f"STALE CONTEXT: Last Read of {file_path} was {age} tool calls ago "
+            f"(threshold: {STALENESS_THRESHOLD}). Use the Read tool on {file_path} before "
+            f"this Edit to avoid overwriting external changes."
+        )
     else:
         # Recently read — allow silently
-        print(json.dumps({"decision": "allow"}))
+        allow()
 
 
 if __name__ == '__main__':

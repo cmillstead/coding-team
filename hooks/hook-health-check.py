@@ -7,6 +7,11 @@ silently degrades to no protection — this hook makes that degradation visible.
 
 Does NOT block the session — verification is advisory. A broken hook should
 be fixed, not prevent work.
+
+Note: This hook verifies STRUCTURAL health only (syntax errors, import failures,
+crashes, timeouts). It does NOT verify behavioral correctness — that is covered
+by the pytest suite in hooks/tests/. A hook that passes health check but has a
+logic bug will still be caught by the test suite.
 """
 import json
 import subprocess
