@@ -12,7 +12,7 @@ import pytest
 import yaml
 
 
-REPO_ROOT = Path("/Users/cevin/.claude/skills/coding-team")
+REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 SKILLS_DIR = REPO_ROOT / "skills"
 ROOT_SKILL = REPO_ROOT / "SKILL.md"
 

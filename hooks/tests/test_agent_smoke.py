@@ -9,7 +9,8 @@ from pathlib import Path
 import pytest
 import yaml
 
-AGENTS_DIR = Path("/Users/cevin/.claude/skills/coding-team/agents")
+REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+AGENTS_DIR = REPO_ROOT / "agents"
 
 VALID_MODELS = {"opus", "sonnet", "haiku"}
 
