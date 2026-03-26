@@ -79,16 +79,16 @@ def main():
     if last_read is None:
         print(json.dumps({
             "decision": "allow",
-            "reason": f"WARNING: Editing {file_path} without a prior Read. "
-                      f"Re-read the file first to avoid overwriting external changes."
+            "reason": f"STALE CONTEXT: Editing {file_path} without a prior Read. "
+                      f"Use the Read tool on {file_path} first to avoid overwriting external changes."
         }))
     elif (counter - last_read) > STALENESS_THRESHOLD:
         age = counter - last_read
         print(json.dumps({
             "decision": "allow",
-            "reason": f"WARNING: Last Read of {file_path} was {age} tool calls ago "
-                      f"(threshold: {STALENESS_THRESHOLD}). Re-read before editing "
-                      f"to avoid overwriting external changes."
+            "reason": f"STALE CONTEXT: Last Read of {file_path} was {age} tool calls ago "
+                      f"(threshold: {STALENESS_THRESHOLD}). Use the Read tool on {file_path} before "
+                      f"this Edit to avoid overwriting external changes."
         }))
     else:
         # Recently read — allow silently

@@ -181,6 +181,8 @@ def main():
                 msg += f"  - {m}\n"
             msg += "\nYou MUST run verification before committing. "
             msg += "Golden Principle #8: Verify Before Claiming Done.\n\n"
+            msg += "Known rationalizations: 'I verified by reading the code' — reading is not running. "
+            msg += "'Changes are too small for tests' — size does not exempt verification.\n\n"
             msg += "Run the missing checks first, then retry the commit.\n"
             msg += "If tests/linting don't apply to this repo, explain why to the user."
 

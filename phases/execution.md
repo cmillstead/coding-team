@@ -14,12 +14,13 @@ If user wants isolation (or task warrants it), follow the `/worktree` skill (`sk
 
 On approval, begin execution. **Agent team per task: implementer + audit team (spec + simplify + harden).** Implementer follows the `/tdd` skill for all implementation work.
 
-**CRITICAL: The main agent is the orchestrator, not the implementer.** You do NOT write code, edit files, or run tests yourself during Phase 5. Your ONLY permitted tools during execution are:
+**CRITICAL: The main agent is the orchestrator, not the implementer.** During Phase 5, you dispatch all file edits to agents. Your ONLY permitted direct actions are:
 - **Agent tool** — dispatch implementer and auditor subagents
 - **Teammate tool** — dispatch teammates (if agent teams available)
 - **SendMessage tool** — coordinate with teammates
 - **TaskCreate / TaskList / TaskUpdate tools** — manage shared task list
-- **Read tool** — read files for context (NEVER edit them)
+- **Read tool** — read files for context
+- **Edit/Write tools** — ONLY for `memory/`, `~/Documents/obsidian-vault/`, and `/tmp/` session files. All other edits — including `agents/`, `phases/`, `prompts/`, `skills/`, `hooks/`, `docs/plans/`, and source code — go through the Agent tool. See "Phase 5 Edit Routing" in SKILL.md.
 - **Bash tool for git commands only** — `git diff`, `git log`, `git rev-parse` (NOT test commands, NOT `pytest`, NOT `npm test`, NOT `cargo test`)
 
 If you use Edit, Write, or Bash to run tests during Phase 5, the task must be re-done by an agent. Your direct edit bypasses the audit loop and is not trusted — it skips spec review, simplify audit, and harden audit. Unreviewed code does not ship.
@@ -33,6 +34,18 @@ During Phase 5, spawn subagents for all code changes.
 Execution uses subagents because the plan pre-decomposes work into independent tasks. Each agent works alone and reports back.
 
 **Pre-flight: Feature branch.** Before dispatching the first implementer, verify the current branch is not main/master. If on main, create a feature branch: `git checkout -b <feature-name>`. All Phase 5 work happens on this branch.
+
+**Pre-flight: Session state.** Write the session state file so execution-phase hooks activate:
+
+```bash
+python3 -c "import json, time; json.dump({'phase': 'execution', 'ts': time.time()}, open('/tmp/coding-team-session.json', 'w'))"
+```
+
+This activates:
+- `phase5-edit-guard.py` — warns if the orchestrator edits code directly instead of delegating
+- `plan-completeness-check.py` — warns if agent output covers fewer findings than assigned
+
+The file auto-expires after 2 hours. Clean up is not required but can be done in Phase 6.
 
 ## Execution Loop
 

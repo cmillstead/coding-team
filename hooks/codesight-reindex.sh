@@ -18,6 +18,17 @@ if [[ "$FILE_PATH" == /Users/cevin/src/* ]]; then
     done
 
     if [[ -n "$PROJECT_ROOT" ]]; then
+        # Debounce: skip if reindexed within last 30 seconds
+        DEBOUNCE_FILE="/tmp/codesight-reindex-$(echo "$PROJECT_ROOT" | md5 -q)"
+        if [[ -f "$DEBOUNCE_FILE" ]]; then
+            LAST_RUN=$(cat "$DEBOUNCE_FILE" 2>/dev/null || echo 0)
+            NOW=$(date +%s)
+            if (( NOW - LAST_RUN < 30 )); then
+                exit 0
+            fi
+        fi
+        date +%s > "$DEBOUNCE_FILE"
+
         (
             IRONMUNCH_ALLOWED_ROOTS=/Users/cevin/src \
             /Users/cevin/src/ironmunch/.venv/bin/codesight-mcp index "$PROJECT_ROOT" --no-ai 2>&1

@@ -50,27 +50,27 @@ def analyze_session(records, session_id):
     if edits > 6 and reads > 0 and edits / reads > 3:
         anomalies.append(
             f"High Edit:Read ratio ({edits}:{reads} = {edits/reads:.1f}:1)"
-            " — you may be editing files without re-reading them first"
+            " — re-read files before editing to avoid stale overwrites"
         )
     elif edits > 3 and reads == 0:
         anomalies.append(f"{edits} Edit calls with 0 Read calls — always read before editing")
 
     bash_count = tool_counts.get("Bash", 0)
     if bash_count > 30:
-        anomalies.append(f"{bash_count} Bash calls in session — check for retry loops")
+        anomalies.append(f"{bash_count} Bash calls in session — likely retry loop. Use alternative approaches instead of re-running the same command.")
 
     total = len(session_records)
     if total > 200:
         anomalies.append(
             f"{total} tool calls in session"
-            " — consider compaction to avoid context degradation"
+            " — compaction needed to avoid context degradation"
         )
 
     searches = tool_counts.get("Grep", 0) + tool_counts.get("Glob", 0)
     if edits > 10 and searches == 0:
         anomalies.append(
             f"{edits} edits with no search calls"
-            " — use Grep/Glob to verify changes across codebase"
+            " — use Grep tool and Glob tool to verify changes across codebase"
         )
 
     return anomalies

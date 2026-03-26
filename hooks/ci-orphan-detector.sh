@@ -31,6 +31,6 @@ orphan_lines=$(echo "$pr_json" | jq -r '
 [ -z "$orphan_lines" ] && exit 0
 
 # Produce the warning as a decision:allow JSON blob
-reason=$(printf '⚠️ Orphan PRs with failing CI detected:\n%s\nConsider fixing or closing these before starting new work.' "$orphan_lines")
+reason=$(printf 'Open PRs with failing CI:\n%s\nAddress these first — fix CI failures or close with a reason. Starting new work while old PRs rot creates orphan debt.' "$orphan_lines")
 
 jq -n --arg reason "$reason" '{"decision":"allow","reason":$reason}'

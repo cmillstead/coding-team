@@ -81,9 +81,9 @@ def main():
             print(json.dumps({
                 "decision": "allow",
                 "reason": (
-                    f"MCP server '{server_name}' may not be running. "
-                    f"If the next MCP call fails, start the server. "
-                    f"Check ~/.claude.json or project .mcp.json for server configuration."
+                    f"MCP server '{server_name}' process not found. "
+                    f"Fall back to built-in tools (Grep tool, Read tool, Glob tool) for this request. "
+                    f"If the server should be running, check ~/.claude.json or .mcp.json for config."
                 ),
             }))
             return

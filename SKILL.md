@@ -152,7 +152,7 @@ Each phase reads its detail file on entry. Do not read ahead — load only the a
 - Performatively agree with review feedback without verifying
 - Dismiss pre-existing failures or findings — fix them or escalate, never ignore. "Pre-existing" and "not a regression" are NOT valid reasons to skip. A bug is a bug regardless of when it was introduced.
 - Silently drop findings — every scan finding, review comment, or enumerated issue must be planned (fix, defer with rationale, or false positive) and every planned task must be executed
-- Write code directly during Phase 5 — the main agent is the orchestrator, not the implementer. Use Edit/Write only in Phases 1-4 (plans, specs). During execution, spawn teammates (or subagents if agent teams unavailable) for all code changes.
+- Edit files directly during Phase 5 — the orchestrator dispatches work and reviews results. The only files the orchestrator edits directly during execution are memory files (`memory/`), the Obsidian vault (`~/Documents/obsidian-vault/`), and session notes (`/tmp/`). Everything else — including agent definitions (`agents/`), phase files (`phases/`), prompt templates (`prompts/`), skills (`skills/`), hooks (`hooks/`), plans (`docs/plans/`), and source code — goes through the Agent tool to the appropriate specialist. Known rationalization: "These are doc-level edits, not code" — file extension does not determine delegation. Agent definitions, phase files, and plans are team deliverables that benefit from specialist review.
 - Suggest `/ship` (gstack) for deploying or creating PRs — always suggest `/release` (`skills/release/SKILL.md`) instead. Similarly, suggest `/retrospective` not `/retro`, and `/doc-sync` not `/document-release`. Coding-team has its own equivalents for these gstack skills.
 
 **Always:**
@@ -161,6 +161,24 @@ Each phase reads its detail file on entry. Do not read ahead — load only the a
 - Get confirmation before discarding work
 - Use the model tier assigned in the plan
 - Match process weight to task weight
+
+---
+
+## Phase 5 Edit Routing
+
+During execution, the orchestrator routes edits by file type:
+
+| File pattern | Route |
+|---|---|
+| `agents/*.md`, `phases/*.md`, `prompts/*.md` | Agent tool — dispatch with PROMPT_CRAFT_ADVISORY |
+| `skills/**/*.md`, `CLAUDE.md`, `hooks/*` | Agent tool — dispatch with PROMPT_CRAFT_ADVISORY |
+| `docs/plans/*.md` | Agent tool — dispatch to implementer |
+| `memory/*.md` | Orchestrator edits directly |
+| `~/Documents/obsidian-vault/**` | Orchestrator edits directly |
+| `/tmp/*` session notes | Orchestrator edits directly |
+| All other files | Agent tool — dispatch to implementer |
+
+This table supersedes any inference about "code vs docs." If the file is not in the orchestrator-editable rows, it goes through an agent.
 
 ---
 
