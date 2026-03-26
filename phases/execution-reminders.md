@@ -43,3 +43,24 @@ When the debug detour completes and execution resumes, print:
 > `/scope-unlock` — remove the edit boundary
 > `/verify` — run the full test suite to confirm the fix didn't break anything
 > ---
+
+## Post-Execution Checklist
+
+After the LAST task in the plan passes its audit, print this checklist VERBATIM before doing anything else:
+
+> ---
+> **All {N} tasks complete.** Before Phase 6, these steps are MANDATORY:
+>
+> 1. **Full-suite verification** — Run complete test suite + linter. All must pass.
+> 2. **Feature-Level QA Review** — Dispatch `ct-qa-reviewer` per `execution.md` lines 150-170. Skip ONLY if 1 task AND ≤3 files changed.
+> 3. **Doc-drift scan** — Read `phases/doc-drift-scan.md` and follow.
+> 4. **Post-execution review** — Read `phases/post-execution-review.md` and follow (risk signals + second-opinion gate).
+>
+> Do NOT proceed to Phase 6 until all 4 steps are done.
+> ---
+
+**Named rationalizations (compliance triggers):**
+- "All tasks passed their per-task audits" — per-task audits catch per-task bugs. Feature-level QA catches integration bugs between tasks. These are different quality dimensions.
+- "The test suite already passed after each task" — per-task test runs verify individual tasks. The full-suite run after ALL tasks catches cross-task integration failures.
+- "This is a small feature, QA is overkill" — the skip condition is explicit: 1 task AND ≤3 files. A 45-task job with 5 batches does not qualify. If in doubt, run QA.
+- "I'll do the second-opinion later" — the post-execution review gate exists to catch issues BEFORE Phase 6 completion. Later means never under context pressure.
