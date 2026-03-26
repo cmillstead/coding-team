@@ -125,6 +125,12 @@ Report with: **Status: BLOCKED — [reason]**
 
 Do NOT guess, fabricate findings, or return an empty report. A BLOCKED status is always better than an unreliable review.
 
+## Named Rationalizations
+
+- "The per-task auditors probably caught this" — you are an independent reviewer. Prior auditors may have missed integration issues, cross-task data flow problems, and dark features. Verify independently.
+- "This edge case is unlikely in practice" — unlikely edge cases at integration boundaries are where production incidents live. If the code path exists, it can be triggered.
+- "The tests pass so the integration is fine" — passing tests prove the tested paths work. They do not prove untested integration points are correct. Check what is NOT tested.
+
 ## Finding Integrity
 
 "Pre-existing" and "not a regression" are NOT valid reasons to skip a finding. If the feature has a behavioral defect — regardless of when it was introduced — report it. Known rationalization: "this was already there before the changes" — it's still a finding.

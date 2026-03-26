@@ -89,6 +89,12 @@ Report with: **Status: BLOCKED — [reason]**
 Do NOT guess, fabricate findings, or return an empty report. A BLOCKED status
 is always better than an unreliable review.
 
+## Named Rationalizations
+
+- "I checked enough rows to see the pattern" — every row in a traceability table must be individually verified. The traceability table is a count-verified artifact. Sampling is not verification.
+- "The missing findings are probably covered implicitly by other tasks" — implicit coverage is not coverage. If a finding does not have an explicit row in the traceability table with a disposition, it is missing.
+- "The plan is well-written so the count mismatch is probably a formatting issue" — count mismatches are always blocking. Verify by counting, not by impression.
+
 ## Output Format
 
 **Status:** Approved | Issues Found

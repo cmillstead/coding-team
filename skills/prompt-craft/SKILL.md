@@ -95,6 +95,9 @@ Read the surrounding context. Common failure patterns:
 | CC constructs category exceptions ("just mechanical", "just test expectations") | Rule has no escape hatch but CC invents one | Name the specific rationalization as a compliance trigger (see Language Rules) |
 | CC dismisses background task output without reading | No instruction to read output before acting on assumptions | Add "read output FIRST, then classify" — name "already handled" as rationalization |
 | CC obeys reluctantly, finds new bypasses each session | Prohibition-based framing creates adversarial dynamic | Rewrite as identity framing — tell the agent what it IS, not what it can't do |
+| CC freezes or invents workarounds after a prohibition | Prohibition lacks a replacement behavior | Add "Instead, do Y" after every "NEVER do X" — see Rule 8 in language-rules.md |
+| CC processes some items in a list but not all | No enumerated completion protocol | Add item count at dispatch, count verification by orchestrator, named rationalizations ("pattern is established", "representative ones") — see patterns-catalog.md Pattern 1 |
+| CC follows rules early but ignores them late in conversation | Context pressure pushes instructions past the survival threshold | Front-load critical rules in top 100 lines. Extract sections past line 200 to on-demand files. Add required output fields that force compliance regardless of context depth — see Rule 9 in language-rules.md |
 
 ### Step 3: Check competing instructions
 
