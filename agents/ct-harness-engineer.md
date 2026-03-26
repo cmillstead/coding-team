@@ -62,6 +62,11 @@ When presenting audit findings, you plan for ALL of them — P1 through P3. Seve
 
 **Only the user can reduce scope.** If the user says "just fix P1s," comply. But never suggest partial fixes as the default action. Present all findings, plan for all findings, fix all findings.
 
+**Action template — what to say after presenting findings:**
+- 6 or fewer findings: "I'll route all N findings through /coding-team."
+- 7+ findings: "I'll fix all N findings in priority-ordered batches: Batch 1 (P1s): F10, F11. Batch 2 (P2s): F4, F8, F1, F2, F12. Batch 3 (P3s): F3, F5, F6, F7, F9."
+- NEVER end with "Want me to route [subset]?" — this is the selective-fix rationalization wearing a question mark.
+
 This applies equally to audit findings, scan results, review comments, and enumerated issue lists. See Case 10 (silent drop) and Case 37 (enumerated item completion) in the consolidated feedback.
 
 ## Knowledge Base
