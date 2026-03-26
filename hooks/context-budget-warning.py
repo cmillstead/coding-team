@@ -13,19 +13,77 @@ Data sources checked (in priority order):
 1. Event payload fields (e.g., context_window_usage, token_count) — from stdin JSON
 2. Environment variables: CLAUDE_CONTEXT_PERCENT, CONTEXT_PERCENT, CLAUDE_CONTEXT_USAGE
 3. Temp file: /tmp/claude-context-percent.txt (written by external tooling)
+4. Tool call count heuristic — counts tool calls in metrics-logger JSONL for the
+   current session and maps to an estimated context percentage.
 
 KNOWN_LIMITATION:
     As of March 2026, Claude Code does not expose context window usage to hooks
     via the event payload, environment variables, or any documented mechanism.
-    All three data sources above will return None in practice, causing this hook
-    to silently no-op. This is by design — the hook is deployed as ready
-    infrastructure so that when Claude Code adds context exposure (via event
-    fields or env vars), this hook activates automatically without redeployment.
+    Sources 1-3 will return None in practice. Source 4 provides an imprecise but
+    working heuristic based on tool call count, giving the hook a live signal
+    even without official context exposure.
 """
 
 import json
 import os
 import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+
+def estimate_from_tool_count() -> float | None:
+    """Estimate context usage from tool call count in current session.
+
+    Reads metrics-logger JSONL for today, counts tool calls matching
+    the current session ID. Maps count to estimated percentage using
+    a conservative linear model.
+
+    Calibration assumptions (200K token window):
+    - Average tool call consumes ~1000 tokens (input + output + reasoning)
+    - 50 calls ~ 25% (50K tokens)
+    - 100 calls ~ 50% (100K tokens)
+    - 150 calls ~ 75% (150K tokens)
+    - 200 calls ~ 95% (approaching limit)
+
+    Returns None if metrics directory doesn't exist or no data for session.
+    """
+    metrics_dir = Path.home() / ".claude" / "metrics"
+    if not metrics_dir.exists():
+        return None
+
+    session_id = os.environ.get("CLAUDE_SESSION_ID", "")
+    if not session_id:
+        return None
+
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    log_path = metrics_dir / f"tool-usage-{today}.jsonl"
+
+    if not log_path.exists():
+        return None
+
+    count = 0
+    try:
+        with open(log_path) as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    record = json.loads(line)
+                    if record.get("session") == session_id:
+                        count += 1
+                except json.JSONDecodeError:
+                    continue
+    except OSError:
+        return None
+
+    if count < 30:
+        return None  # too few calls to estimate meaningfully
+
+    # Linear mapping: 0 calls = 0%, 200 calls = 95%
+    # Capped at 95% since we can't know the exact limit
+    estimated = min(95.0, (count / 200.0) * 95.0)
+    return estimated
 
 
 def get_context_percent(event: dict) -> float | None:
@@ -45,6 +103,9 @@ def get_context_percent(event: dict) -> float | None:
            CLAUDE_CONTEXT_USAGE. Not currently set by Claude Code.
         3. Temp file — /tmp/claude-context-percent.txt. Can be written by
            external monitoring (e.g., statusline scripts).
+        4. Tool call count heuristic — counts tool calls from metrics-logger
+           JSONL for the current session. Imprecise but provides a working
+           signal when no other source is available.
     """
     # Source 1: Event payload fields (not currently populated by Claude Code)
     for field in ["context_window_usage", "context_percent", "context_usage"]:
@@ -89,6 +150,13 @@ def get_context_percent(event: dict) -> float | None:
             return float(f.read().strip())
     except (FileNotFoundError, ValueError):
         pass
+
+    # Source 4: Heuristic from tool call count (via metrics-logger JSONL)
+    # Imprecise but provides a working signal when no other source is available.
+    # Calibration: based on typical 200K context window, ~1K tokens per tool call average.
+    estimated = estimate_from_tool_count()
+    if estimated is not None:
+        return estimated
 
     return None
 
