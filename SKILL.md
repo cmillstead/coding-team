@@ -87,6 +87,8 @@ These apply to every agent in the team:
 - **Right-size the model** — use the cheapest model that can handle the task. Haiku for mechanical edits, Sonnet for implementation, Opus for architecture and review.
 - **Dispatch first, self-execute second** — when you have both delegatable work (agent tasks) and self-executable work (memory saves, doc writes, context reads), dispatch agents FIRST, then do your own tasks while agents run. Agent work takes longer; starting it immediately maximizes parallelism. Never block agent dispatch behind your own lightweight tasks.
 
+**Session memory:** At session start, read `memory/consolidated-feedback.md` using the Read tool. These are hard-won behavioral rules and case study principles from prior sessions — they prevent known failure modes from recurring.
+
 ---
 
 ## Phase Sequence
