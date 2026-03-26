@@ -210,6 +210,115 @@ class TestSummarizeSessions:
         assert "notempty" in summaries[0]
 
 
+class TestAggregatByBranch:
+    def test_groups_by_branch_with_multiple_sessions(self):
+        """Records with branch fields are grouped; branches with 2+ sessions included."""
+        mod = _load_analyzer_module()
+        records = [
+            {"tool": "Read", "session": "s1", "branch": "feat/login"},
+            {"tool": "Edit", "session": "s1", "branch": "feat/login"},
+            {"tool": "Read", "session": "s2", "branch": "feat/login"},
+            {"tool": "Bash", "session": "s2", "branch": "feat/login"},
+            {"tool": "Bash", "session": "s2", "branch": "feat/login"},
+        ]
+        result = mod.aggregate_by_branch(records)
+        assert "feat/login" in result
+        info = result["feat/login"]
+        assert info["total_calls"] == 5
+        assert info["session_count"] == 2
+        assert set(info["sessions"]) == {"s1", "s2"}
+        # Top tools should include the counts
+        tool_names = [t for t, _ in info["top_tools"]]
+        assert "Bash" in tool_names
+        assert "Read" in tool_names
+
+    def test_no_branch_fields_returns_empty(self):
+        """Records without branch fields should produce an empty result."""
+        mod = _load_analyzer_module()
+        records = [
+            {"tool": "Read", "session": "s1"},
+            {"tool": "Edit", "session": "s2"},
+        ]
+        result = mod.aggregate_by_branch(records)
+        assert result == {}
+
+    def test_single_session_branch_excluded(self):
+        """Branches with only 1 session should be excluded from aggregation."""
+        mod = _load_analyzer_module()
+        records = [
+            {"tool": "Read", "session": "s1", "branch": "feat/solo"},
+            {"tool": "Edit", "session": "s1", "branch": "feat/solo"},
+            {"tool": "Read", "session": "s1", "branch": "feat/solo"},
+        ]
+        result = mod.aggregate_by_branch(records)
+        assert "feat/solo" not in result
+        assert result == {}
+
+    def test_multiple_branches_aggregated_independently(self):
+        """Multiple branches each with 2+ sessions are all included."""
+        mod = _load_analyzer_module()
+        records = [
+            {"tool": "Read", "session": "s1", "branch": "feat/a"},
+            {"tool": "Read", "session": "s2", "branch": "feat/a"},
+            {"tool": "Edit", "session": "s3", "branch": "feat/b"},
+            {"tool": "Edit", "session": "s4", "branch": "feat/b"},
+            {"tool": "Bash", "session": "s5", "branch": "feat/c"},  # only 1 session
+        ]
+        result = mod.aggregate_by_branch(records)
+        assert "feat/a" in result
+        assert "feat/b" in result
+        assert "feat/c" not in result
+
+
+class TestFormatBranchSummary:
+    def test_format_multi_session_branch(self):
+        """format_branch_summary produces readable output with call counts."""
+        mod = _load_analyzer_module()
+        branch_data = {
+            "feat/login": {
+                "total_calls": 45,
+                "session_count": 3,
+                "top_tools": [("Read", 20), ("Edit", 15), ("Bash", 10)],
+                "sessions": ["s1", "s2", "s3"],
+            }
+        }
+        output = mod.format_branch_summary(branch_data)
+        assert "Branch cost summary:" in output
+        assert "feat/login" in output
+        assert "45 calls" in output
+        assert "3 sessions" in output
+        assert "Read:20" in output
+
+    def test_format_empty_data_returns_empty_string(self):
+        """Empty branch data should return empty string."""
+        mod = _load_analyzer_module()
+        assert mod.format_branch_summary({}) == ""
+
+    def test_format_multiple_branches_sorted(self):
+        """Multiple branches should appear sorted alphabetically."""
+        mod = _load_analyzer_module()
+        branch_data = {
+            "feat/z": {
+                "total_calls": 10,
+                "session_count": 2,
+                "top_tools": [("Read", 10)],
+                "sessions": ["s1", "s2"],
+            },
+            "feat/a": {
+                "total_calls": 20,
+                "session_count": 3,
+                "top_tools": [("Edit", 20)],
+                "sessions": ["s3", "s4", "s5"],
+            },
+        }
+        output = mod.format_branch_summary(branch_data)
+        lines = output.strip().split("\n")
+        # Header + 2 branch lines
+        assert len(lines) == 3
+        assert "feat/a" in lines[1]
+        assert "feat/z" in lines[2]
+
+
 class TestCostSummaryIntegration:
     def test_cost_summary_appears_in_output(self, tmp_path):
         """Integration test: cost summary section appears in advisory output."""
