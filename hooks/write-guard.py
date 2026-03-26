@@ -30,7 +30,7 @@ ACTIVE_MARKER = Path("/tmp/coding-team-active")
 
 
 def is_orchestrator_file(file_path: str) -> bool:
-    """Return True only for files the orchestrator may edit during Phase 5."""
+    """Return True only for files the orchestrator may always edit during Phase 5."""
     path_str = str(file_path)
     if path_str.startswith("/tmp"):
         return True
@@ -39,6 +39,25 @@ def is_orchestrator_file(file_path: str) -> bool:
     if "/memory/" in path_str or path_str.endswith("/memory"):
         return True
     return False
+
+
+# Instruction files: high impact surface — always delegate regardless of edit size.
+# A 1-line change to an agent prompt can cascade through the entire pipeline.
+INSTRUCTION_PATTERNS = [
+    "/agents/",
+    "/phases/",
+    "/prompts/",
+    "/skills/",
+    "/hooks/",
+    "CLAUDE.md",
+    "SKILL.md",
+]
+
+
+def is_instruction_file(file_path: str) -> bool:
+    """Return True for files that MUST be delegated — high impact surface."""
+    path_str = str(file_path)
+    return any(pattern in path_str for pattern in INSTRUCTION_PATTERNS)
 
 
 def read_session() -> tuple[dict | None, bool]:
@@ -98,12 +117,21 @@ def check_phase5(file_path: str) -> str | None:
     if is_orchestrator_file(file_path):
         return None
 
-    return (
-        f"BLOCKED: During active coding-team session, the orchestrator delegates all file edits — "
-        f"never makes them directly. Use the Agent tool to dispatch this edit of {file_path}. "
-        f"For agent/phase/prompt/skill files, include PROMPT_CRAFT_ADVISORY in the agent prompt. "
-        f"Only memory/, ~/Documents/obsidian-vault/, and /tmp/ are orchestrator-editable during Phase 5."
-    )
+    # Instruction files: ALWAYS delegate — high impact surface regardless of edit size.
+    # Source code: allowed for small edits (orchestrator uses ≤20 line threshold).
+    if is_instruction_file(file_path):
+        return (
+            f"BLOCKED: Instruction file edit during active coding-team session. "
+            f"Instruction files (agents, phases, prompts, skills, hooks, CLAUDE.md) "
+            f"ALWAYS go through the Agent tool — a 1-line change can cascade.\n\n"
+            f"File: {file_path}\n"
+            f"Use the Agent tool to dispatch this edit with PROMPT_CRAFT_ADVISORY.\n\n"
+            f"Known rationalization: 'This instruction file change is trivial' — "
+            f"impact surface determines routing, not perceived complexity."
+        )
+
+    # Non-instruction source code: allow (orchestrator judges ≤20 line threshold)
+    return None
 
 
 # ---------------------------------------------------------------------------
