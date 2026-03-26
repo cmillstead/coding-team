@@ -220,12 +220,11 @@ Each phase reads its detail file on entry. Do not read ahead — load only the a
 
 | File | Purpose |
 |------|---------|
-| `~/.claude/agents/ct-implementer.md` | Implementer (task team member) prompt template |
-| `~/.claude/agents/ct-spec-reviewer.md` | Spec compliance + TDD verification (read-only) |
-| `~/.claude/agents/ct-simplify-auditor.md` | Simplify auditor — clarity and complexity (read-only) |
-| `~/.claude/agents/ct-harden-auditor.md` | Harden auditor — security and resilience (read-only) |
-| `~/.claude/agents/ct-prompt-craft-auditor.md` | Prompt-craft auditor — CC instruction quality (read-only, conditional) |
-| `~/.claude/agents/ct-harness-engineer.md` | Harness engineer — hooks, rules, settings, constraint promotion, maturity (read-write for audit commands) |
-| `prompts/quality-reviewer.md` | Legacy quality reviewer (use simplify + harden instead) |
-| `~/.claude/agents/ct-spec-doc-reviewer.md` | Design doc reviewer template |
-| `~/.claude/agents/ct-plan-doc-reviewer.md` | Plan doc reviewer template |
+| `agents/ct-implementer.md` | Implementer (task team member) prompt template |
+| `agents/ct-spec-reviewer.md` | Spec compliance + TDD verification (read-only) |
+| `agents/ct-simplify-auditor.md` | Simplify auditor — clarity and complexity (read-only) |
+| `agents/ct-harden-auditor.md` | Harden auditor — security and resilience (read-only) |
+| `agents/ct-prompt-craft-auditor.md` | Prompt-craft auditor — CC instruction quality (read-only, conditional) |
+| `agents/ct-harness-engineer.md` | Harness engineer — hooks, rules, settings, constraint promotion, maturity (read-write for audit commands) |
+| `agents/ct-spec-doc-reviewer.md` | Design doc reviewer template |
+| `agents/ct-plan-doc-reviewer.md` | Plan doc reviewer template |
