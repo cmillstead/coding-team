@@ -1,27 +1,36 @@
 #!/usr/bin/env python3
-"""Claude Code SessionStart hook: verify all Python hooks are healthy.
+"""Claude Code SessionStart hook: verify hooks are healthy and analyze metrics.
 
-Runs each Python hook in ~/.claude/hooks/ with empty JSON input and a timeout.
-Reports any hooks that crash, have syntax errors, or timeout. A broken hook
-silently degrades to no protection — this hook makes that degradation visible.
+Two responsibilities merged into one SessionStart hook:
+1. Structural health checks — runs each Python/shell hook with empty input,
+   reports crashes, syntax errors, or timeouts. A broken hook silently degrades
+   to no protection; this makes that degradation visible.
+2. Metrics analysis — reads JSONL files from ~/.claude/metrics/, computes
+   aggregate statistics for recent sessions, and surfaces anomalies:
+   - High Edit:Read ratio (>3:1) suggests stale context
+   - Excessive Bash calls (>30) suggests retry loops
+   - Long sessions (200+ tool calls) need compaction
+   - Low search usage — many edits with no Grep/Glob
 
-Does NOT block the session — verification is advisory. A broken hook should
-be fixed, not prevent work.
-
-Note: This hook verifies STRUCTURAL health only (syntax errors, import failures,
-crashes, timeouts). It does NOT verify behavioral correctness — that is covered
-by the pytest suite in hooks/tests/. A hook that passes health check but has a
-logic bug will still be caught by the test suite.
+Does NOT block the session — all output is advisory.
 """
 import json
+import os
 import shutil
 import subprocess
 import sys
+from collections import Counter
+from datetime import datetime, timezone
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent))
+from _lib.output import allow_with_reason
 
 HOOKS_DIR = Path.home() / ".claude" / "hooks"
 SETTINGS_PATH = Path.home() / ".claude" / "settings.json"
+METRICS_DIR = Path.home() / ".claude" / "metrics"
 TIMEOUT_SECONDS = 5
+MAX_METRICS_FILES = 3
 
 
 def check_hook(hook_path: Path) -> str | None:
@@ -203,6 +212,21 @@ def check_mcp_health() -> list[str]:
     return issues
 
 
+def check_skill_symlinks() -> list[str]:
+    """Check that symlinks in ~/.claude/skills/ are not broken.
+
+    Returns a list of warning strings for broken symlinks.
+    """
+    skills_dir = Path.home() / ".claude" / "skills"
+    if not skills_dir.is_dir():
+        return []
+    broken = []
+    for entry in sorted(skills_dir.iterdir()):
+        if entry.is_symlink() and not entry.resolve().exists():
+            broken.append(f"Broken symlink: {entry.name} -> {os.readlink(entry)}")
+    return broken
+
+
 def main():
     if not HOOKS_DIR.is_dir():
         return
@@ -233,7 +257,10 @@ def main():
     # Check instruction file lengths (case study #24: context saturation)
     length_warnings = check_instruction_file_lengths()
 
-    if not unhealthy and not mcp_issues and not length_warnings:
+    # Check skill symlinks (merged from symlink-integrity-check.py)
+    symlink_issues = check_skill_symlinks()
+
+    if not unhealthy and not mcp_issues and not length_warnings and not symlink_issues:
         return  # All healthy — silent success
 
     parts = []
@@ -256,9 +283,15 @@ def main():
             "Context saturation degrades compliance beyond ~200 lines:\n"
             + "\n".join(f"  - {w}" for w in length_warnings)
         )
+    if symlink_issues:
+        parts.append(
+            f"Skill symlink check: {len(symlink_issues)} broken symlink(s).\n"
+            + "\n".join(f"  - {s}" for s in symlink_issues)
+            + "\n\nFix with: ln -sf <repo-skill-dir> ~/.claude/skills/<name>"
+        )
 
     msg = "\n\n".join(parts)
-    print(json.dumps({"decision": "allow", "reason": msg}))
+    allow_with_reason(msg)
 
 
 if __name__ == "__main__":
