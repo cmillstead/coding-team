@@ -45,7 +45,12 @@ def main():
         exit_code = tool_result.get("exit_code")
         if exit_code is not None and exit_code != 0:
             has_error = True
-    if any(marker in result_str.lower() for marker in ["error", "traceback", "exception"]):
+        elif exit_code is None:
+            # No exit code available — fall back to keyword detection
+            if any(marker in result_str.lower() for marker in ["error", "traceback", "exception"]):
+                has_error = True
+        # If exit_code == 0, trust the exit code over keywords
+    elif any(marker in result_str.lower() for marker in ["error", "traceback", "exception"]):
         has_error = True
 
     METRICS_DIR.mkdir(parents=True, exist_ok=True)

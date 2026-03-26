@@ -35,7 +35,10 @@ def _check_path(target: Path) -> None:
     for deploy_dir, repo_dir in TRACKED_DIRS.items():
         deploy_resolved = deploy_dir.resolve()
         if str(target).startswith(str(deploy_resolved)):
-            relative = target.relative_to(deploy_resolved)
+            try:
+                relative = target.relative_to(deploy_resolved)
+            except ValueError:
+                continue
             repo_copy = repo_dir / relative
 
             if not repo_copy.exists():

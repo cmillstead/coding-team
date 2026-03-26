@@ -21,12 +21,22 @@ MAX_AGE_SECONDS = 2 * 60 * 60  # 2 hours
 
 
 def is_docs_or_md(file_path: str) -> bool:
-    """Return True if the file is markdown or under docs/memory directories."""
+    """Return True if the file is markdown or a file under top-level docs/memory dirs.
+
+    Only exempts .md files unconditionally. For docs/ and memory/ directories,
+    requires the segment to appear as a top-level directory (first real path
+    component after any leading / or drive) to avoid false positives on paths
+    like src/memory/cache.py or pkg/docs/parser.py.
+    """
     p = Path(file_path)
     if p.suffix == ".md":
         return True
+    # Only exempt if docs or memory is a top-level directory segment
+    # (i.e., the path starts with docs/ or memory/ relative to the working dir)
     parts = p.parts
-    if "docs" in parts or "memory" in parts:
+    # For absolute paths, check index 1 (after '/'); for relative, check index 0
+    top_index = 1 if parts and parts[0] == "/" else 0
+    if len(parts) > top_index and parts[top_index] in ("docs", "memory"):
         return True
     return False
 
