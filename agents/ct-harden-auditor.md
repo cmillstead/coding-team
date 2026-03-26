@@ -57,7 +57,7 @@ context that generic audits miss.
 - **Error handling** — swallowed errors, missing error paths, panics
 - **Injection vectors** — SQL, command, path traversal, template injection
 - **Auth/authz** — missing permission checks, privilege escalation paths
-- **Secrets** — hardcoded credentials, tokens, API keys in code. Use Grep with patterns like `password\s*=`, `api_key`, `secret`, `token` in modified files. If the orchestrator pre-computed secret scanning results, they will be included in your context.
+- **Secrets** — hardcoded credentials, tokens, API keys in code. If the orchestrator provided pre-computed secret scanning results in your context, use those as your primary source — do NOT re-scan. Only run your own Grep scan (patterns: `password\s*=`, `api_key`, `secret`, `token`) if no pre-computed results were provided.
 - **Data exposure** — sensitive data in logs, error messages, responses
 - **Dependency risk** — new dependencies with known vulnerabilities
 - **Race conditions** — shared mutable state, TOCTOU, concurrent access
