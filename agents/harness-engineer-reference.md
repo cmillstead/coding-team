@@ -57,7 +57,7 @@ When you find an instruction-quality issue during a harness audit, note it as "R
 
 The most important pattern in harness engineering: **failure → observation → prompt fix → hook promotion → structural constraint.**
 
-Every feedback memory (`memory/feedback-*.md`) represents a completed observation step. Your job is to evaluate whether the fix has been promoted far enough up the leverage ladder:
+Every feedback memory (discovered via Glob for `feedback-*.md` in the project memory directory — see audit protocol step 3) represents a completed observation step. Your job is to evaluate whether the fix has been promoted far enough up the leverage ladder:
 
 ```
 Prompt text fix          ← degrades under context pressure

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Claude Code PreToolUse hook: warn when orchestrator edits non-allowlisted files during Phase 5.
+"""Claude Code PreToolUse hook: block orchestrator edits to non-allowlisted files during Phase 5.
 
 During the execution phase, all file edits should be delegated to agents.
 The orchestrator may only edit memory files (memory/), the Obsidian vault
@@ -39,17 +39,9 @@ def is_orchestrator_file(file_path: str) -> bool:
     if "/Documents/obsidian-vault/" in path_str:
         return True
 
-    p = Path(file_path)
-    parts = p.parts
-    top_index = 1 if parts and parts[0] == "/" else 0
-
-    if len(parts) <= top_index:
-        return False
-
-    top_dir = parts[top_index]
-
-    # memory/ directory is allowed
-    if top_dir == "memory":
+    # memory/ directory is allowed — check for /memory/ anywhere in path
+    # because project memory paths are absolute: ~/.claude/projects/.../memory/
+    if "/memory/" in path_str or path_str.endswith("/memory"):
         return True
 
     return False
@@ -121,14 +113,15 @@ def main():
         # Memory/vault/tmp files are fine for orchestrator to edit directly
         return
 
-    # Code file during execution phase — warn
+    # Code file during execution phase — BLOCK (not warn)
+    # Warnings are routinely ignored under context pressure (feedback-warnings-escape-hatch.md).
+    # Constrain > Inform: make it impossible, don't ask nicely.
     print(json.dumps({
-        "decision": "allow",
+        "decision": "block",
         "reason": (
-            f"You are the orchestrator. During execution phase, you delegate all file edits — you do not make them directly. "
+            f"BLOCKED: During execution phase, the orchestrator delegates all file edits — never makes them directly. "
             f"Use the Agent tool to dispatch this edit of {file_path}. "
             f"For agent/phase/prompt/skill files, include PROMPT_CRAFT_ADVISORY in the agent prompt. "
-            f"Known rationalization: 'These are doc-level edits, not code' — file extension does not determine delegation. "
             f"Only memory/, ~/Documents/obsidian-vault/, and /tmp/ are orchestrator-editable during Phase 5."
         ),
     }))

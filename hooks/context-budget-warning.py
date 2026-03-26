@@ -70,12 +70,13 @@ def estimate_from_tool_count() -> float | None:
     tool call. Between parses, returns the cached estimate. This reduces
     the cost from O(n^2) over a session to O(n).
 
-    Calibration assumptions (200K token window):
+    Calibration assumptions (1M token window, Opus 4.6):
     - Average tool call consumes ~1000 tokens (input + output + reasoning)
-    - 50 calls ~ 25% (50K tokens)
-    - 100 calls ~ 50% (100K tokens)
-    - 150 calls ~ 75% (150K tokens)
-    - 200 calls ~ 95% (approaching limit)
+    - 200 calls ~ 20% (200K tokens)
+    - 500 calls ~ 50% (500K tokens)
+    - 700 calls ~ 70% (700K tokens)
+    - 850 calls ~ 85% (850K tokens)
+    - 950 calls ~ 95% (approaching limit)
 
     Returns None if metrics directory doesn't exist or no data for session.
     """
@@ -133,9 +134,9 @@ def estimate_from_tool_count() -> float | None:
     if count < 30:
         return None  # too few calls to estimate meaningfully
 
-    # Linear mapping: 0 calls = 0%, 200 calls = 95%
+    # Linear mapping: 0 calls = 0%, 1000 calls = 95% (calibrated for 1M token window)
     # Capped at 95% since we can't know the exact limit
-    estimated = min(95.0, (count / 200.0) * 95.0)
+    estimated = min(95.0, (count / 1000.0) * 95.0)
 
     # Save to cache for skip-interval optimization
     if cache_file is not None:
@@ -211,7 +212,7 @@ def get_context_percent(event: dict) -> float | None:
 
     # Source 4: Heuristic from tool call count (via metrics-logger JSONL)
     # Imprecise but provides a working signal when no other source is available.
-    # Calibration: based on typical 200K context window, ~1K tokens per tool call average.
+    # Calibration: based on 1M context window (Opus 4.6), ~1K tokens per tool call average.
     estimated = estimate_from_tool_count()
     if estimated is not None:
         return estimated
