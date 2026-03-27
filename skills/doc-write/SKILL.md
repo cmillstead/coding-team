@@ -84,39 +84,7 @@ Ask the user which to prioritize if multiple are needed. Default to README first
 
 ### 5. Mermaid diagrams
 
-Use mermaid for architecture overviews, data flow, and component relationships. Include at least one diagram in ARCHITECTURE.md and consider one in README.md for complex projects.
-
-**Safe mermaid rules** (mermaid injection is real):
-- NEVER use `click` directives — they execute JavaScript in browser renderers
-- NEVER use HTML labels (`<b>`, `<script>`, etc.) — use plain text labels only
-- NEVER embed URLs in node definitions — use a separate legend or prose links
-- Keep node labels to alphanumeric text, hyphens, and spaces — no special characters from code symbols without sanitizing
-- Wrap all node labels in double quotes to prevent syntax injection: `A["Auth Service"]`
-
-**Common diagram types:**
-
-```markdown
-## System Overview
-` ` `mermaid
-graph TD
-    A["Client"] --> B["API Gateway"]
-    B --> C["Auth Service"]
-    B --> D["Core Service"]
-    D --> E["Database"]
-` ` `
-
-## Data Flow
-` ` `mermaid
-sequenceDiagram
-    participant U as "User"
-    participant A as "API"
-    participant D as "DB"
-    U->>A: Request
-    A->>D: Query
-    D-->>A: Result
-    A-->>U: Response
-` ` `
-```
+Use mermaid for architecture overviews, data flow, and component relationships. Include at least one diagram in ARCHITECTURE.md and consider one in README.md for complex projects. Read `skills/doc-write/mermaid-reference.md` for safe-mermaid rules and diagram templates before writing any mermaid block.
 
 ### 6. ARCHITECTURE.md structure
 

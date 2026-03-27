@@ -128,12 +128,9 @@ Each phase reads its detail file on entry. Do not read ahead — load only the a
 **Input:** Approved plan from Phase 4.
 **Output:** Implemented, tested, audited code on feature branch.
 **Detail:** Read `phases/execution.md`
-**Exit gate (all 4 steps blocking — do NOT proceed to Phase 6 until complete):**
-1. **Full-suite verification** — run complete test suite + linter after ALL tasks (not just per-task). Fresh output required.
-2. **Feature-level QA** — dispatch `ct-qa-reviewer` via Agent tool (detail: `phases/execution.md`). Skip ONLY if 1 task AND ≤3 files changed.
-3. **Doc-drift scan** — read `phases/doc-drift-scan.md` and follow.
-4. **Second-opinion gate** — run `command -v codex`; if available, ALWAYS offer per `phases/post-execution-review.md`. Do NOT skip, pre-decide, or rationalize away.
-Known rationalization: "All tasks passed individually so we're done" — per-task verification catches per-task bugs. These 4 steps catch cross-task integration failures, dark features, doc drift, and cross-model blind spots. They are different quality dimensions.
+**Exit gate (all 4 blocking — do NOT proceed to Phase 6 until complete):**
+1. Full-suite test + lint (fresh output, not per-task). 2. `ct-qa-reviewer` via Agent tool (skip only if 1 task AND ≤3 files). 3. Doc-drift scan (`phases/doc-drift-scan.md`). 4. Second-opinion gate (`phases/post-execution-review.md`) — offer if codex available, NEVER skip.
+Known rationalization: "All tasks passed individually" — these 4 steps catch cross-task failures, dark features, doc drift, and cross-model blind spots.
 
 ### Phase 6: Completion
 **Purpose:** Verify, merge/PR/keep/discard, learning loop.
