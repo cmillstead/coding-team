@@ -39,6 +39,8 @@ After all tasks are executed and verified:
    - After fixes, re-run Codex to verify. Only proceed when findings are resolved.
    - If no P1/P2 findings (only P3 or clean): continue with step 4.
 
+   **Note:** `/second-opinion` writes `/tmp/second-opinion-completed` on completion. `/release` checks for this marker before pushing — if missing inside the pipeline, it stops and asks the user to run `/second-opinion` or explicitly skip.
+
 4. **If Codex not available OR Codex review done with findings resolved**, print this VERBATIM:
 
 > ---

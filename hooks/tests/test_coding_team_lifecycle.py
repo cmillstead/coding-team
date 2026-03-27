@@ -114,6 +114,38 @@ class TestSubSkillsPassThrough:
         assert result.stdout.strip() == ""
 
 
+class TestPostToolUseCleanup:
+    """PostToolUse for coding-team cleans up all marker files."""
+
+    def test_removes_second_opinion_marker_on_post(self):
+        """Second-opinion completion marker is cleaned up when pipeline ends."""
+        so_marker = "/tmp/second-opinion-completed"
+        # Create both the active file and second-opinion marker atomically
+        code = (
+            "import sys, json, os, io, time, runpy\n"
+            f"sys.path.insert(0, {str(HOOKS_DIR)!r})\n"
+            "with open('/tmp/coding-team-active', 'w') as _f:\n"
+            "    _f.write(str(time.time()))\n"
+            "with open('/tmp/second-opinion-completed', 'w') as _f:\n"
+            "    _f.write('done')\n"
+        )
+        hook_path = str(HOOKS_DIR / "coding-team-lifecycle.py")
+        code += f"runpy.run_path({hook_path!r}, run_name='__main__')\n"
+
+        event = {"tool_name": "Skill", "tool_input": {"skill": "coding-team"},
+                 "tool_result": "done"}
+        result = subprocess.run(
+            ["python3", "-c", code],
+            input=json.dumps(event),
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        assert result.returncode == 0
+        assert not os.path.exists(so_marker)
+        assert not os.path.exists(ACTIVE_FILE)
+
+
 class TestNonCodingTeamSkill:
     def test_allows_silently_for_other_skills(self, run_hook, make_event):
         event = make_event("Skill", skill="some-other-skill")

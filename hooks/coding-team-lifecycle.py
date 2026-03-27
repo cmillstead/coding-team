@@ -57,6 +57,13 @@ def main():
                 os.remove(session_file)
         except OSError:
             pass
+        # Clean up second-opinion completion marker
+        so_marker = "/tmp/second-opinion-completed"
+        try:
+            if os.path.exists(so_marker):
+                os.remove(so_marker)
+        except OSError:
+            pass
         return
 
     # PreToolUse: check for recursion, then activate

@@ -112,3 +112,4 @@ When both Claude and Codex have reviewed the same code, produce a cross-model an
 - Clean up temp files after every invocation
 - Never present Codex's output as Claude's own analysis — always attribute clearly
 - **ALL findings must be addressed** — fix, defer with user approval, or explain why it's a false positive. "Pre-existing" is NOT valid to skip a finding.
+- After completing any review or challenge (after presenting results), write the completion marker: `touch /tmp/second-opinion-completed`. This marker is checked by `/release` to enforce the second-opinion gate within the pipeline. The marker is cleaned up automatically by the coding-team lifecycle hook when the pipeline ends.
