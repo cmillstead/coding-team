@@ -26,6 +26,7 @@
 - [feedback-hook-accumulation.md](feedback-hook-accumulation.md) — Harness-engineer adds 1-2 hooks per audit cycle without cost/benefit; if >20 hooks, consolidate before adding
 - [feedback-heredoc-commit-bug.md](feedback-heredoc-commit-bug.md) — git-safety-guard now handles -F/--file= and HEREDOC patterns; block-by-default on unparseable messages
 - [feedback-hook-bypass-rationalization.md](feedback-hook-bypass-rationalization.md) — Agent circumvented hook by switching command format; fixed with block-by-default + named rationalization
+- [feedback-exit-gate-colocation.md](feedback-exit-gate-colocation.md) — Mandatory post-execution gates (QA, second-opinion, doc-drift) skipped due to structural demotion + propagation failure; fixed by inlining into SKILL.md exit gate
 
 ## Active Decisions
 
