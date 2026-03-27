@@ -41,6 +41,20 @@ If no PR exists, start from step 1.
    ```
    If lint errors: fix trivially fixable ones, re-run, confirm clean.
 
+4b. **Second-opinion gate (pipeline only):**
+    ```bash
+    ls /tmp/coding-team-active 2>/dev/null
+    ```
+    - If `/tmp/coding-team-active` exists (inside pipeline):
+      ```bash
+      ls /tmp/second-opinion-completed 2>/dev/null
+      ```
+      - If `/tmp/second-opinion-completed` is missing:
+        Print: "Second-opinion gate not completed. Run `/second-opinion review` before shipping, or say 'skip' to proceed without it."
+        STOP and wait for user response. Do NOT proceed to push.
+      - If present: continue to step 5.
+    - If `/tmp/coding-team-active` does NOT exist (standalone /release): skip this step.
+
 5. **Review diff:**
    ```bash
    git diff "$BASE"...HEAD --stat
@@ -64,6 +78,7 @@ If no PR exists, start from step 1.
      Read that protocol, classify the failure, and act accordingly.
      Key rules: read full logs, classify before acting, NEVER fix infra/billing issues with code changes, paste verbatim errors to implementers.
      Do NOT invoke `/coding-team` from within `/release` (recursive invocation).
+   - **After pushing a CI fix:** re-run `gh pr checks "$PR_NUM" --watch --fail-fast` to verify the fix. Do NOT declare success until CI passes. If the fix introduced NEW failures, this counts toward the 3-attempt cap. After 3 total failed fix attempts, close the PR (`gh pr close "$PR_NUM" --delete-branch`) and report to user.
 
 8. **Merge:**
    Merge only when: (a) CI passed in step 7, or (b) no CI checks configured, or (c) user explicitly says "merge" after seeing CI status.
