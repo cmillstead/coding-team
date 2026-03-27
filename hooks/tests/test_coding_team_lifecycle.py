@@ -1,9 +1,9 @@
 """Tests for coding-team-lifecycle.py hook.
 
-NOTE: The live Claude Code session runs hooks (coding-team-done.py) that delete
-/tmp/coding-team-active between our Bash tool calls. To avoid this race condition,
-we create the active file INSIDE the subprocess and run the hook's main() function
-directly, all within a single process invocation.
+NOTE: The live Claude Code session runs hooks that delete /tmp/coding-team-active
+between our Bash tool calls. To avoid this race condition, we create the active file
+INSIDE the subprocess and run the hook's main() function directly, all within a
+single process invocation.
 """
 
 import json
@@ -30,23 +30,6 @@ def cleanup_active_file():
 
 def run_lifecycle_with_setup(event: dict, create_active: bool = False) -> subprocess.CompletedProcess:
     """Run lifecycle hook with optional active file creation, all atomically."""
-    setup = ""
-    if create_active:
-        setup = (
-            "import time\n"
-            "with open('/tmp/coding-team-active', 'w') as _f:\n"
-            "    _f.write(str(time.time()))\n"
-        )
-
-    code = (
-        "import sys, json, os, io\n"
-        f"sys.path.insert(0, {str(HOOKS_DIR)!r})\n"
-        f"{setup}"
-        "from _lib.event import parse_event, get_tool_input\n"
-        "from _lib import output\n"
-        "from coding_team_lifecycle_mod import main\n"
-        "main()\n"
-    )
     # Use runpy to run the hook as a module, calling main()
     code = (
         "import sys, json, os, io, time, runpy\n"
@@ -95,9 +78,40 @@ class TestPostToolUseSkillCodingTeam:
         result = run_lifecycle_with_setup(event, create_active=True)
         assert result.returncode == 0
         # The hook removes the active file on PostToolUse
-        # Verify by checking file existence after subprocess exits
-        # The subprocess created then deleted it, so it should be gone
         assert not os.path.exists(ACTIVE_FILE)
+
+
+class TestSubSkillsPassThrough:
+    """Sub-skills must NOT be blocked when the pipeline is active.
+
+    The recursion guard only protects against re-entering /coding-team itself.
+    Skills like /second-opinion, /debug, /harness-engineer are designed to be
+    invoked WITHIN the pipeline.
+    """
+
+    @pytest.mark.parametrize("skill_name", [
+        "second-opinion",
+        "debug",
+        "harness-engineer",
+        "prompt-craft",
+        "verify",
+        "tdd",
+        "review-feedback",
+        "scope-lock",
+        "scope-unlock",
+        "release",
+        "retrospective",
+        "doc-sync",
+        "parallel-fix",
+        "worktree",
+    ])
+    def test_sub_skill_allowed_when_pipeline_active(self, skill_name):
+        """Sub-skills pass through even when /tmp/coding-team-active exists."""
+        event = {"tool_name": "Skill", "tool_input": {"skill": skill_name}}
+        result = run_lifecycle_with_setup(event, create_active=True)
+        assert result.returncode == 0
+        # Should produce no output (silent allow), not a block
+        assert result.stdout.strip() == ""
 
 
 class TestNonCodingTeamSkill:

@@ -31,6 +31,7 @@
 ## Active Decisions
 
 - [project-harness-done-2026-03-26.md](project-harness-done-2026-03-26.md) — **Harness Level 3 DONE. Moratorium until 2026-04-09. Quarterly audits only. P1-only at maturity.**
+- [project-tier3-harness-assessment-2026-03-27.md](project-tier3-harness-assessment-2026-03-27.md) — Confirmed Tier 3 harness (long-running taxonomy). One gap: 30-40% context budget rule not formalized. Deferred — observe behavior first.
 
 ## Project History (not loaded by default)
 
