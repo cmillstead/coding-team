@@ -82,19 +82,23 @@ Ask the user which to prioritize if multiple are needed. Default to README first
 ## License
 ```
 
-### 5. ARCHITECTURE.md structure
+### 5. Mermaid diagrams
+
+Use mermaid for architecture overviews, data flow, and component relationships. Include at least one diagram in ARCHITECTURE.md and consider one in README.md for complex projects. Read `skills/doc-write/mermaid-reference.md` for safe-mermaid rules and diagram templates before writing any mermaid block.
+
+### 6. ARCHITECTURE.md structure
 
 ```
 # Architecture
 
 ## Overview
-<!-- 2-3 sentence system description + diagram if possible -->
+<!-- 2-3 sentence system description + mermaid diagram -->
 
 ## Components
 <!-- Each major module: what it does, what it talks to -->
 
 ## Data Flow
-<!-- How data moves through the system -->
+<!-- Mermaid sequence diagram showing how data moves -->
 
 ## Key Decisions
 <!-- Why things are the way they are -->
