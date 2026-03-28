@@ -102,6 +102,21 @@ def check_phase5(file_path: str) -> str | None:
     if session is None:
         # Session file missing — check if a session SHOULD be active
         if ACTIVE_MARKER.exists():
+            # Check marker age — stale markers from crashed/compacted sessions
+            # should be cleaned up, not block indefinitely
+            try:
+                marker_content = ACTIVE_MARKER.read_text().strip()
+                marker_ts = float(marker_content) if marker_content else 0
+            except (ValueError, OSError):
+                marker_ts = 0
+            marker_age = time.time() - marker_ts if marker_ts > 0 else float("inf")
+            if marker_age > MAX_AGE_SECONDS:
+                # Stale marker — clean up silently and allow
+                try:
+                    ACTIVE_MARKER.unlink(missing_ok=True)
+                except OSError:
+                    pass
+                return None
             return (
                 "BLOCKED: coding-team session file is missing but the session marker "
                 "(/tmp/coding-team-active) still exists. This suggests the session file "
