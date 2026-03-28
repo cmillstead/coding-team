@@ -27,6 +27,7 @@
 - [feedback-heredoc-commit-bug.md](feedback-heredoc-commit-bug.md) — git-safety-guard now handles -F/--file= and HEREDOC patterns; block-by-default on unparseable messages
 - [feedback-hook-bypass-rationalization.md](feedback-hook-bypass-rationalization.md) — Agent circumvented hook by switching command format; fixed with block-by-default + named rationalization
 - [feedback-exit-gate-colocation.md](feedback-exit-gate-colocation.md) — Mandatory post-execution gates (QA, second-opinion, doc-drift) skipped due to structural demotion + propagation failure; fixed by inlining into SKILL.md exit gate
+- [feedback-lint-scope-rationalization.md](feedback-lint-scope-rationalization.md) — Agent filters lint to "our changed files only" and dismisses rest as pre-existing; fix: exit code gate in git-safety-guard
 
 ## Active Decisions
 
