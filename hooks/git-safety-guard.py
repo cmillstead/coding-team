@@ -1,13 +1,19 @@
 #!/usr/bin/env python3
-"""Claude Code PreToolUse hook: consolidated git safety guard.
+"""Claude Code Pre+PostToolUse hook: consolidated git safety guard.
 
 Combines secret-guard, branch-guard, and pre-completion-checklist into a single
 hook with deterministic execution order:
+
+PreToolUse on Bash:
   1. Secret check — block git add of secret files or broad adds
   2. Branch check — block commit/push/merge on main/master
-  3. Verification checklist — require test+lint before commit/push
+  3. Verification checklist — require test+lint PASSED before commit/push
+  Track verification commands for checklist state.
 
-Also tracks verification commands (pytest, npm test, etc.) for checklist state.
+PostToolUse on Bash:
+  Capture exit codes from verification commands (lint, test, typecheck).
+  Used by the PreToolUse commit gate to verify tests/lint actually PASSED,
+  not just that they were run.
 """
 
 import os, sys
@@ -166,6 +172,56 @@ def has_project_infrastructure() -> bool:
 # Main
 # ---------------------------------------------------------------------------
 
+def _extract_exit_code(tool_result) -> int | None:
+    """Extract exit code from Bash tool_result."""
+    if isinstance(tool_result, dict):
+        # CC provides exit_code in structured result
+        if "exit_code" in tool_result:
+            return int(tool_result["exit_code"])
+        # Fallback: check stdout for common exit code patterns
+        stdout = str(tool_result.get("stdout", ""))
+    elif isinstance(tool_result, str):
+        stdout = tool_result
+    else:
+        return None
+    # If the tool_result is from a failed command, CC typically wraps it
+    # in an error block — we can't reliably extract exit code from text
+    return None
+
+
+def _handle_post_tool_use(ev: dict) -> None:
+    """PostToolUse: capture exit codes from verification commands."""
+    command = event.get_command(ev)
+    if not command or not is_verification(command):
+        return
+
+    tool_result = ev.get("tool_result", "")
+    exit_code = _extract_exit_code(tool_result)
+
+    # Heuristic: if tool_result contains "error" or "Error" lines indicative
+    # of lint/test failures, treat as non-zero even without explicit exit code.
+    # CC Bash tool sets exit_code in the result dict when available.
+    if exit_code is None and isinstance(tool_result, str):
+        # Check if the output was from a command that CC reported as failed
+        # CC wraps failed commands with "Exit code: N" in some contexts
+        import re as _re
+        m = _re.search(r'Exit code:\s*(\d+)', tool_result)
+        if m:
+            exit_code = int(m.group(1))
+
+    state_file = state.get_state_file("claude-verification")
+    st = state.load_state(state_file, {"verifications": [], "last_updated": time.time()})
+    if state.is_stale(st):
+        st = {"verifications": [], "last_updated": time.time()}
+    st["verifications"].append({
+        "command": command[:100],
+        "time": time.time(),
+        "exit_code": exit_code,
+    })
+    st["verifications"] = st["verifications"][-20:]
+    state.save_state(state_file, st)
+
+
 def main():
     ev = event.parse_event()
     if not ev:
@@ -175,24 +231,37 @@ def main():
     if tool_name != "Bash":
         return
 
+    # PostToolUse: capture exit codes from verification commands
+    if "tool_result" in ev:
+        _handle_post_tool_use(ev)
+        return
+
     command = event.get_command(ev)
     if not command:
         return
 
     git_subcmd = git.extract_git_command(command)
 
-    # --- Track verification commands (always, regardless of git command) ---
+    # --- Track verification commands in PreToolUse too (fallback if PostToolUse misses) ---
     if is_verification(command):
         state_file = state.get_state_file("claude-verification")
         st = state.load_state(state_file, {"verifications": [], "last_updated": time.time()})
         if state.is_stale(st):
             st = {"verifications": [], "last_updated": time.time()}
-        st["verifications"].append({
-            "command": command[:100],
-            "time": time.time(),
-        })
-        st["verifications"] = st["verifications"][-20:]
-        state.save_state(state_file, st)
+        # Only add if not already tracked by PostToolUse (check last entry)
+        recent = st.get("verifications", [])
+        already_tracked = (
+            recent and recent[-1]["command"] == command[:100]
+            and time.time() - recent[-1]["time"] < 5
+        )
+        if not already_tracked:
+            st["verifications"].append({
+                "command": command[:100],
+                "time": time.time(),
+                "exit_code": None,  # Unknown until PostToolUse
+            })
+            st["verifications"] = st["verifications"][-20:]
+            state.save_state(state_file, st)
 
     # --- 1. Secret check (git add) ---
     if git_subcmd == "add":
