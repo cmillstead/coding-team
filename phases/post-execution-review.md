@@ -30,7 +30,7 @@ After all tasks are executed and verified:
    - User says "review": run `/second-opinion review` against the diff. Then continue with step 3a.
    - User says "challenge": run `/second-opinion challenge` against the diff. Then continue with step 3a.
    - User says "both": run `/second-opinion review` first, then `/second-opinion challenge`. Then continue with step 3a.
-   - User says "skip" or sends a different message: continue with step 4.
+   - User says "skip" or sends a different message: write the declined marker (`touch /tmp/second-opinion-declined`), then continue with step 4.
 
    3a. **After Codex review completes — findings gate.** If Codex returned ANY P1 or P2 findings:
    - List every finding with severity
@@ -73,4 +73,4 @@ json.dump(d, open(p, 'w'))
    ```
    This flag is checked by `phases/completion.md` to ensure the gate was not skipped.
 
-**User override:** If the user has said "never ask about second opinion" or "skip second-opinion gates" in this session, skip second-opinion in execution for the rest of the session.
+**User override:** If the user wants to skip second-opinion for the rest of the session, run `touch /tmp/second-opinion-declined`. The lifecycle hook checks for this marker — verbal instructions alone will not bypass the gate.
