@@ -187,6 +187,10 @@ coding-team reads `~/.claude/golden-principles.md` during design and planning ph
 - **Immediate feedback**: If an action has a delay, always show a loading/progress indicator — never leave the user with no feedback
 - **WCAG 2.1 AA compliance**: Keyboard accessible, color contrast, ARIA labels, focus indicators, semantic HTML, `prefers-reduced-motion` respect
 
+## Hook Deployment
+
+Hooks: source in `hooks/`, deployed to `~/.claude/hooks/` via `scripts/deploy.sh`. Always deploy BEFORE updating `settings.json` hook references — reversing the order creates an unrecoverable deadlock.
+
 ## Obsidian Vault
 
 - Location: `~/Documents/obsidian-vault/`

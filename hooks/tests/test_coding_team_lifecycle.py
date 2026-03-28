@@ -73,9 +73,28 @@ class TestPreToolUseSkillCodingTeam:
 
 class TestPostToolUseSkillCodingTeam:
     def test_removes_active_file_on_post(self):
+        """PostToolUse cleanup runs when second-opinion gate passes."""
+        # Create active file + declined marker so the gate passes
+        code = (
+            "import sys, json, os, io, time, runpy\n"
+            f"sys.path.insert(0, {str(HOOKS_DIR)!r})\n"
+            "with open('/tmp/coding-team-active', 'w') as _f:\n"
+            "    _f.write(str(time.time()))\n"
+            "with open('/tmp/second-opinion-declined', 'w') as _f:\n"
+            "    _f.write('skipped')\n"
+        )
+        hook_path = str(HOOKS_DIR / "coding-team-lifecycle.py")
+        code += f"runpy.run_path({hook_path!r}, run_name='__main__')\n"
+
         event = {"tool_name": "Skill", "tool_input": {"skill": "coding-team"},
                  "tool_result": "done"}
-        result = run_lifecycle_with_setup(event, create_active=True)
+        result = subprocess.run(
+            ["python3", "-c", code],
+            input=json.dumps(event),
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
         assert result.returncode == 0
         # The hook removes the active file on PostToolUse
         assert not os.path.exists(ACTIVE_FILE)
@@ -143,6 +162,95 @@ class TestPostToolUseCleanup:
         )
         assert result.returncode == 0
         assert not os.path.exists(so_marker)
+        assert not os.path.exists(ACTIVE_FILE)
+
+
+class TestSecondOpinionGate:
+    """PostToolUse for coding-team blocks completion unless second-opinion was addressed.
+
+    Fail-closed: if neither /tmp/second-opinion-completed nor /tmp/second-opinion-declined
+    exists, the hook blocks pipeline completion. This is structural enforcement — the LLM
+    cannot rationalize past it.
+    """
+
+    SO_COMPLETED = "/tmp/second-opinion-completed"
+    SO_DECLINED = "/tmp/second-opinion-declined"
+
+    def _run_post_with_markers(self, completed=False, declined=False):
+        """Run PostToolUse for coding-team with optional markers, atomically."""
+        code = (
+            "import sys, json, os, io, time, runpy\n"
+            f"sys.path.insert(0, {str(HOOKS_DIR)!r})\n"
+            "with open('/tmp/coding-team-active', 'w') as _f:\n"
+            "    _f.write(str(time.time()))\n"
+        )
+        if completed:
+            code += (
+                "with open('/tmp/second-opinion-completed', 'w') as _f:\n"
+                "    _f.write('done')\n"
+            )
+        if declined:
+            code += (
+                "with open('/tmp/second-opinion-declined', 'w') as _f:\n"
+                "    _f.write('skipped')\n"
+            )
+        hook_path = str(HOOKS_DIR / "coding-team-lifecycle.py")
+        code += f"runpy.run_path({hook_path!r}, run_name='__main__')\n"
+
+        event = {"tool_name": "Skill", "tool_input": {"skill": "coding-team"},
+                 "tool_result": "done"}
+        return subprocess.run(
+            ["python3", "-c", code],
+            input=json.dumps(event),
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+
+    def test_blocks_when_neither_marker_exists(self):
+        """Fail-closed: no markers → block completion."""
+        result = self._run_post_with_markers(completed=False, declined=False)
+        assert result.returncode == 0
+        parsed = json.loads(result.stdout)
+        assert parsed["decision"] == "block"
+        assert "second-opinion" in parsed["reason"].lower()
+
+    def test_allows_when_completed_marker_exists(self):
+        """User ran codex → allow completion."""
+        result = self._run_post_with_markers(completed=True)
+        assert result.returncode == 0
+        # Should produce no block output (silent allow + cleanup)
+        stdout = result.stdout.strip()
+        if stdout:
+            parsed = json.loads(stdout)
+            assert parsed.get("decision") != "block"
+
+    def test_allows_when_declined_marker_exists(self):
+        """User explicitly declined → allow completion."""
+        result = self._run_post_with_markers(declined=True)
+        assert result.returncode == 0
+        stdout = result.stdout.strip()
+        if stdout:
+            parsed = json.loads(stdout)
+            assert parsed.get("decision") != "block"
+
+    def test_cleans_up_completed_marker_after_gate_passes(self):
+        """Markers are cleaned up when the pipeline completes."""
+        self._run_post_with_markers(completed=True)
+        assert not os.path.exists(self.SO_COMPLETED)
+        assert not os.path.exists(ACTIVE_FILE)
+
+    def test_cleans_up_declined_marker_after_gate_passes(self):
+        """Declined marker is cleaned up when the pipeline completes."""
+        self._run_post_with_markers(declined=True)
+        assert not os.path.exists(self.SO_DECLINED)
+        assert not os.path.exists(ACTIVE_FILE)
+
+    def test_cleans_up_both_markers_after_gate_passes(self):
+        """Both markers cleaned up when both exist."""
+        self._run_post_with_markers(completed=True, declined=True)
+        assert not os.path.exists(self.SO_COMPLETED)
+        assert not os.path.exists(self.SO_DECLINED)
         assert not os.path.exists(ACTIVE_FILE)
 
 
