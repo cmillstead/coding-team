@@ -70,7 +70,8 @@
       "Bash(cp /Users/cevin/.claude/skills/coding-team/hooks/git-safety-guard.py /Users/cevin/.claude/hooks/git-safety-guard.py)",
       "Bash(cp /Users/cevin/.claude/skills/coding-team/hooks/write-guard.py /Users/cevin/.claude/hooks/write-guard.py)",
       "Bash(defuddle parse:*)",
-      "Bash(cd:*)"
+      "Bash(cd:*)",
+      "Bash(do cp:*)"
     ]
   }
 }

@@ -13,6 +13,18 @@ import pytest
 
 
 HOOKS_DIR = Path("/Users/cevin/.claude/skills/coding-team/hooks")
+ACTIVE_MARKER = Path("/tmp/coding-team-active")
+SESSION_FILE = Path("/tmp/coding-team-session.json")
+
+
+@pytest.fixture(autouse=True)
+def clean_markers():
+    """Ensure no stale session markers leak between tests."""
+    ACTIVE_MARKER.unlink(missing_ok=True)
+    SESSION_FILE.unlink(missing_ok=True)
+    yield
+    ACTIVE_MARKER.unlink(missing_ok=True)
+    SESSION_FILE.unlink(missing_ok=True)
 
 # Encode mock-triggering test data as base64 to avoid the no-mocks hook
 # scanning THIS file and blocking the write. These are INPUT strings we
@@ -109,13 +121,14 @@ class TestIdentityFramingAdvisory:
 class TestSessionTamperDetection:
     """Test that write-guard detects session file deletion mid-session."""
 
-    def test_blocks_when_active_marker_exists_but_session_missing(self, run_hook, make_event, tmp_path):
-        """If active marker exists but session JSON is missing, block."""
+    def test_blocks_when_fresh_marker_exists_but_session_missing(self, run_hook, make_event):
+        """If a recent active marker exists but session JSON is missing, block."""
         active_marker = Path("/tmp/coding-team-active")
         session_file = Path("/tmp/coding-team-session.json")
 
-        # Create active marker, ensure session file doesn't exist
-        active_marker.touch()
+        # Create active marker with a fresh timestamp
+        import time
+        active_marker.write_text(str(time.time()))
         if session_file.exists():
             session_file.unlink()
 
@@ -125,6 +138,47 @@ class TestSessionTamperDetection:
             assert result.parsed is not None
             assert result.parsed["decision"] == "block"
             assert "session file is missing" in result.parsed["reason"].lower() or "session marker" in result.parsed["reason"].lower()
+        finally:
+            active_marker.unlink(missing_ok=True)
+
+    def test_allows_stale_marker_without_session(self, run_hook, make_event):
+        """If active marker is older than MAX_AGE (2h), auto-clean and allow."""
+        active_marker = Path("/tmp/coding-team-active")
+        session_file = Path("/tmp/coding-team-session.json")
+
+        # Create active marker with a stale timestamp (3 hours ago)
+        import time
+        active_marker.write_text(str(time.time() - 3 * 60 * 60))
+        if session_file.exists():
+            session_file.unlink()
+
+        try:
+            event = make_event("Edit", file_path="/some/code/file.py", old_string="x", new_string="y")
+            result = run_hook("write-guard.py", event)
+            # Should not block — stale marker gets cleaned up
+            if result.parsed:
+                assert result.parsed.get("decision") != "block" or "session" not in result.parsed.get("reason", "").lower()
+            # Marker should have been cleaned up
+            assert not active_marker.exists()
+        finally:
+            active_marker.unlink(missing_ok=True)
+
+    def test_allows_empty_marker_without_session(self, run_hook, make_event):
+        """If active marker has no timestamp (empty), treat as stale and allow."""
+        active_marker = Path("/tmp/coding-team-active")
+        session_file = Path("/tmp/coding-team-session.json")
+
+        # Create empty marker (e.g. from touch command)
+        active_marker.touch()
+        if session_file.exists():
+            session_file.unlink()
+
+        try:
+            event = make_event("Edit", file_path="/some/code/file.py", old_string="x", new_string="y")
+            result = run_hook("write-guard.py", event)
+            # Should not block — empty marker treated as stale
+            if result.parsed:
+                assert result.parsed.get("decision") != "block" or "session" not in result.parsed.get("reason", "").lower()
         finally:
             active_marker.unlink(missing_ok=True)
 
