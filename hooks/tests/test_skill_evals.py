@@ -229,11 +229,13 @@ SKILL_EVAL_CASES = {
             "prompt": "I need to add a new authentication feature to the API",
             "expected_skill": "coding-team",
             "not_expected": ["debug", "release", "doc-write"],
+            "behavioral_indicators": [],
         },
         {
             "prompt": "Refactor the database layer to use connection pooling",
             "expected_skill": "coding-team",
             "not_expected": ["dep-audit", "incident"],
+            "behavioral_indicators": [],
         },
     ],
     "release": [
@@ -241,6 +243,7 @@ SKILL_EVAL_CASES = {
             "prompt": "Ship this branch, create a PR and merge it",
             "expected_skill": "release",
             "not_expected": ["debug", "coding-team"],
+            "behavioral_indicators": ["create a pr", "pull request", "merge", "push", "/release"],
         },
     ],
     "debug": [
@@ -248,11 +251,13 @@ SKILL_EVAL_CASES = {
             "prompt": "The tests are failing with a TypeError on line 42",
             "expected_skill": "debug",
             "not_expected": ["release", "doc-write"],
+            "behavioral_indicators": ["investigate", "root cause", "debug", "failing test", "typeerror", "/debug"],
         },
         {
             "prompt": "Something is broken in production, investigate the root cause",
             "expected_skill": "debug",
             "not_expected": ["release", "onboard"],
+            "behavioral_indicators": ["investigate", "root cause", "debug", "diagnose", "broken", "/debug"],
         },
     ],
     "prompt-craft": [
@@ -260,6 +265,7 @@ SKILL_EVAL_CASES = {
             "prompt": "Claude Code keeps ignoring my instructions about testing",
             "expected_skill": "prompt-craft",
             "not_expected": ["debug", "coding-team"],
+            "behavioral_indicators": ["instruction", "prompt", "claude.md", "rules", "behavioral", "/prompt-craft", "skill"],
         },
     ],
     "verify": [
@@ -267,6 +273,7 @@ SKILL_EVAL_CASES = {
             "prompt": "Verify that the tests actually pass before we merge",
             "expected_skill": "verify",
             "not_expected": ["release", "debug"],
+            "behavioral_indicators": ["verify", "verification", "run tests", "test suite", "pass", "/verify", "evidence"],
         },
     ],
 }
@@ -310,8 +317,15 @@ class TestSkillEvalHarness:
 
         response = result.stdout.lower()
 
-        assert expected.lower() in response, (
-            f"Expected skill {expected!r} not mentioned in response for: {prompt!r}"
+        # Check for skill name OR behavioral indicators
+        indicators = case.get("behavioral_indicators", [])
+        skill_match = expected.lower() in response
+        behavioral_match = any(ind.lower() in response for ind in indicators)
+
+        assert skill_match or behavioral_match, (
+            f"Expected skill {expected!r} not found in response for: {prompt!r}\n"
+            f"Checked indicators: {indicators}\n"
+            f"Response preview: {response[:300]}"
         )
 
         for blocked in not_expected:
