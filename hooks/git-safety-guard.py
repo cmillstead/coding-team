@@ -331,6 +331,28 @@ def main():
             for v in recent
         )
 
+        # Check that the most recent test and lint runs actually passed
+        # Exit code 5 = pytest "no tests collected" — treat as passing
+        failed_tests = [v for v in recent
+                        if re.search(r'test|jest|vitest|pytest|cargo\s+test|go\s+test', v["command"])
+                        and v.get("exit_code") is not None and v["exit_code"] not in (0, 5)]
+        failed_lint = [v for v in recent
+                       if re.search(r'lint|eslint|tsc|mypy|ruff|clippy|shellcheck', v["command"])
+                       and v.get("exit_code") is not None and v["exit_code"] != 0]
+
+        if failed_tests or failed_lint:
+            msg = "PRE-COMPLETION CHECKLIST FAILED\n\n"
+            msg += "Verification commands ran but FAILED:\n"
+            if failed_tests:
+                msg += f"  - Tests failed (exit code {failed_tests[-1]['exit_code']}): {failed_tests[-1]['command']}\n"
+            if failed_lint:
+                msg += f"  - Lint failed (exit code {failed_lint[-1]['exit_code']}): {failed_lint[-1]['command']}\n"
+            msg += "\nFix the failures before committing. "
+            msg += "Known rationalization: 'pre-existing failure, not my regression' — "
+            msg += "a failing test is a failing test regardless of when it was introduced.\n"
+            output.block(msg)
+            return
+
         missing = []
         if not has_tests:
             missing.append("tests (npm test, pytest, cargo test, etc.)")
