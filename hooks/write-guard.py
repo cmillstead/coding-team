@@ -25,7 +25,7 @@ from _lib import output as _output
 # Phase 5 edit guard constants
 # ---------------------------------------------------------------------------
 SESSION_FILE = Path("/tmp/coding-team-session.json")
-MAX_AGE_SECONDS = 2 * 60 * 60  # 2 hours
+MAX_AGE_SECONDS = 30 * 60  # 30 minutes — stale marker cleanup; legitimate sessions have session JSON
 ACTIVE_MARKER = Path("/tmp/coding-team-active")
 
 
@@ -321,8 +321,8 @@ IDENTITY_MARKERS = [
 ]
 
 
-def is_instruction_file(file_path: str) -> bool:
-    """Check if the file path matches known instruction file patterns."""
+def is_identity_file(file_path: str) -> bool:
+    """Check if the file path matches known identity file patterns (agents, skills)."""
     for pattern in IDENTITY_FILE_PATTERNS:
         if re.search(pattern, file_path):
             return True
@@ -363,7 +363,7 @@ def check_identity_framing(tool_name: str, tool_input: dict) -> str | None:
     """Check identity framing. Returns advisory reason or None."""
     file_path = tool_input.get("file_path", "")
 
-    if not file_path or not is_instruction_file(file_path):
+    if not file_path or not is_identity_file(file_path):
         return None
 
     # For Write, check full content; for Edit, check new_string
