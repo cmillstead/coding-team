@@ -42,8 +42,8 @@ python3 -c "import json, time; json.dump({'phase': 'execution', 'ts': time.time(
 ```
 
 This activates:
-- `phase5-edit-guard.py` — warns if the orchestrator edits code directly instead of delegating
-- `plan-completeness-check.py` — warns if agent output covers fewer findings than assigned
+- `write-guard.py` — blocks if the orchestrator edits instruction files directly instead of delegating via the Agent tool
+- Plan completeness is enforced by the orchestrator's completeness check protocol (see Execution Loop below)
 
 The file auto-expires after 2 hours. Clean up is not required but can be done in Phase 6.
 
