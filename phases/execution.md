@@ -45,7 +45,7 @@ This activates:
 - `write-guard.py` — blocks if the orchestrator edits instruction files directly instead of delegating via the Agent tool
 - Plan completeness is enforced by the orchestrator's completeness check protocol (see Execution Loop below)
 
-The file auto-expires after 2 hours. Clean up is not required but can be done in Phase 6.
+The session file auto-expires after 30 minutes. Clean up is not required but can be done in Phase 6.
 
 ## Execution Loop
 

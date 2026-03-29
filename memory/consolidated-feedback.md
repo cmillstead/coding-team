@@ -50,10 +50,10 @@ type: feedback
 19. **Recursive invocation** — Global routing rules leak into worker contexts. Workers need identity statements overriding global rules: "You ARE the delegate." (Case 19)
 20. **Severity downgrade** — Tool severity tiers (warning/error) become inaction justification. Override tool classification explicitly: "We treat warnings as errors." (Case 20)
 21. **Orphaned resource** — Workflows creating external resources (PRs, infra) need cleanup paths for session abandonment: retry cap + cleanup + session-resume detection. (Case 21)
-22. **Structure-not-behavior tests** — Agents write tests that read source files and check strings. Require behavioral assertions: call function, assert output. (Case 22) *(enforced by hook: agent-quality-tracker.py)*
+22. **Structure-not-behavior tests** — Agents write tests that read source files and check strings. Require behavioral assertions: call function, assert output. (Case 22)
 23. **Unpropagated fix** — Fixing one instance doesn't fix the class. After fixing a vulnerability, search for the same pattern at all analogous sites. (Case 23)
 24. **Context saturation** — Beyond ~300-400 lines, MANDATORY labels stop working. Fix structurally: required output fields, checkpoints at headroom layer, pre-computation. (Case 24) *(enforced by hook: hook-health-check.py — instruction files >200 lines)*
-25. **Incomplete refactor** — Add new pattern, verify it works, REMOVE the old pattern. Skipping step 3 creates contradictory instructions. (Case 25) *(enforced by hook: deliverable-correction.py)*
+25. **Incomplete refactor** — Add new pattern, verify it works, REMOVE the old pattern. Skipping step 3 creates contradictory instructions. (Case 25)
 26. **Tool overload** — 21 tools in one prompt creates selection ambiguity. Cap at 5-6 primary tools, pre-compute results from secondary tools at orchestrator level. (Case 26)
 27. **Trust inversion** — Verification gates defaulting to trust are decoration. Invert: verify always, skip under narrow explicit conditions. (Case 27)
 28. **Exemption accumulation** — Same permission in multiple places amplifies beyond intended scope. One exemption, one canonical location, explicit scope boundary. (Case 28)
