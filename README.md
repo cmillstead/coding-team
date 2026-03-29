@@ -13,29 +13,31 @@ Assembles specialist agent teams to collaboratively work through code tasks. The
 5. **Execution** — task teams (implementer + audit team) build and verify
 6. **Completion** — full verification, learning loop, then merge / PR / keep / discard
 
-Each phase loads on demand — the main SKILL.md is a ~220 line router. Session resume logic and post-execution review load conditionally. Standalone skills can be invoked independently outside the pipeline.
+The main SKILL.md (~200 lines) is a router that delegates to `commands/build.md` (~246 lines) as the primary orchestrator. Phase files in `cookbook/phases/` load on demand. Commands in `commands/` can be invoked as standalone slash commands.
 
 ## Architecture
 
 ### Composable phases
 
-The main SKILL.md is a router that knows the phase sequence, input/output contracts, and which file to read for details. Phase files load on demand. Standalone skills load independently.
+The SKILL.md is a router that knows the phase sequence, input/output contracts, and which file to read for details. `commands/build.md` is the main orchestrator that implements the full pipeline. Phase files load on demand. Commands can be invoked independently outside the pipeline.
 
 **Context window budget:**
 
 | Invocation | Loaded | Lines |
 |---|---|---|
-| `/coding-team` (router decides) | Main SKILL.md | ~218 |
-| `/coding-team` → resume session | Main + `phases/session-resume.md` | ~331 |
-| `/coding-team` → Phase 4 (planning) | Main + `phases/planning.md` | ~386 |
-| `/coding-team` → Phase 5 (execution) | Main + `phases/execution.md` | ~413 |
-| `/coding-team` → Phase 5 post-exec | Main + execution + `phases/post-execution-review.md` | ~471 |
-| `/coding-team` → Phase 2 (design) | Main + `phases/design-team.md` | ~432 |
-| `/coding-team` → Phase 6 (completion) | Main + `phases/completion.md` | ~451 |
-| `/debug` (standalone) | `skills/debug/SKILL.md` only | ~203 |
+| `/coding-team` (router decides) | SKILL.md | ~200 |
+| `/coding-team` → resume session | SKILL.md + `cookbook/phases/session-resume.md` | ~313 |
+| `/coding-team` → Phase 1 (dialogue) | SKILL.md + `cookbook/phases/dialogue.md` | ~239 |
+| `/coding-team` → Phase 2 (design) | SKILL.md + `cookbook/phases/design-team.md` | ~353 |
+| `/coding-team` → Phase 4 (planning) | SKILL.md + `cookbook/phases/planning.md` | ~382 |
+| `/coding-team` → Phase 5 (execution) | SKILL.md + `cookbook/phases/execution.md` | ~405 |
+| `/coding-team` → Phase 5 post-exec | SKILL.md + execution + `cookbook/phases/post-execution-review.md` | ~481 |
+| `/coding-team` → Phase 6 (completion) | SKILL.md + `cookbook/phases/completion.md` | ~361 |
+| `/build` (command) | `commands/build.md` | ~246 |
+| `/debug` (standalone) | `skills/debug/SKILL.md` only | ~200 |
 | `/verify` (standalone) | `skills/verify/SKILL.md` only | ~55 |
-| `/prompt-craft` (standalone) | `skills/prompt-craft/SKILL.md` only | ~249 |
-| `/doc-write` (standalone) | `skills/doc-write/SKILL.md` only | ~185 |
+| `/prompt-craft` (standalone) | `skills/prompt-craft/SKILL.md` only | ~152 |
+| `/doc-write` (standalone) | `skills/doc-write/SKILL.md` only | ~189 |
 | `/dep-audit` (standalone) | `skills/dep-audit/SKILL.md` only | ~108 |
 | `/migration-guide` (standalone) | `skills/migration-guide/SKILL.md` only | ~127 |
 | `/onboard` (standalone) | `skills/onboard/SKILL.md` only | ~101 |
@@ -43,7 +45,7 @@ The main SKILL.md is a router that knows the phase sequence, input/output contra
 | `/api-qa` (standalone) | `skills/api-qa/SKILL.md` only | ~93 |
 | `/incident` (standalone) | `skills/incident/SKILL.md` only | ~129 |
 
-Phase files do not reference each other. The main SKILL.md's phase contracts define the input/output handoff between phases.
+Phase files do not reference each other. The SKILL.md's phase contracts define the input/output handoff between phases.
 
 ### Agent teams vs subagents
 
@@ -101,7 +103,7 @@ For fresh tasks (no prior plans), it routes based on what you bring:
 
 | You have... | Entry point |
 |---|---|
-| Task modifying CC instruction files (phases, prompts, skills, CLAUDE.md) + vague request | Phase 2 with Prompt/Skill Specialist |
+| Task modifying CC instruction files + vague request | Phase 2 with Prompt/Skill Specialist |
 | Task modifying CC instruction files + complete spec | Phase 4 with prompt-craft advisory |
 | CC behavioral issue ("CC keeps doing X", "CC ignores instructions") | `/prompt-craft diagnose` |
 | A vague idea or new feature request | Phase 1 — dialogue to clarify |
@@ -192,26 +194,58 @@ Each task gets a **task team**: an implementer (using TDD) plus an audit team of
 
 Full test suite + linter verification, then four options: merge locally, push and create PR (max 3 CI fix attempts, auto-cleanup on failure), keep branch as-is, or discard (requires typing "discard" to confirm). Completion summary persists to `docs/retros/` — either incorporated into the retrospective or saved standalone if the user skips `/retrospective`. A decision log prompt asks the user to record any architectural decisions made during the feature to `memory/decisions/`. A **Memory Nudge** then extracts session learnings: codebase facts → project-local `docs/team-memory.md` (with archive rotation), cross-project patterns → `memory/patterns.md`, and a structured episode → Obsidian vault (pattern-rich for vector_search retrieval in future Phase 2 sessions).
 
+## Commands
+
+Commands in `commands/` replace the old inline skill definitions. They can be invoked as standalone slash commands or used by the pipeline:
+
+| Command | File | Purpose | Lines |
+|---|---|---|---|
+| `/build` | `commands/build.md` | Main orchestrator — full design/plan/execute/verify/ship pipeline | ~246 |
+| `/verify` | `commands/verify.md` | Evidence-before-claims gate. Run the command, read the output, then claim the result. | ~55 |
+| `/tdd` | `commands/tdd.md` | Red-green-refactor cycle with verification at each step. | ~31 |
+| `/review-feedback` | `commands/review-feedback.md` | Technical evaluation of code review feedback. Push back when wrong. | ~90 |
+| `/worktree` | `commands/worktree.md` | Isolated git worktree for feature work. | ~79 |
+| `/parallel-fix` | `commands/parallel-fix.md` | Parallel agent dispatch for independent failures. | ~112 |
+| `/second-opinion` | `commands/second-opinion.md` | Cross-model second opinion via OpenAI Codex CLI. | ~114 |
+| `/scope-lock` | `commands/scope-lock.md` | Restrict edits to a directory during debugging. | ~43 |
+| `/scope-unlock` | `commands/scope-unlock.md` | Remove scope-lock edit restriction. | ~20 |
+| `/release` | `commands/release.md` | Automated release: sync base branch, test, push, create PR. | ~107 |
+| `/retrospective` | `commands/retrospective.md` | Post-ship engineering retrospective. | ~87 |
+| `/doc-sync` | `commands/doc-sync.md` | Post-ship documentation update — sync docs with shipped code. | ~64 |
+| `/dep-audit` | `commands/dep-audit.md` | Dependency health, license, and upgrade audit. | ~108 |
+| `/migration-guide` | `commands/migration-guide.md` | Breaking change upgrade guides. | ~121 |
+| `/onboard` | `commands/onboard.md` | Guided codebase orientation. | ~102 |
+| `/a11y` | `commands/a11y.md` | Accessibility audit — WCAG compliance, keyboard nav, ARIA. | ~107 |
+| `/api-qa` | `commands/api-qa.md` | API contract testing — validation, error responses, breaking changes. | ~94 |
+| `/incident` | `commands/incident.md` | Incident response — structured production incident coordination. | ~130 |
+
 ## Standalone skills
 
-These can be invoked independently with their own slash commands, or used automatically by the pipeline:
+These are symlink targets in `skills/` that can be exposed as independent slash commands:
 
 | Skill | Command | Purpose | Lines |
 |---|---|---|---|
-| Debug | `/debug` | Four-phase root cause investigation. Parallel hypothesis teams for complex bugs. Saves reports to `docs/debug/`. | ~201 |
-| Verify | `/verify` | Evidence-before-claims gate. Run the command, read the output, then claim the result. | ~55 |
+| Debug | `/debug` | Four-phase root cause investigation. Parallel hypothesis teams for complex bugs. | ~200 |
+| Verify | `/verify` | Evidence-before-claims gate. | ~55 |
 | TDD | `/tdd` | Red-green-refactor cycle with verification at each step. | ~31 |
 | Review Feedback | `/review-feedback` | Technical evaluation of code review feedback. Push back when wrong. | ~91 |
 | Worktree | `/worktree` | Isolated git worktree for feature work. | ~88 |
 | Parallel Fix | `/parallel-fix` | Parallel agent dispatch for independent failures. | ~141 |
-| Prompt Craft | `/prompt-craft` | Write, evaluate, and refine skills and agent prompts. Diagnose behavioral issues. | ~263 |
-| Harness Engineer | `/harness-engineer` | Harness infrastructure design & audit: hooks, rules, settings, maturity. | ~55 |
-| Second Opinion | `/second-opinion` | Cross-model second opinion via OpenAI Codex CLI. Review, challenge, consult. | ~295 |
+| Prompt Craft | `/prompt-craft` | Write, evaluate, and refine skills and agent prompts. Diagnose behavioral issues. | ~152 |
+| Harness Engineer | `/harness-engineer` | Harness infrastructure design and audit: hooks, rules, settings, maturity. | ~87 |
+| Second Opinion | `/second-opinion` | Cross-model second opinion via OpenAI Codex CLI. | ~115 |
 | Scope Lock | `/scope-lock` | Restrict edits to a directory during debugging. | ~48 |
 | Scope Unlock | `/scope-unlock` | Remove scope-lock edit restriction. | ~26 |
-| Release | `/release` | Automated release: sync base branch, test, push, create PR. CI retry cap + orphan cleanup. | ~89 |
-| Retrospective | `/retrospective` | Post-ship engineering retrospective. Saves to `docs/retros/`, feeds eval criteria to `docs/project-evals.md`. | ~93 |
+| Release | `/release` | Automated release: sync base branch, test, push, create PR. CI retry cap + orphan cleanup. | ~121 |
+| Retrospective | `/retrospective` | Post-ship engineering retrospective. Saves to `docs/retros/`. | ~93 |
 | Doc Sync | `/doc-sync` | Post-ship documentation update — sync docs with shipped code. | ~70 |
+| Doc Write | `/doc-write` | Write docs from scratch or improve existing. | ~189 |
+| Dep Audit | `/dep-audit` | Dependency health, license, and upgrade audit. | ~108 |
+| Migration Guide | `/migration-guide` | Breaking change upgrade guides. | ~127 |
+| Onboard | `/onboard` | Guided codebase orientation. | ~101 |
+| A11y | `/a11y` | Accessibility audit — WCAG compliance, keyboard nav, ARIA. | ~106 |
+| API QA | `/api-qa` | API contract testing — validation, error responses, breaking changes. | ~93 |
+| Incident | `/incident` | Incident response — structured production incident coordination. | ~129 |
 
 ## Internalized protocols
 
@@ -272,9 +306,20 @@ Or add to `~/.claude/settings.json`:
 
 Without this, all coordination falls back to subagents. The skill detects availability automatically at session start.
 
+### Deploy hooks, agents, and config
+
+The deploy script syncs hooks, agents, rules, and config from the repo to `~/.claude/`:
+
+```bash
+cd ~/.claude/skills/coding-team
+bash scripts/deploy.sh
+```
+
+This deploys hooks to `~/.claude/hooks/`, agents to `~/.claude/agents/`, rules to `~/.claude/rules/`, and config to `~/.claude/`. Always run deploy BEFORE updating `settings.json` hook references.
+
 ### Full pipeline only
 
-If you only want the `/coding-team` orchestrated pipeline, you're done.
+If you only want the `/coding-team` orchestrated pipeline, you're done after deploy.
 
 ### Standalone skills (recommended)
 
@@ -282,7 +327,7 @@ Expose individual protocols as standalone slash commands:
 
 ```bash
 # All standalone skills
-for skill in debug verify review-feedback worktree parallel-fix tdd prompt-craft harness-engineer second-opinion scope-lock scope-unlock release retrospective doc-sync; do
+for skill in debug verify review-feedback worktree parallel-fix tdd prompt-craft harness-engineer second-opinion scope-lock scope-unlock release retrospective doc-sync doc-write dep-audit migration-guide onboard a11y api-qa incident; do
   ln -s ~/.claude/skills/coding-team/skills/$skill ~/.claude/skills/$skill
 done
 ```
@@ -293,30 +338,6 @@ Or pick just the ones you want:
 # Just debugging and verification
 ln -s ~/.claude/skills/coding-team/skills/debug ~/.claude/skills/debug
 ln -s ~/.claude/skills/coding-team/skills/verify ~/.claude/skills/verify
-```
-
-### Optional: session-start hook
-
-A lightweight `UserPromptSubmit` hook suggests `/coding-team` on the first message of each session for code tasks. It skips greetings, meta questions, and non-code requests.
-
-```bash
-cp hooks/coding-team-router.py ~/.claude/hooks/
-```
-
-Then add to `~/.claude/settings.json`:
-
-```json
-"UserPromptSubmit": [
-  {
-    "matcher": "",
-    "hooks": [
-      {
-        "type": "command",
-        "command": "python3 ~/.claude/hooks/coding-team-router.py"
-      }
-    ]
-  }
-]
 ```
 
 ### Skill taxonomy
@@ -331,31 +352,87 @@ coding-team reads `~/.claude/skills/skill-taxonomy.yml` to discover installed sk
 Add caching to the API response layer with TTL-based invalidation
 ```
 
-Or let the session-start hook suggest it automatically.
+Or invoke the build command directly:
+
+```
+/build Add caching to the API response layer with TTL-based invalidation
+```
 
 For simple tasks (typo, rename, single-file fix), the skill skips to Phase 5 with a single haiku-tier task.
 
 ## File structure
 
 ```
-SKILL.md                          # router + phase contracts (~230 lines)
+SKILL.md                          # router + phase contracts (~200 lines)
 README.md                         # this file
-hooks/                            # Claude Code hooks (deployed to ~/.claude/hooks/)
-  coding-team-router.py           #   session-start hook — suggests /coding-team
-  coding-team-active.py           #   marks coding-team session as active
-  coding-team-done.py             #   clears active marker on skill completion
-  plan-completeness-check.py      #   warns when agent output covers fewer findings than input
-  phase5-edit-guard.py            #   blocks orchestrator edits to non-allowlisted files during Phase 5
-  track-artifacts-in-repo.py      #   reminds to commit deployed files back to repo
-  no-mocks.py                     #   blocks mock patterns in test files
-  agent-quality-tracker.py        #   logs skill quality + emits correction on error/empty
-  hook-health-check.py             #   SessionStart — verifies all Python hooks are healthy
-  context-budget-warning.py       #   warns at 70/85/95% context usage (calibrated for 1M tokens)
-  (+ 15 more hooks)               #   see hooks/ directory for full list
+commands/                         # slash commands (18 files, invokable independently)
+  build.md                        #   /build — main orchestrator (~246 lines)
+  verify.md                       #   /verify — evidence-before-claims
+  tdd.md                          #   /tdd — red-green-refactor cycle
+  review-feedback.md              #   /review-feedback — code review handling
+  worktree.md                     #   /worktree — git worktree setup/cleanup
+  parallel-fix.md                 #   /parallel-fix — parallel agent dispatch
+  second-opinion.md               #   /second-opinion — cross-model review
+  scope-lock.md                   #   /scope-lock — restrict edit directory
+  scope-unlock.md                 #   /scope-unlock — remove edit restriction
+  release.md                      #   /release — automated release workflow
+  retrospective.md                #   /retrospective — post-ship retro
+  doc-sync.md                     #   /doc-sync — post-ship doc update
+  dep-audit.md                    #   /dep-audit — dependency audit
+  migration-guide.md              #   /migration-guide — upgrade guides
+  onboard.md                      #   /onboard — codebase orientation
+  a11y.md                         #   /a11y — accessibility audit
+  api-qa.md                       #   /api-qa — API contract testing
+  incident.md                     #   /incident — incident response
+cookbook/                          # on-demand phase details and references
+  phases/                         #   pipeline phase files (loaded on demand)
+    session-resume.md             #     continuation detection + plan discovery
+    dialogue.md                   #     Phase 1 — clarify, propose, approve
+    design-team.md                #     Phase 2 — specialist workers + synthesis
+    design-team-context-retrieval.md  # context retrieval for design team
+    design-team-lifecycle.md      #     agent teams lifecycle details
+    spec-review.md                #     Phase 3 — write and validate design spec
+    planning.md                   #     Phase 4 — detailed TDD implementation plan
+    plan-format.md                #     plan document template + task structure
+    planning-next-steps.md        #     risk signals + second-opinion gate
+    execution.md                  #     Phase 5 — task teams + audit loops
+    execution-reminders.md        #     mid-execution progress reminders
+    audit-loop.md                 #     audit team dispatch + triage
+    doc-drift-scan.md             #     documentation drift scan
+    post-execution-review.md      #     risk signals + Codex review
+    ci-fix-protocol.md            #     CI failure classification + retry protocol
+    completion.md                 #     Phase 6 — verify, merge/PR, learning loop
+    memory-nudge.md               #     session learning extraction
+    reference-files.md            #     index of all reference files
+  references/                     #   on-demand reference material
+    builder-reference.md          #     builder agent reference
+hooks/                            # Claude Code hooks (8 active, deployed to ~/.claude/hooks/)
+  builder-self-check.py           #   validates builder agent output quality
+  codesight-hooks.py              #   codesight indexing integration
+  coding-team-lifecycle.py        #   session lifecycle management (start/end markers)
+  git-safety-guard.py             #   prevents force push, main branch commits, etc.
+  hook-health-check.py            #   SessionStart — verifies all Python hooks are healthy
+  lint-warning-enforcer.py        #   treats lint warnings as errors
+  loop-detection.py               #   detects and breaks agent retry loops
+  write-guard.py                  #   blocks orchestrator edits to instruction files during Phase 5
+  _lib/                           #   shared hook utilities
+    __init__.py
+    event.py                      #     event parsing
+    git.py                        #     git operations
+    output.py                     #     output formatting
+    state.py                      #     session state management
+    suppression.py                #     suppression logic
+  tests/                          #   hook test suite (pytest)
 scripts/                          # deployment and infrastructure scripts
   deploy.sh                       #   sync hooks, agents, rules, config from repo to ~/.claude/
-  statusline-command.sh            #   Claude Code status line formatting
+  statusline-command.sh           #   Claude Code status line formatting
 agents/                           # native agent definitions (deployed to ~/.claude/agents/)
+  ct-builder.md                   #   builder agent — orchestrates build pipeline
+  ct-reviewer.md                  #   code reviewer agent
+  ct-qa.md                        #   QA agent — end-to-end quality checks
+  ct-plan-reviewer.md             #   plan document reviewer
+  ct-prompt-reviewer.md           #   prompt/skill quality reviewer
+  ct-harden-reviewer.md           #   security/resilience reviewer
   ct-implementer.md               #   implementer agent template
   ct-spec-reviewer.md             #   spec compliance + TDD verification (read-only)
   ct-simplify-auditor.md          #   simplify auditor — clarity/complexity (read-only)
@@ -364,7 +441,9 @@ agents/                           # native agent definitions (deployed to ~/.cla
   ct-harness-engineer.md          #   harness engineer — hooks, rules, maturity (read-write)
   ct-spec-doc-reviewer.md         #   design doc reviewer
   ct-plan-doc-reviewer.md         #   plan doc reviewer
+  ct-qa-reviewer.md               #   QA reviewer — cross-task quality
   harness-engineer-reference.md   #   on-demand reference for harness engineer
+  implementer-reference.md        #   on-demand reference for implementer
 config/                           # global instruction files (deployed to ~/.claude/)
   CLAUDE.md                       #   global CLAUDE.md — role, boundaries, workflow prefs
   golden-principles.md            #   16 tiebreaker principles for ambiguous decisions
@@ -378,26 +457,18 @@ rules/                            # path-specific rules (deployed to ~/.claude/r
   chunk-taxonomy-work.md          #   chunking large analysis tasks
   skill-files.md                  #   skill & CC instruction file rules
   vault-path-resolution.md        #   user-specified paths are authoritative
-memory/                           # behavioral feedback (persists across sessions)
+  hook-bypass.md                  #   hook bypass prevention
+  mcp-resilience.md               #   MCP retry limits and graceful degradation
+  multi-pass-audit.md             #   multi-pass audit pattern
+phases/                           # legacy phase files (mirrors cookbook/phases/)
+memory/                           # behavioral feedback (~34 files, persists across sessions)
   MEMORY.md                       #   index — points to consolidated file
   consolidated-feedback.md        #   distilled rules from all feedback (loaded by default)
+  active-rules.md                 #   currently active behavioral rules
   feedback-*.md                   #   individual feedback entries (history, not loaded)
-phases/                           # pipeline phase details (loaded on demand)
-  session-resume.md               #   continuation detection + plan discovery
-  dialogue.md                     #   Phase 1 — clarify, propose, approve
-  design-team.md                  #   Phase 2 — specialist workers + synthesis
-  spec-review.md                  #   Phase 3 — write and validate design spec
-  planning.md                     #   Phase 4 — detailed TDD implementation plan
-  execution.md                    #   Phase 5 — task teams + audit loops
-  post-execution-review.md        #   risk signals + Codex review (loaded after execution)
-  completion.md                   #   Phase 6 — verify, merge/PR, learning loop
-  audit-loop.md                   #   audit team dispatch + triage (extracted from execution)
-  design-team-lifecycle.md        #   agent teams lifecycle details (extracted from design-team)
-  doc-drift-scan.md               #   documentation drift scan (extracted from execution)
-  memory-nudge.md                 #   session learning extraction (extracted from completion)
-  plan-format.md                  #   plan document template + task structure (extracted from planning)
-  planning-next-steps.md          #   risk signals + second-opinion gate (extracted from planning)
-skills/                           # standalone skills (can be invoked independently)
+  project-*.md                    #   project session notes
+  reference-*.md                  #   reference documentation
+skills/                           # standalone skills (symlink targets for independent use)
   debug/SKILL.md                  #   /debug — root cause investigation
   verify/SKILL.md                 #   /verify — evidence-before-claims gates
   review-feedback/SKILL.md        #   /review-feedback — handling review feedback

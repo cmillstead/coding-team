@@ -44,6 +44,23 @@ class HookResult:
     parsed: dict | None
 
 
+@pytest.fixture(autouse=True, scope="function")
+def clean_coding_team_markers():
+    """Clean coding-team markers before and after each test to prevent cross-test contamination."""
+    markers = ["/tmp/coding-team-active", "/tmp/coding-team-session.json"]
+    for m in markers:
+        try:
+            os.unlink(m)
+        except FileNotFoundError:
+            pass
+    yield
+    for m in markers:
+        try:
+            os.unlink(m)
+        except FileNotFoundError:
+            pass
+
+
 @pytest.fixture
 def hooks_dir():
     """Return the hooks directory path."""
