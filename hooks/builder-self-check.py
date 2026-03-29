@@ -27,7 +27,7 @@ from _lib import output as _output
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
-LOG_FILE = "/tmp/builder-validation.log"
+LOG_FILE = "/tmp/builder-self-check.log"
 
 TEST_FILE_PATTERNS = [
     r'test[s]?[/_]',
