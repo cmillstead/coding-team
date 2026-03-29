@@ -13,6 +13,18 @@ import pytest
 
 
 HOOKS_DIR = Path("/Users/cevin/.claude/skills/coding-team/hooks")
+ACTIVE_MARKER = Path("/tmp/coding-team-active")
+SESSION_FILE = Path("/tmp/coding-team-session.json")
+
+
+@pytest.fixture(autouse=True)
+def clean_markers():
+    """Ensure no stale session markers leak between tests."""
+    ACTIVE_MARKER.unlink(missing_ok=True)
+    SESSION_FILE.unlink(missing_ok=True)
+    yield
+    ACTIVE_MARKER.unlink(missing_ok=True)
+    SESSION_FILE.unlink(missing_ok=True)
 
 # Encode mock-triggering test data as base64 to avoid the no-mocks hook
 # scanning THIS file and blocking the write. These are INPUT strings we
