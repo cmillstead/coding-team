@@ -56,13 +56,22 @@ if [ "${CODESIGHT_STATUSLINE:-1}" != "0" ] && [ -f "$ACTIVE_FILE" ]; then
     fi
 fi
 
-# Coding-team active indicator — lit when there's a recent in-progress plan
+# Coding-team active indicator — lit when exactly one in-progress plan exists
 ct_part=""
 CT_MAIN_ROOT=$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null | sed 's|/.git$||')
 if [ -n "$CT_MAIN_ROOT" ] && [ -d "$CT_MAIN_ROOT/docs/plans" ]; then
-    CT_PLAN=$(find "$CT_MAIN_ROOT/docs/plans" -maxdepth 1 -name '*.md' -mmin -240 -print0 2>/dev/null | xargs -0 ls -t 2>/dev/null | head -1)
-    if [ -n "$CT_PLAN" ] && ! head -20 "$CT_PLAN" 2>/dev/null | grep -qE '^status:[[:space:]]*complete'; then
+    in_progress_count=0
+    for plan in "$CT_MAIN_ROOT/docs/plans"/*.md; do
+        [ -r "$plan" ] || continue
+        # Read YAML frontmatter between leading --- delimiters; check for status: in-progress
+        if awk 'BEGIN{n=0} /^---[[:space:]]*$/{n++; if(n==2)exit} n==1 && /^status:[[:space:]]*in-progress[[:space:]]*$/{found=1} END{exit !found}' "$plan" 2>/dev/null; then
+            in_progress_count=$((in_progress_count + 1))
+        fi
+    done
+    if [ "$in_progress_count" -eq 1 ]; then
         ct_part=" \033[32m█\033[0m"
+    elif [ "$in_progress_count" -gt 1 ]; then
+        ct_part=" \033[31m!\033[0m"
     fi
 fi
 
