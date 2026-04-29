@@ -18,71 +18,19 @@ Second-opinion gate (PostToolUse):
 """
 import os
 import re
-import subprocess
 import sys
-import time
-from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(__file__))
 
 from _lib.event import parse_event, get_tool_input
 from _lib import output
+from _lib.active_plan import find_active_plan
 
 
 SECOND_OPINION_LINE_RE = re.compile(
     r"^- \[([ xX])\] Second-opinion review.*$",
     re.MULTILINE | re.IGNORECASE,
 )
-PLAN_STALE_SECONDS = 4 * 3600
-
-
-def find_active_plan() -> Path | None:
-    """Return the most recent in-progress plan file, or None.
-
-    A plan is "in-progress" when:
-      - frontmatter does NOT contain `status: complete`, AND
-      - file mtime is within the last 4 hours.
-    Plans are scanned newest-first; first match wins.
-    """
-    try:
-        raw = subprocess.check_output(
-            ["git", "rev-parse", "--path-format=absolute", "--git-common-dir"],
-            text=True,
-            stderr=subprocess.DEVNULL,
-        ).strip()
-    except (subprocess.CalledProcessError, FileNotFoundError, OSError):
-        return None
-    if not raw:
-        return None
-    # Strip trailing /.git (or worktree's literal `.git` suffix) to get repo root.
-    if raw.endswith("/.git"):
-        main_root = raw[: -len("/.git")]
-    else:
-        main_root = raw
-    plans_dir = Path(main_root) / "docs" / "plans"
-    if not plans_dir.exists():
-        return None
-    candidates = sorted(
-        plans_dir.glob("*.md"),
-        key=lambda p: p.stat().st_mtime,
-        reverse=True,
-    )
-    now = time.time()
-    for plan in candidates:
-        try:
-            text = plan.read_text(errors="replace")[:500]
-        except OSError:
-            continue
-        if re.search(r"^status:\s*complete", text, re.MULTILINE | re.IGNORECASE):
-            continue
-        try:
-            mtime = plan.stat().st_mtime
-        except OSError:
-            continue
-        if now - mtime > PLAN_STALE_SECONDS:
-            continue
-        return plan
-    return None
 
 
 def main() -> None:
