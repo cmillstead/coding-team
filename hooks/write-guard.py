@@ -19,7 +19,7 @@ from pathlib import Path
 
 from _lib import event as _event
 from _lib import output as _output
-from _lib.active_plan import find_active_plan
+from _lib.active_plan import find_active_plan, AmbiguousActivePlanError
 
 
 # ---------------------------------------------------------------------------
@@ -62,16 +62,28 @@ def check_phase5(file_path: str) -> str | None:
     """Check coding-team pipeline edit guard. Returns block reason or None.
 
     Pipeline state is derived from the active plan file (under
-    `$MAIN_ROOT/docs/plans/`) via `find_active_plan()`. When a plan is
-    in-progress, instruction-file edits are blocked so they go through
-    the Agent tool — a 1-line change to an agent prompt can cascade
-    through the entire pipeline.
+    `$MAIN_ROOT/docs/plans/`) via `find_active_plan()`. The active plan
+    is the unique plan whose YAML frontmatter declares
+    `status: in-progress`. When such a plan exists, instruction-file
+    edits are blocked so they go through the Agent tool — a 1-line
+    change to an agent prompt can cascade through the entire pipeline.
 
     When no active plan exists, all edits are allowed: there is no
     pipeline to gate against.
+
+    If multiple plans claim `status: in-progress` or a plan is
+    unreadable, fail closed and block with a remediation message.
     """
-    if find_active_plan() is None:
-        # No active plan → no pipeline state to gate.
+    try:
+        active = find_active_plan()
+    except AmbiguousActivePlanError as exc:
+        return (
+            f"BLOCKED: cannot determine active plan state — {exc}. "
+            f"Either fix the plan file's readability or remove its "
+            f"`status: in-progress` frontmatter and try again."
+        )
+    if active is None:
+        # No active plan -> no pipeline state to gate.
         return None
     if is_orchestrator_file(file_path):
         return None

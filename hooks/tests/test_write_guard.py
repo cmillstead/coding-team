@@ -1,20 +1,20 @@
 """Tests for write-guard.py hook.
 
-Pipeline-state detection now derives from the active plan file under
-`$MAIN_ROOT/docs/plans/*.md` (matches lifecycle hook). The Phase 5 edit
-guard blocks orchestrator edits to instruction files only when an
-in-progress plan is detected. Tests construct a fresh git repo per case
-under `tmp_path` and run the hook with that repo as cwd, so we never
-touch real /tmp markers or real plan directories.
+Pipeline-state detection derives from the active plan file under
+`$MAIN_ROOT/docs/plans/*.md` — the unique plan whose YAML frontmatter
+declares `status: in-progress`. The Phase 5 edit guard blocks
+orchestrator edits to instruction files only when an in-progress plan
+is detected. Tests construct a fresh git repo per case under
+`tmp_path` and run the hook with that repo as cwd, so we never touch
+real plan directories.
 
 # mock-ok: test data strings trigger the no-mocks hook scanner — these are test INPUTS, not real mock usage
 """
 
 import base64
 import json
-import os
+import stat
 import subprocess
-import time
 from pathlib import Path
 
 import pytest
@@ -22,6 +22,8 @@ import pytest
 
 HOOKS_DIR = Path("/Users/cevin/.claude/skills/coding-team/hooks")
 HOOK_PATH = HOOKS_DIR / "write-guard.py"
+
+ACTIVE_FRONTMATTER = "---\nstatus: in-progress\n---\n\n"
 
 
 # Encode mock-triggering test data as base64 to avoid the no-mocks hook
@@ -46,19 +48,22 @@ def _init_repo(repo_root: Path) -> None:
     )
 
 
-def _write_plan(
-    repo_root: Path,
-    name: str,
-    body: str = "# Plan\n\n## Completion Checklist\n- [ ] Second-opinion review\n",
-    mtime: float | None = None,
-) -> Path:
-    """Create a plan file under docs/plans/ with optional mtime override."""
+def _active_plan_body() -> str:
+    """Canonical in-progress plan body (unchecked second-opinion line)."""
+    return (
+        ACTIVE_FRONTMATTER
+        + "# Plan\n\n## Completion Checklist\n- [ ] Second-opinion review\n"
+    )
+
+
+def _write_plan(repo_root: Path, name: str, body: str | None = None) -> Path:
+    """Create a plan file under docs/plans/. Defaults to in-progress + unchecked."""
+    if body is None:
+        body = _active_plan_body()
     plans_dir = repo_root / "docs" / "plans"
     plans_dir.mkdir(parents=True, exist_ok=True)
     plan = plans_dir / name
     plan.write_text(body)
-    if mtime is not None:
-        os.utime(plan, (mtime, mtime))
     return plan
 
 
@@ -95,7 +100,7 @@ class TestPhase5InPipeline:
     """An in-progress plan file marks the pipeline as active."""
 
     def test_blocks_instruction_file_edit(self, repo: Path):
-        """In-pipeline + instruction-file edit by orchestrator → blocked."""
+        """In-pipeline + instruction-file edit by orchestrator -> blocked."""
         _write_plan(repo, "plan.md")
         # An instruction file under a worktree of the test repo
         instr_dir = repo / "skills" / "demo"
@@ -118,7 +123,7 @@ class TestPhase5InPipeline:
         assert "agent tool" in reason
 
     def test_allows_non_instruction_source_edit(self, repo: Path):
-        """In-pipeline + non-instruction-file → allowed (orchestrator handles ≤20-line judgment)."""
+        """In-pipeline + non-instruction-file -> allowed (orchestrator handles ≤20-line judgment)."""
         _write_plan(repo, "plan.md")
         src_file = repo / "src" / "main.py"
         src_file.parent.mkdir(parents=True)
@@ -137,7 +142,7 @@ class TestPhase5InPipeline:
             assert parsed.get("decision") != "block", f"unexpected block: {parsed!r}"
 
     def test_allows_orchestrator_file_during_pipeline(self, repo: Path):
-        """In-pipeline + orchestrator-allowlisted path (memory/, /tmp, etc.) → allowed."""
+        """In-pipeline + orchestrator-allowlisted path (memory/, /tmp, etc.) -> allowed."""
         _write_plan(repo, "plan.md")
         memory_file = repo / "memory" / "notes.md"
         memory_file.parent.mkdir(parents=True)
@@ -158,8 +163,8 @@ class TestPhase5InPipeline:
 class TestPhase5NoPipeline:
     """No active plan = no pipeline = all edits allowed regardless of file type."""
 
-    def test_no_docs_plans_dir_allows_instruction_edit(self, repo: Path, tmp_path: Path):
-        """No docs/plans/ → allow instruction-file edits."""
+    def test_no_docs_plans_dir_allows_instruction_edit(self, repo: Path):
+        """No docs/plans/ -> allow instruction-file edits."""
         # No plan file written.
         instr_dir = repo / "skills" / "demo"
         instr_dir.mkdir(parents=True)
@@ -178,7 +183,7 @@ class TestPhase5NoPipeline:
             assert parsed.get("decision") != "block", f"unexpected block: {parsed!r}"
 
     def test_all_plans_complete_allows_instruction_edit(self, repo: Path):
-        """All plans marked status: complete → no active plan → allow."""
+        """All plans marked status: complete -> no in-progress plan -> allow."""
         _write_plan(
             repo,
             "done.md",
@@ -200,10 +205,38 @@ class TestPhase5NoPipeline:
         if parsed is not None:
             assert parsed.get("decision") != "block"
 
-    def test_stale_plan_allows_instruction_edit(self, repo: Path):
-        """Plan older than 4h → not detected → allow instruction-file edits."""
-        stale_mtime = time.time() - (5 * 3600)  # 5 hours ago
-        _write_plan(repo, "stale.md", mtime=stale_mtime)
+    def test_planned_only_allows_instruction_edit(self, repo: Path):
+        """Plan with `status: planned` (not in-progress yet) -> no gate -> allow."""
+        _write_plan(
+            repo,
+            "planned.md",
+            body="---\nstatus: planned\n---\n# Planned\n## Completion Checklist\n- [ ] Second-opinion review\n",
+        )
+
+        instr_file = repo / "skills" / "demo" / "SKILL.md"
+        instr_file.parent.mkdir(parents=True)
+        instr_file.write_text("# Demo\n")
+
+        event = {
+            "tool_name": "Edit",
+            "tool_input": {
+                "file_path": str(instr_file),
+                "new_string": "altered",
+            },
+        }
+        parsed, _stdout, _stderr, _rc = _run(event, cwd=repo)
+        if parsed is not None:
+            assert parsed.get("decision") != "block", (
+                f"expected allow when plan is `status: planned` (not yet in-progress), got {parsed!r}"
+            )
+
+    def test_no_frontmatter_allows_instruction_edit(self, repo: Path):
+        """Plan without leading frontmatter -> no gate -> allow."""
+        _write_plan(
+            repo,
+            "noframe.md",
+            body="# Plan\n\n## Completion Checklist\n- [ ] Second-opinion review\n",
+        )
 
         instr_file = repo / "skills" / "demo" / "SKILL.md"
         instr_file.parent.mkdir(parents=True)
@@ -220,19 +253,13 @@ class TestPhase5NoPipeline:
         if parsed is not None:
             assert parsed.get("decision") != "block"
 
-    def test_complete_plan_falls_back_to_next(self, repo: Path):
-        """Newest plan complete → skip to older in-progress plan → still in-pipeline."""
-        older_mtime = time.time() - 60   # 1 min ago
-        newer_mtime = time.time() - 30   # 30 sec ago
-
-        # Older plan (in-progress) — should be picked up after skipping newer.
-        _write_plan(repo, "older.md", mtime=older_mtime)
-        # Newer plan — marked complete in frontmatter, should be skipped.
+    def test_in_progress_picked_despite_complete_sibling(self, repo: Path):
+        """An in-progress plan still wins even if a status: complete sibling exists."""
+        _write_plan(repo, "older.md")  # in-progress (default)
         _write_plan(
             repo,
             "newer.md",
             body="---\nstatus: complete\n---\n# Newer\n## Completion Checklist\n- [ ] Second-opinion review\n",
-            mtime=newer_mtime,
         )
 
         instr_file = repo / "skills" / "demo" / "SKILL.md"
@@ -248,8 +275,82 @@ class TestPhase5NoPipeline:
         }
         parsed, stdout, _stderr, _rc = _run(event, cwd=repo)
         assert parsed is not None and parsed.get("decision") == "block", (
-            f"expected fallback to older in-progress plan to block, got {stdout!r}"
+            f"expected block — in-progress plan should activate gate regardless of "
+            f"complete sibling, got {stdout!r}"
         )
+
+
+class TestPhase5AmbiguousState:
+    """Multiple in-progress plans or unreadable plans fail closed -> block."""
+
+    def test_multiple_in_progress_blocks_instruction_edit(self, repo: Path):
+        """Two plans with `status: in-progress` -> block with ambiguity message."""
+        _write_plan(repo, "plan-a.md")
+        _write_plan(repo, "plan-b.md")
+
+        instr_file = repo / "skills" / "demo" / "SKILL.md"
+        instr_file.parent.mkdir(parents=True)
+        instr_file.write_text("# Demo\n")
+
+        event = {
+            "tool_name": "Edit",
+            "tool_input": {
+                "file_path": str(instr_file),
+                "new_string": "altered",
+            },
+        }
+        parsed, stdout, _stderr, _rc = _run(event, cwd=repo)
+        assert parsed is not None, f"expected JSON output, got {stdout!r}"
+        assert parsed.get("decision") == "block"
+        reason = parsed.get("reason", "").lower()
+        assert "cannot determine active plan state" in reason
+
+    def test_multiple_in_progress_blocks_even_normal_source(self, repo: Path):
+        """Ambiguity blocks ALL edits (fail closed), not just instruction files."""
+        _write_plan(repo, "plan-a.md")
+        _write_plan(repo, "plan-b.md")
+
+        src = repo / "src" / "main.py"
+        src.parent.mkdir(parents=True)
+        src.write_text("print('hi')")
+
+        event = {
+            "tool_name": "Edit",
+            "tool_input": {
+                "file_path": str(src),
+                "new_string": "print('hello')",
+            },
+        }
+        parsed, stdout, _stderr, _rc = _run(event, cwd=repo)
+        assert parsed is not None, f"expected JSON output, got {stdout!r}"
+        assert parsed.get("decision") == "block"
+        assert "cannot determine active plan state" in parsed.get("reason", "").lower()
+
+    def test_unreadable_plan_blocks(self, repo: Path):
+        """chmod 000 on an in-progress plan -> fail closed -> block."""
+        plan = _write_plan(repo, "locked.md")
+        plan.chmod(0)
+
+        instr_file = repo / "skills" / "demo" / "SKILL.md"
+        instr_file.parent.mkdir(parents=True)
+        instr_file.write_text("# Demo\n")
+
+        event = {
+            "tool_name": "Edit",
+            "tool_input": {
+                "file_path": str(instr_file),
+                "new_string": "altered",
+            },
+        }
+        try:
+            parsed, stdout, _stderr, _rc = _run(event, cwd=repo)
+        finally:
+            plan.chmod(stat.S_IRUSR | stat.S_IWUSR)
+        assert parsed is not None, f"expected JSON output, got {stdout!r}"
+        assert parsed.get("decision") == "block"
+        reason = parsed.get("reason", "").lower()
+        assert "cannot determine active plan state" in reason
+        assert "unreadable" in reason
 
 
 # ---------------------------------------------------------------------------
@@ -259,7 +360,7 @@ class TestPhase5NoPipeline:
 
 class TestMigrationGuard:
     def test_blocks_edit_to_existing_tracked_migration(self, repo: Path):
-        """Tracked migration file → blocked even with no active plan."""
+        """Tracked migration file -> blocked even with no active plan."""
         migration_dir = repo / "migrations"
         migration_dir.mkdir()
         migration_file = migration_dir / "001_create.py"
@@ -339,6 +440,7 @@ class TestIdentityFramingAdvisory:
         Run outside any git repo so the Phase 5 guard is dormant — this isolates
         the identity-framing check.
         """
+        import os
         event = {
             "tool_name": "Write",
             "tool_input": {
@@ -360,7 +462,7 @@ class TestIdentityFramingAdvisory:
 
 class TestNormalFileAllowed:
     def test_allows_edit_to_normal_python_file_outside_pipeline(self, repo: Path):
-        """No active plan + non-instruction non-test file → silent allow."""
+        """No active plan + non-instruction non-test file -> silent allow."""
         src = repo / "src" / "main.py"
         src.parent.mkdir(parents=True)
         src.write_text("print('hi')")
