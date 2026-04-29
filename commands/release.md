@@ -41,19 +41,27 @@ If no PR exists, start from step 1.
    ```
    If lint errors: fix trivially fixable ones, re-run, confirm clean.
 
-4b. **Second-opinion gate (pipeline only):**
+4b. **Second-opinion gate (active plan only):**
+    Detect the active plan file (most recent in-progress plan in `docs/plans/` modified within the last 4 hours):
     ```bash
-    ls /tmp/coding-team-active 2>/dev/null
+    MAIN_ROOT=$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null | sed 's|/.git$||')
+    [ -d "$MAIN_ROOT/docs/plans" ] && \
+      ACTIVE_PLAN=$(find "$MAIN_ROOT/docs/plans" -maxdepth 1 -name '*.md' -mmin -240 -print0 2>/dev/null | \
+        xargs -0 ls -t 2>/dev/null | \
+        while read -r p; do
+          head -20 "$p" | grep -qE '^status:\s*complete' || { echo "$p"; break; }
+        done) || ACTIVE_PLAN=
     ```
-    - If `/tmp/coding-team-active` exists (inside pipeline):
+    - If `ACTIVE_PLAN` is empty (no recent in-progress plan — standalone `/release`): skip this step, continue to step 5.
+    - If `ACTIVE_PLAN` is set, check the Completion Checklist for the Second-opinion review line:
       ```bash
-      ls /tmp/second-opinion-completed 2>/dev/null
+      grep -E '^- \[[ x]\] Second-opinion review' "$ACTIVE_PLAN"
       ```
-      - If `/tmp/second-opinion-completed` is missing:
-        Print: "Second-opinion gate not completed. Run `/second-opinion review` before shipping, or say 'skip' to proceed without it."
+      - If the matched line is `- [x]` OR contains `skip:` → gate satisfied, continue to step 5.
+      - If the matched line is `- [ ]` and does NOT contain `skip:`:
+        Print: "Second-opinion gate not completed. Active plan: $ACTIVE_PLAN. Run `/second-opinion review` before shipping, or edit the plan to mark `- [x] Second-opinion review (skip: <reason>)` and try `/release` again."
         STOP and wait for user response. Do NOT proceed to push.
-      - If present: continue to step 5.
-    - If `/tmp/coding-team-active` does NOT exist (standalone /release): skip this step.
+      - If no `Second-opinion review` line is present in the plan (back-compat with older plans): gate satisfied, continue to step 5.
 
 5. **Review diff:**
    ```bash
