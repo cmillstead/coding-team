@@ -56,17 +56,13 @@ if [ "${CODESIGHT_STATUSLINE:-1}" != "0" ] && [ -f "$ACTIVE_FILE" ]; then
     fi
 fi
 
-# Coding-team active indicator
-CT_ACTIVE_FILE="/tmp/coding-team-active"
-CT_STALE_SECONDS=300
+# Coding-team active indicator — lit when there's a recent in-progress plan
 ct_part=""
-if [ -f "$CT_ACTIVE_FILE" ]; then
-    ts=$(cat "$CT_ACTIVE_FILE" 2>/dev/null)
-    now=$(date +%s)
-    if [ -n "$ts" ] && [ $(( now - ${ts%.*} )) -lt "$CT_STALE_SECONDS" ]; then
+CT_MAIN_ROOT=$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null | sed 's|/.git$||')
+if [ -n "$CT_MAIN_ROOT" ] && [ -d "$CT_MAIN_ROOT/docs/plans" ]; then
+    CT_PLAN=$(find "$CT_MAIN_ROOT/docs/plans" -maxdepth 1 -name '*.md' -mmin -240 -print0 2>/dev/null | xargs -0 ls -t 2>/dev/null | head -1)
+    if [ -n "$CT_PLAN" ] && ! head -20 "$CT_PLAN" 2>/dev/null | grep -qE '^status:[[:space:]]*complete'; then
         ct_part=" \033[32m█\033[0m"
-    else
-        rm -f "$CT_ACTIVE_FILE"
     fi
 fi
 

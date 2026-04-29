@@ -2,15 +2,7 @@
 
 ## Pre-check: Second-Opinion Gate
 
-Before proceeding with Phase 6, verify the second-opinion gate was executed:
-
-1. Read `/tmp/coding-team-session.json` (if it exists)
-2. Check for `"second_opinion_offered": true` in the session data
-3. Run: `command -v codex >/dev/null 2>&1`
-
-**If the flag is missing AND Codex is available:** STOP — do not proceed with Phase 6. Load `cookbook/phases/post-execution-review.md` and follow it first. The post-execution review will set the flag when complete. Return here after.
-
-**If the flag is present OR Codex is not available:** Proceed with Phase 6 below.
+The lifecycle hook enforces this gate by reading the active plan file's Completion Checklist. Before proceeding with Phase 6, ensure `cookbook/phases/post-execution-review.md` has been followed and the plan's `- [ ] Second-opinion review` line is now `- [x]` (or contains `skip: <reason>`). If it isn't, the hook will block at pipeline completion regardless — load post-execution-review.md and complete it first.
 
 Known rationalization: "We already reviewed everything in the audit loop" — audit loop review is internal (same model reviewing its own work). Second-opinion is cross-model validation and serves a fundamentally different purpose. They are not substitutes for each other.
 

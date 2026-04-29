@@ -35,50 +35,45 @@ Execution uses subagents because the plan pre-decomposes work into independent t
 
 **Pre-flight: Feature branch.** Before dispatching the first implementer, verify the current branch is not main/master. If on main, create a feature branch: `git checkout -b <feature-name>`. All Phase 5 work happens on this branch.
 
-**Pre-flight: Session state.** Write the session state file so execution-phase hooks activate:
-
-```bash
-python3 -c "import json, time; json.dump({'phase': 'execution', 'ts': time.time()}, open('/tmp/coding-team-session.json', 'w'))"
-```
-
-This activates:
-- `write-guard.py` — blocks if the orchestrator edits instruction files directly instead of delegating via the Agent tool
-- Plan completeness is enforced by the orchestrator's completeness check protocol (see Execution Loop below)
-
-The session file auto-expires after 30 minutes. Clean up is not required but can be done in Phase 6.
+**Pre-flight: Active plan.** `write-guard.py` detects "in pipeline" by looking for an in-progress plan file under `docs/plans/` (mtime within 4h, frontmatter not `status: complete`). The plan you are about to execute IS that signal — no separate session marker is needed. write-guard activates automatically while the plan file is fresh, and blocks orchestrator direct edits to instruction files until the plan is marked complete or expires.
 
 ## Execution Loop
 
 ```
 BASELINE (once, before first task)
-  CODESIGHT INDEX CHECK (once, before first task)
-  -1. Verify the repo is indexed for codesight-mcp:
-      Run `mcp__codesight-mcp__list_repos` to see indexed repos.
-      If the working directory's repo is NOT listed, run `mcp__codesight-mcp__index_folder` with the working directory path.
-      If the repo IS listed, run `mcp__codesight-mcp__get_status` to verify the index is current. If the index is stale (status shows outdated or files changed since last index), run `mcp__codesight-mcp__index_folder` to reindex. Do NOT fall back to Grep/Bash when the index is stale — reindex instead.
-      If codesight-mcp tools are not available (MCP server not running), skip — agents will fall back to Grep/Read.
-      If a codesight-mcp call fails or times out, fall back to Grep/Read for that specific query. Do NOT block on a flaky MCP connection.
-
-  0. Run full test suite and record results as BASELINE_FAILURES
-     - If all tests pass: baseline is clean
-     - If tests fail: these are PRE-EXISTING failures that must be fixed
-     - Pass BASELINE_FAILURES to every implementer
+  0. Run full test suite and record exit code + output
+     - If exit code 0: proceed
+     - If exit code != 0: dispatch a fix agent for each failing test cluster.
+       Do NOT classify failures. Do NOT describe them to implementers as "pre-existing."
+       Do NOT proceed until the suite is green.
+       A flaky test (timeout, race condition, intermittent failure) is a broken test.
+       The fix is to make it deterministic: add retries for network calls, mock the
+       clock for timeouts, remove race conditions, isolate shared state.
+       If a fix requires architectural changes beyond scope, report BLOCKED to the user
+       with the specific test names and failure modes. The USER decides whether to
+       defer — you do not.
 
 For each task in plan:
   1. Record BASE_SHA (git rev-parse HEAD)
 
-  PRE-EXISTING FAILURES (if any remain from baseline)
-  1a. The first implementer that encounters pre-existing failures MUST fix them
-      before starting task work. This is non-negotiable — all tests must pass
-      before new work begins. Include the failures in the implementer prompt
-      as a "Fix before starting" section.
-  1b. If pre-existing failures are in an unrelated area and the fix is non-trivial,
-      treat it as a separate mini-task: investigate root cause, fix, verify, commit
-      with "fix: resolve pre-existing test failure in <area>" before proceeding.
+  BASELINE VERIFICATION
+  1a. Run tests. If any failure exists, fix it before dispatching the next implementer.
+      Do not compare against previous failure counts.
+
+  CONTEXT GATHERING (before each dispatch)
+  1b. Use `codesight-mcp` CLI via Bash to explore the codebase before reading files:
+        codesight-mcp search-symbols "name" --repo .
+        codesight-mcp get-file-outline "file" --repo .
+        codesight-mcp get-callers "symbol" --repo .
+        codesight-mcp get-call-chain "from" "to" --repo .
+        codesight-mcp search-text "query" --repo .
+        codesight-mcp get-repo-outline --repo .
+      Then Read only the specific sections you need for the implementer prompt.
+      Do NOT read entire files raw when an outline or symbol search would suffice.
 
   IMPLEMENTER (see ~/.claude/agents/ct-implementer.md)
   2. Dispatch implementer via Agent tool — use model tier from the plan
-     - Pass: full task text, context, working directory, baseline test state
+     - Pass: full task text, context, working directory
      - If the task has advisory skills: include the advisory block in the implementer prompt's Advisory Skills section. The implementer applies these rules throughout implementation.
      - If the task involves Python, TypeScript, Angular, JavaScript, HTML, or SCSS files, read `~/.claude/code-style.md` using the Read tool and include its contents in the implementer prompt's Code Style section.
      - Read `~/.claude/golden-principles.md` and include in the implementer prompt's Context section when the task involves architectural decisions or new patterns.
