@@ -35,7 +35,11 @@ Execution uses subagents because the plan pre-decomposes work into independent t
 
 **Pre-flight: Feature branch.** Before dispatching the first implementer, verify the current branch is not main/master. If on main, create a feature branch: `git checkout -b <feature-name>`. All Phase 5 work happens on this branch.
 
-**Pre-flight: Active plan.** `write-guard.py` detects "in pipeline" by looking for an in-progress plan file under `docs/plans/` (mtime within 4h, frontmatter not `status: complete`). The plan you are about to execute IS that signal — no separate session marker is needed. write-guard activates automatically while the plan file is fresh, and blocks orchestrator direct edits to instruction files until the plan is marked complete or expires.
+**Pre-flight: Activate plan.** BEFORE dispatching the first implementer, edit the active plan file's frontmatter using the Edit tool: change `status: planned` to `status: in-progress`. This is a normal Edit by the orchestrator — write-guard isn't yet active because the plan currently has `status: planned`, not `status: in-progress`.
+
+Once the edit lands, write-guard is active for the duration of Phase 5: orchestrator direct Edit/Write to instruction files (`agents/`, `phases/`, `prompts/`, `skills/`, `CLAUDE.md`, hooks) will be blocked, forcing all instruction-file work through the Agent tool.
+
+Verify: re-read the plan, confirm `status: in-progress` is present in the frontmatter block (between the leading `---` delimiters). If the plan still shows `status: planned`, re-edit before proceeding. If multiple plans now claim `status: in-progress`, the lifecycle hook will fail closed — clear the stale ones (mark them `complete`) before dispatching.
 
 ## Execution Loop
 

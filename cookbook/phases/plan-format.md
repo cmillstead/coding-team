@@ -4,9 +4,13 @@ Reference material for the planning worker. Follow this format exactly when writ
 
 ## Header
 
-Every plan starts with this header:
+Every plan starts with YAML frontmatter and this header. The frontmatter `status` field is set to `planned` by the planning worker; the orchestrator flips it to `in-progress` at Phase 5 entry and `complete` at Phase 6 end (see `cookbook/phases/planning.md` "Plan status lifecycle" for the full state machine).
 
 ```markdown
+---
+status: planned
+---
+
 # [Feature Name] Implementation Plan
 
 **Input findings: [N]** <- include ONLY when addressing scan/review findings; omit for feature work

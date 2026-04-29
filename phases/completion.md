@@ -50,6 +50,12 @@ Which option?
 
 **Never** proceed with failing tests, merge without verifying, delete work without confirmation, or dismiss failures/findings as "pre-existing" or "not our problem." A bug is a bug regardless of when it was introduced.
 
+7. **Final: mark plan complete.** After the user has selected and executed a completion option (merge/PR/keep/discard), edit the active plan file's frontmatter using the Edit tool: change `status: in-progress` to `status: complete`. This deactivates the write-guard and lifecycle gates for any future Phase 5 work in this repo.
+
+   If the user chose `discard` and the plan file was removed as part of cleanup, this step is moot. If the plan file persists (any of merge/PR/keep, or discard that left the plan file in place), it MUST be marked `status: complete` before the session ends — leaving a plan with `status: in-progress` will block the next pipeline run with an ambiguous-active-plan error.
+
+   Verify: re-read the plan, confirm `status: complete` is present in the frontmatter block.
+
 ## Pre-Push Verification
 
 Before running `git push`, verify locally:

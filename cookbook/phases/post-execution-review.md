@@ -60,4 +60,6 @@ After all tasks are executed and verified:
 
 5. **Verify the gate is marked.** The choice (review/challenge/both/skip) should already have updated the active plan file's `- [ ] Second-opinion review` line — `/second-opinion` does the edit on review/challenge/both, and the skip branch above instructs you to do it manually. Re-read the plan to confirm the line is now `- [x]` or contains `skip:`. If it isn't, the lifecycle hook will block pipeline completion — fix the plan now.
 
+The plan's frontmatter `status` field stays `in-progress` through this phase — it is flipped to `complete` by the orchestrator at the end of Phase 6 (see `cookbook/phases/completion.md` "Final: mark plan complete"). Post-execution-review only manages the second-opinion checklist line, not the frontmatter status.
+
 **User override:** If the user wants to skip second-opinion, edit the active plan file's Completion Checklist line to `- [x] Second-opinion review (skip: <reason>)`. The lifecycle hook reads this checkbox — verbal instructions alone will not bypass the gate.
