@@ -63,8 +63,20 @@ if [ -n "$CT_MAIN_ROOT" ] && [ -d "$CT_MAIN_ROOT/docs/plans" ]; then
     in_progress_count=0
     for plan in "$CT_MAIN_ROOT/docs/plans"/*.md; do
         [ -r "$plan" ] || continue
-        # Read YAML frontmatter between leading --- delimiters; check for status: in-progress
-        if awk 'BEGIN{n=0} /^---[[:space:]]*$/{n++; if(n==2)exit} n==1 && /^status:[[:space:]]*in-progress[[:space:]]*$/{found=1} END{exit !found}' "$plan" 2>/dev/null; then
+        # Frontmatter must start at byte 0 (matching Python helper); check for status: in-progress
+        # Use sprintf %c for BOM (portable: BSD awk regex does not interpret \xNN escapes)
+        if awk '
+            BEGIN{n=0; bom=sprintf("%c%c%c", 239, 187, 191)}
+            NR==1 {
+                if (substr($0, 1, 3) == bom) $0 = substr($0, 4)
+                if ($0 !~ /^---[[:space:]]*$/) exit 1
+                n=1
+                next
+            }
+            n==1 && /^---[[:space:]]*$/ {exit}
+            n==1 && /^status:[[:space:]]*in-progress[[:space:]]*$/ {found=1}
+            END {exit !found}
+        ' "$plan" 2>/dev/null; then
             in_progress_count=$((in_progress_count + 1))
         fi
     done

@@ -42,17 +42,41 @@ If no PR exists, start from step 1.
    If lint errors: fix trivially fixable ones, re-run, confirm clean.
 
 4b. **Second-opinion gate (active plan only):**
-    Detect the active plan file (most recent in-progress plan in `docs/plans/` modified within the last 4 hours):
+    Detect the active plan file (the unique plan in `docs/plans/` whose YAML frontmatter declares `status: in-progress`). The frontmatter must start at byte 0 (after an optional UTF-8 BOM), matching the hook's Python helper.
     ```bash
     MAIN_ROOT=$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null | sed 's|/.git$||')
-    [ -d "$MAIN_ROOT/docs/plans" ] && \
-      ACTIVE_PLAN=$(find "$MAIN_ROOT/docs/plans" -maxdepth 1 -name '*.md' -mmin -240 -print0 2>/dev/null | \
-        xargs -0 ls -t 2>/dev/null | \
-        while read -r p; do
-          head -20 "$p" | grep -qE '^status:\s*complete' || { echo "$p"; break; }
-        done) || ACTIVE_PLAN=
+    ACTIVE_PLAN=
+    AMBIGUOUS=0
+    if [ -n "$MAIN_ROOT" ] && [ -d "$MAIN_ROOT/docs/plans" ]; then
+        in_progress_count=0
+        for plan in "$MAIN_ROOT/docs/plans"/*.md; do
+            [ -r "$plan" ] || continue
+            # YAML frontmatter must start at byte 0 (or after BOM); awk reads only that block
+            # Use sprintf %c for BOM (portable: BSD awk regex does not interpret \xNN escapes)
+            if awk '
+                BEGIN{n=0; bom=sprintf("%c%c%c", 239, 187, 191)}
+                NR==1 {
+                    if (substr($0, 1, 3) == bom) $0 = substr($0, 4)
+                    if ($0 !~ /^---[[:space:]]*$/) exit 1
+                    n=1
+                    next
+                }
+                n==1 && /^---[[:space:]]*$/ {exit}
+                n==1 && /^status:[[:space:]]*in-progress[[:space:]]*$/ {found=1}
+                END {exit !found}
+            ' "$plan" 2>/dev/null; then
+                in_progress_count=$((in_progress_count + 1))
+                ACTIVE_PLAN="$plan"
+            fi
+        done
+        if [ "$in_progress_count" -gt 1 ]; then
+            AMBIGUOUS=1
+            ACTIVE_PLAN=
+        fi
+    fi
     ```
-    - If `ACTIVE_PLAN` is empty (no recent in-progress plan — standalone `/release`): skip this step, continue to step 5.
+    - If `AMBIGUOUS=1`: STOP and print "BLOCKED: multiple plans claim `status: in-progress` in docs/plans/. Resolve by marking stale plans `status: complete` before retrying /release." Do NOT proceed.
+    - If `ACTIVE_PLAN` is empty (no in-progress plan — standalone `/release`): skip this step, continue to step 5.
     - If `ACTIVE_PLAN` is set, check the Completion Checklist for the Second-opinion review line:
       ```bash
       grep -E '^- \[[ x]\] Second-opinion review' "$ACTIVE_PLAN"
