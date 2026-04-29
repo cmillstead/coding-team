@@ -1,109 +1,126 @@
 #!/usr/bin/env python3
-"""Coding-team lifecycle hook: recursion guard + second-opinion gate.
+"""Coding-team lifecycle hook: second-opinion gate via plan-file checkbox.
 
-Only guards the `coding-team` entry-point skill. Sub-skills (debug, second-opinion,
+Only acts on the `coding-team` entry-point skill. Sub-skills (debug, second-opinion,
 harness-engineer, etc.) are designed to be invoked WITHIN the pipeline and pass through.
 
-PreToolUse on Skill:
-  - If skill is "coding-team" AND marker exists → BLOCK (recursive invocation)
-  - If skill is "coding-team" AND marker absent → write marker, ALLOW
-  - Any other skill → silent return
-
-PostToolUse on Skill:
-  - If skill is "coding-team" → check second-opinion gate, then clean up markers
-  - Any other skill → silent return
+PostToolUse on Skill (PreToolUse path is a no-op now):
+  - If skill is "coding-team" -> enforce second-opinion gate via active-plan checkbox
+  - Any other skill -> silent return
 
 Second-opinion gate (PostToolUse):
-  Blocks pipeline completion unless one of these markers exists:
-  - /tmp/second-opinion-completed  (user ran codex)
-  - /tmp/second-opinion-declined   (user explicitly skipped)
-  Fail-closed: if neither exists, block and remind the orchestrator to offer.
-"""
-import os, sys
-sys.path.insert(0, os.path.dirname(__file__))
+  Reads the active plan file under $MAIN_ROOT/docs/plans/ — the unique plan whose
+  YAML frontmatter declares `status: in-progress`. Within the
+  `## Completion Checklist` section, looks for `- [ ] Second-opinion review ...`:
+    - `- [x]` (or `- [X]`) -> allow
+    - line contains `skip:` -> allow (gate-satisfied with explicit skip)
+    - `- [ ]` and no `skip:` -> block with reminder
+    - no checklist section / no matching line / no plan -> allow (back-compat)
 
-import json
-import time
+  If multiple plans claim `status: in-progress` or a plan is unreadable, the
+  helper raises AmbiguousActivePlanError; we block with a remediation message.
+"""
+import os
+import re
+import sys
+
+sys.path.insert(0, os.path.dirname(__file__))
 
 from _lib.event import parse_event, get_tool_input
 from _lib import output
-
-ACTIVE_FILE = "/tmp/coding-team-active"
-SO_COMPLETED = "/tmp/second-opinion-completed"
-SO_DECLINED = "/tmp/second-opinion-declined"
+from _lib.active_plan import find_active_plan, AmbiguousActivePlanError
 
 
-def _cleanup_markers():
-    """Remove all session markers. Called after gate passes."""
-    for path in [ACTIVE_FILE, "/tmp/coding-team-session.json", SO_COMPLETED, SO_DECLINED]:
-        try:
-            if os.path.exists(path):
-                os.remove(path)
-        except OSError:
-            pass
+_COMPLETION_SECTION_RE = re.compile(
+    r"^##\s+Completion\s+Checklist\s*\n(.*?)(?=\n##\s|\Z)",
+    re.MULTILINE | re.DOTALL | re.IGNORECASE,
+)
+
+_CHECKLIST_LINE_RE = re.compile(
+    r"^\s*-\s*\[([ xX])\]\s+Second-opinion\s+review\b(.*)$",
+    re.MULTILINE,
+)
 
 
-def _check_second_opinion_gate() -> bool:
-    """Return True if gate passes (marker exists), False if blocked.
+def _read_second_opinion_state(plan_text: str) -> str | None:
+    """Return 'checked', 'unchecked', or None if no checklist line found.
 
-    Fail-closed: if neither marker exists, the gate blocks.
+    Scopes the search to the first `## Completion Checklist` section.
+    Tolerates leading whitespace and varied whitespace between `[x]` and
+    the label. Does not match `*` bullets — must be `-` to match the
+    canonical template.
     """
-    return os.path.exists(SO_COMPLETED) or os.path.exists(SO_DECLINED)
+    section_match = _COMPLETION_SECTION_RE.search(plan_text)
+    if not section_match:
+        return None  # back-compat: old plans without the section -> allow
+    section = section_match.group(1)
+    line_match = _CHECKLIST_LINE_RE.search(section)
+    if not line_match:
+        return None
+    box, trailing = line_match.group(1), line_match.group(2)
+    if box.lower() == "x":
+        return "checked"
+    if "skip:" in trailing.lower():
+        return "checked"  # explicit skip with reason counts as gate-satisfied
+    return "unchecked"
 
 
-def main():
+def main() -> None:
     event = parse_event()
     if not event:
         return
 
-    tool = event.get("tool_name", "")
-    if tool != "Skill":
+    if event.get("tool_name", "") != "Skill":
         return
 
     tool_input = get_tool_input(event)
     skill_name = tool_input.get("skill_name", "") or tool_input.get("skill", "")
-
-    # Only guard the pipeline entry point — sub-skills are safe to invoke within the pipeline
     if skill_name != "coding-team":
         return
 
     is_post = "tool_result" in event
-
-    if is_post:
-        # PostToolUse: check second-opinion gate before allowing completion
-        if not _check_second_opinion_gate():
-            output.block(
-                "Second-opinion gate: you must offer `/second-opinion review` or "
-                "`/second-opinion challenge` before completing the pipeline. "
-                "If the user declines, write the marker: "
-                "touch /tmp/second-opinion-declined"
-            )
-            return
-        # Gate passed — clean up all markers
-        _cleanup_markers()
+    if not is_post:
+        # PreToolUse path is now a no-op — recursion guard removed; re-entry resumes
+        # via session-resume.md based on durable plan-file state.
         return
 
-    # PreToolUse: check for recursion, then activate
-    if os.path.exists(ACTIVE_FILE):
+    try:
+        plan_path = find_active_plan()
+    except AmbiguousActivePlanError as exc:
         output.block(
-            "You are already inside the coding-team pipeline. "
-            "Do not invoke /coding-team recursively. "
-            "Complete the current task within the existing pipeline."
+            f"BLOCKED: cannot determine active plan state — {exc}. "
+            f"Either fix the plan file's readability or remove its "
+            f"`status: in-progress` frontmatter and try again."
         )
         return
 
-    with open(ACTIVE_FILE, "w") as f:
-        f.write(str(time.time()))
+    if plan_path is None:
+        # No active plan -> no pipeline state to gate.
+        return
 
-    # Create session phase file for execution-phase hooks
-    session_file = "/tmp/coding-team-session.json"
     try:
-        with open(session_file, "w") as sf:
-            json.dump({"phase": "active", "ts": time.time()}, sf)
-    except OSError:
-        pass
+        plan_text = plan_path.read_text(encoding="utf-8", errors="replace")
+    except OSError as exc:
+        # Race: plan disappeared/became unreadable between find_active_plan()
+        # and this read. Fail closed for safety.
+        output.block(
+            f"BLOCKED: cannot determine active plan state — unreadable plan "
+            f"{plan_path}: {exc}. Either fix the plan file's readability or "
+            f"remove its `status: in-progress` frontmatter and try again."
+        )
+        return
+
+    state = _read_second_opinion_state(plan_text)
+    if state is None or state == "checked":
+        return
+
+    # state == "unchecked"
+    output.block(
+        "Second-opinion gate: edit the active plan file's Completion Checklist to "
+        "mark second-opinion done ('- [x] Second-opinion review') or add a skip "
+        f"reason ('- [x] Second-opinion review (skip: <reason>)'). Active plan: {plan_path}"
+    )
 
 
 if __name__ == "__main__":
     main()
-

@@ -2,15 +2,7 @@
 
 ## Pre-check: Second-Opinion Gate
 
-Before proceeding with Phase 6, verify the second-opinion gate was executed:
-
-1. Read `/tmp/coding-team-session.json` (if it exists)
-2. Check for `"second_opinion_offered": true` in the session data
-3. Run: `command -v codex >/dev/null 2>&1`
-
-**If the flag is missing AND Codex is available:** STOP — do not proceed with Phase 6. Load `phases/post-execution-review.md` and follow it first. The post-execution review will set the flag when complete. Return here after.
-
-**If the flag is present OR Codex is not available:** Proceed with Phase 6 below.
+The lifecycle hook enforces this gate by reading the active plan file's Completion Checklist. Before proceeding with Phase 6, ensure `phases/post-execution-review.md` has been followed and the plan's `- [ ] Second-opinion review` line is now `- [x]` (or contains `skip: <reason>`). If it isn't, the hook will block at pipeline completion regardless — load post-execution-review.md and complete it first.
 
 Known rationalization: "We already reviewed everything in the audit loop" — audit loop review is internal (same model reviewing its own work). Second-opinion is cross-model validation and serves a fundamentally different purpose. They are not substitutes for each other.
 
@@ -58,6 +50,12 @@ Which option?
 
 **Never** proceed with failing tests, merge without verifying, delete work without confirmation, or dismiss failures/findings as "pre-existing" or "not our problem." A bug is a bug regardless of when it was introduced.
 
+7. **Final: mark plan complete.** After the user has selected and executed a completion option (merge/PR/keep/discard), edit the active plan file's frontmatter using the Edit tool: change `status: in-progress` to `status: complete`. This deactivates the write-guard and lifecycle gates for any future Phase 5 work in this repo.
+
+   If the user chose `discard` and the plan file was removed as part of cleanup, this step is moot. If the plan file persists (any of merge/PR/keep, or discard that left the plan file in place), it MUST be marked `status: complete` before the session ends — leaving a plan with `status: in-progress` will block the next pipeline run with an ambiguous-active-plan error.
+
+   Verify: re-read the plan, confirm `status: complete` is present in the frontmatter block.
+
 ## Pre-Push Verification
 
 Before running `git push`, verify locally:
@@ -96,6 +94,98 @@ After all tasks, produce a summary that includes audit findings across all round
 Recurring patterns are the signal — if the same finding type appears across multiple tasks or rounds, it indicates a systemic issue worth noting for future work.
 
 **Persistence:** The completion summary is incorporated into the retrospective document when the user runs `/retrospective`. If the user skips the retrospective, save the completion summary as a standalone file: determine `$REPO_ROOT` via `git rev-parse --show-toplevel`, create `$REPO_ROOT/docs/retros/` if needed using Bash tool (`mkdir -p`), and write the summary to `$REPO_ROOT/docs/retros/YYYY-MM-DD-<feature-slug>-completion.md` using the Write tool. Do NOT skip saving — completion summaries contain audit patterns that inform future planning.
+
+## Harness Metrics Capture
+
+After producing the completion summary, append a structured metrics line to `~/.claude/harness-metrics.jsonl` via Bash:
+
+```bash
+echo '{"date":"YYYY-MM-DD","project":"<repo-name>","task":"<feature-slug>","phases_used":["design","plan","execute","audit","complete"],"agents_dispatched":{"builder":N,"reviewer":N,"qa":N,"harden":N,"simplify":N,"prompt":N},"audit_rounds":N,"audit_exit":"clean|low-only|cap","findings_total":N,"findings_fixed":N,"findings_deferred":N,"rework_iterations":N,"test_pass_first_try":true|false,"ci_pass_first_push":true|false,"second_opinion":"ran|skipped|unavailable","elapsed_phases":{"design":"Nm","plan":"Nm","execute":"Nm","audit":"Nm"}}' >> ~/.claude/harness-metrics.jsonl
+```
+
+Fill values from this session's actual data. Use `null` for values you can't determine. Do NOT fabricate — `null` is better than a guess.
+
+**Why:** This data feeds `/harness-retro` for evidence-based pipeline optimization. See Meta-Harness (arXiv:2603.28052) — raw execution data enables causal reasoning about harness failures. Summaries don't.
+
+## Wiki Article Generation
+
+**Skip if user chose "Discard this work."**
+
+After producing the completion summary, generate a project learnings article for the vault wiki.
+
+**Step 1: Determine topic.**
+Read `~/Documents/obsidian-vault/AI/wiki/_master-index.md` using the Read tool. Based on the feature's domain, suggest the best-fit topic first, then present the full menu for confirmation or change:
+
+```
+Wiki article for this feature. Suggested topic: {best-fit}
+
+1. ai-agents — Autonomous agent architectures
+2. ai-coding-tools — CLI tools and code intelligence
+3. ai-data-tools — Federated query engines and data-aware LLM infra
+4. rag — Retrieval-Augmented Generation techniques
+5. security — AI-augmented security tools
+6. New topic (I'll specify)
+7. Skip wiki article
+
+Topic? (number or name)
+```
+
+- If user picks 1-5: use that topic directory.
+- If user picks 6: ask for topic name and description. Create directory with Bash tool (`mkdir -p`). Create `_index.md` using the Write tool:
+  ```markdown
+  # {Topic Name}
+
+  > Part of [[_master-index]]
+
+  {One-sentence description}
+
+  ## Articles
+
+  | Article | Description |
+  |---------|-------------|
+  ```
+  Add row to the `## Topics` table in `_master-index.md`:
+  `| [[{topic-slug}/_index|{Topic Name}]] | {description} |`
+- If user picks 7: skip wiki generation, proceed to Decision Log.
+
+**Step 2: Generate article.**
+Content comes from the completion summary already produced. Do NOT re-analyze the codebase. If the completion summary lacks decisions or patterns, ask the user: "Any key decisions or patterns worth noting? (or 'none')"
+
+Write to `~/Documents/obsidian-vault/AI/wiki/{topic}/{slug}.md` using the Write tool:
+
+```markdown
+# {Feature Name}
+
+> Part of [[{topic}/_index|{Topic Name}]]
+
+{1-paragraph summary from completion summary}
+
+## Key Takeaways
+
+- {From completion summary recurring patterns or user-provided decisions}
+(Omit section if no meaningful takeaways)
+
+## Patterns
+
+- **{Pattern}**: {description, when to reuse}
+(Omit section if no patterns emerged)
+
+## Retrospective
+
+- What went well: {from completion summary}
+- What to improve: {from deferred/unresolved items}
+(Omit section if no retrospective data)
+
+## Related
+
+- [[{other wiki articles in same topic, if any}]]
+```
+
+**Step 3: Update topic index.**
+Read the topic's `_index.md` using the Read tool. Find the `## Articles` table. Append a new table row:
+`| [[{topic}/{slug}|{Feature Name}]] | {one-line description} |`
+
+Known rationalization: "This project isn't wiki-worthy" — the user decides via the skip option, not the agent.
 
 ## Decision Log
 

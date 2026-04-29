@@ -107,6 +107,21 @@ If any file doesn't exist, skip and note in status. Do NOT fabricate context.
 
 Read `cookbook/phases/plan-format.md` for the complete plan template including header, context brief, eval criteria, file structure, task structure, model assignment, and testing rules. Follow the format exactly.
 
+Every plan starts with a YAML frontmatter block setting `status: planned`. The orchestrator manages this field across phases:
+
+```yaml
+---
+status: planned
+---
+```
+
+**Plan status lifecycle.** The frontmatter `status` field has three values:
+- `planned` (Phase 4 output, default) — plan exists, execution not started, no gate active
+- `in-progress` (Phase 5 entry) — orchestrator flips to this BEFORE dispatching first implementer; activates write-guard and second-opinion gate
+- `complete` (Phase 6 end) — orchestrator flips to this after all gates pass; deactivates write-guard
+
+Exactly one plan should have `status: in-progress` at any time. The hook fails closed if it finds zero or multiple plans claiming `in-progress`.
+
 ## Required Plan Sections
 
 Beyond the task list, every plan must include:

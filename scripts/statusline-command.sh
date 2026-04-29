@@ -56,17 +56,34 @@ if [ "${CODESIGHT_STATUSLINE:-1}" != "0" ] && [ -f "$ACTIVE_FILE" ]; then
     fi
 fi
 
-# Coding-team active indicator
-CT_ACTIVE_FILE="/tmp/coding-team-active"
-CT_STALE_SECONDS=300
+# Coding-team active indicator — lit when exactly one in-progress plan exists
 ct_part=""
-if [ -f "$CT_ACTIVE_FILE" ]; then
-    ts=$(cat "$CT_ACTIVE_FILE" 2>/dev/null)
-    now=$(date +%s)
-    if [ -n "$ts" ] && [ $(( now - ${ts%.*} )) -lt "$CT_STALE_SECONDS" ]; then
+CT_MAIN_ROOT=$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null | sed 's|/.git$||')
+if [ -n "$CT_MAIN_ROOT" ] && [ -d "$CT_MAIN_ROOT/docs/plans" ]; then
+    in_progress_count=0
+    for plan in "$CT_MAIN_ROOT/docs/plans"/*.md; do
+        [ -r "$plan" ] || continue
+        # Frontmatter must start at byte 0 (matching Python helper); check for status: in-progress
+        # Use sprintf %c for BOM (portable: BSD awk regex does not interpret \xNN escapes)
+        if awk '
+            BEGIN{n=0; bom=sprintf("%c%c%c", 239, 187, 191)}
+            NR==1 {
+                if (substr($0, 1, 3) == bom) $0 = substr($0, 4)
+                if ($0 !~ /^---[[:space:]]*$/) exit 1
+                n=1
+                next
+            }
+            n==1 && /^---[[:space:]]*$/ {exit}
+            n==1 && /^status:[[:space:]]*in-progress[[:space:]]*$/ {found=1}
+            END {exit !found}
+        ' "$plan" 2>/dev/null; then
+            in_progress_count=$((in_progress_count + 1))
+        fi
+    done
+    if [ "$in_progress_count" -eq 1 ]; then
         ct_part=" \033[32m█\033[0m"
-    else
-        rm -f "$CT_ACTIVE_FILE"
+    elif [ "$in_progress_count" -gt 1 ]; then
+        ct_part=" \033[31m!\033[0m"
     fi
 fi
 

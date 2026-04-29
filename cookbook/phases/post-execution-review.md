@@ -30,7 +30,7 @@ After all tasks are executed and verified:
    - User says "review": run `/second-opinion review` against the diff. Then continue with step 3a.
    - User says "challenge": run `/second-opinion challenge` against the diff. Then continue with step 3a.
    - User says "both": run `/second-opinion review` first, then `/second-opinion challenge`. Then continue with step 3a.
-   - User says "skip" or sends a different message: write the declined marker (`touch /tmp/second-opinion-declined`), then continue with step 4.
+   - User says "skip" or sends a different message: edit the active plan file's Completion Checklist — change `- [ ] Second-opinion review` to `- [x] Second-opinion review (skip: <one-sentence reason from the user>)`. If no reason was given, use `(skip: user-declined)`. The lifecycle hook accepts either `[x]` or any line containing `skip:`. Then continue with step 4.
 
    3a. **After Codex review completes — findings gate.** If Codex returned ANY P1 or P2 findings:
    - List every finding with severity
@@ -39,7 +39,7 @@ After all tasks are executed and verified:
    - After fixes, re-run Codex to verify. Only proceed when findings are resolved.
    - If no P1/P2 findings (only P3 or clean): continue with step 4.
 
-   **Note:** `/second-opinion` writes `/tmp/second-opinion-completed` on completion. `/release` checks for this marker before pushing — if missing inside the pipeline, it stops and asks the user to run `/second-opinion` or explicitly skip.
+   **Note:** `/second-opinion` edits the active plan file's Completion Checklist on completion (changes `- [ ] Second-opinion review` to `- [x]`). `/release` checks the same checkbox before pushing — if unchecked inside the pipeline, it stops and asks the user to run `/second-opinion` or explicitly skip via the checkbox.
 
 4. **If Codex not available OR Codex review done with findings resolved**, print this VERBATIM:
 
@@ -58,19 +58,8 @@ After all tasks are executed and verified:
 >
 > ---
 
-5. **Write second-opinion gate flag** — regardless of which option was chosen (review/challenge/both/skip), mark the gate as passed:
-   ```bash
-   python3 -c "
-import json
-p = '/tmp/coding-team-session.json'
-try:
-    d = json.load(open(p))
-except (FileNotFoundError, json.JSONDecodeError):
-    d = {}
-d['second_opinion_offered'] = True
-json.dump(d, open(p, 'w'))
-"
-   ```
-   This flag is checked by `cookbook/phases/completion.md` to ensure the gate was not skipped.
+5. **Verify the gate is marked.** The choice (review/challenge/both/skip) should already have updated the active plan file's `- [ ] Second-opinion review` line — `/second-opinion` does the edit on review/challenge/both, and the skip branch above instructs you to do it manually. Re-read the plan to confirm the line is now `- [x]` or contains `skip:`. If it isn't, the lifecycle hook will block pipeline completion — fix the plan now.
 
-**User override:** If the user wants to skip second-opinion for the rest of the session, run `touch /tmp/second-opinion-declined`. The lifecycle hook checks for this marker — verbal instructions alone will not bypass the gate.
+The plan's frontmatter `status` field stays `in-progress` through this phase — it is flipped to `complete` by the orchestrator at the end of Phase 6 (see `cookbook/phases/completion.md` "Final: mark plan complete"). Post-execution-review only manages the second-opinion checklist line, not the frontmatter status.
+
+**User override:** If the user wants to skip second-opinion, edit the active plan file's Completion Checklist line to `- [x] Second-opinion review (skip: <reason>)`. The lifecycle hook reads this checkbox — verbal instructions alone will not bypass the gate.

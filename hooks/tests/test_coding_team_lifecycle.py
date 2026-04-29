@@ -1,263 +1,378 @@
 """Tests for coding-team-lifecycle.py hook.
 
-NOTE: The live Claude Code session runs hooks that delete /tmp/coding-team-active
-between our Bash tool calls. To avoid this race condition, we create the active file
-INSIDE the subprocess and run the hook's main() function directly, all within a
-single process invocation.
+The hook derives state from the active plan file under
+$MAIN_ROOT/docs/plans/*.md. The "active" plan is the unique plan whose
+YAML frontmatter declares `status: in-progress`. We construct a fake
+git repo per-test under `tmp_path` and set CWD to it; the hook calls
+`git rev-parse --git-common-dir` which then points into the temp repo.
+
+Each test runs the hook in a subprocess with a fresh CWD (the tmp_path repo)
+so we never touch real plan directories.
 """
 
 import json
 import os
+import stat
 import subprocess
+import time
 from pathlib import Path
 
 import pytest
 
 
 HOOKS_DIR = Path("/Users/cevin/.claude/skills/coding-team/hooks")
-ACTIVE_FILE = "/tmp/coding-team-active"
+HOOK_PATH = HOOKS_DIR / "coding-team-lifecycle.py"
+
+ACTIVE_FRONTMATTER = "---\nstatus: in-progress\n---\n\n"
 
 
-@pytest.fixture(autouse=True)
-def cleanup_active_file():
-    """Remove the active marker file before and after each test."""
-    if os.path.exists(ACTIVE_FILE):
-        os.remove(ACTIVE_FILE)
-    yield
-    if os.path.exists(ACTIVE_FILE):
-        os.remove(ACTIVE_FILE)
-
-
-def run_lifecycle_with_setup(event: dict, create_active: bool = False) -> subprocess.CompletedProcess:
-    """Run lifecycle hook with optional active file creation, all atomically."""
-    # Use runpy to run the hook as a module, calling main()
-    code = (
-        "import sys, json, os, io, time, runpy\n"
-        f"sys.path.insert(0, {str(HOOKS_DIR)!r})\n"
+def _init_repo(repo_root: Path) -> None:
+    """Initialize a minimal git repo at repo_root."""
+    subprocess.run(
+        ["git", "init", "-q", "-b", "main", str(repo_root)],
+        check=True,
+        capture_output=True,
     )
-    if create_active:
-        code += (
-            "with open('/tmp/coding-team-active', 'w') as _f:\n"
-            "    _f.write(str(time.time()))\n"
-        )
-    # Run the hook file directly via runpy which sets __name__ = '__main__'
-    hook_path = str(HOOKS_DIR / "coding-team-lifecycle.py")
-    code += f"runpy.run_path({hook_path!r}, run_name='__main__')\n"
 
+
+def _run_hook(event: dict, cwd: Path) -> subprocess.CompletedProcess:
+    """Run the lifecycle hook with given event and cwd."""
     return subprocess.run(
-        ["python3", "-c", code],
+        ["python3", str(HOOK_PATH)],
         input=json.dumps(event),
         capture_output=True,
         text=True,
         timeout=10,
+        cwd=str(cwd),
     )
 
 
-class TestPreToolUseSkillCodingTeam:
-    def test_allows_and_creates_active_file_when_no_marker(self, run_hook, make_event):
-        event = make_event("Skill", skill="coding-team")
-        result = run_hook("coding-team-lifecycle.py", event)
-        # Should allow (no block output) and create the active file
-        assert result.returncode == 0
-        if result.parsed:
-            assert result.parsed.get("decision") != "block"
-
-    def test_blocks_recursive_invocation_when_marker_exists(self):
-        event = {"tool_name": "Skill", "tool_input": {"skill": "coding-team"}}
-        result = run_lifecycle_with_setup(event, create_active=True)
-        assert result.returncode == 0
-        parsed = json.loads(result.stdout)
-        assert parsed["decision"] == "block"
-        assert "recursive" in parsed["reason"].lower()
+def _post_event(skill: str = "coding-team") -> dict:
+    """PostToolUse event for a Skill invocation."""
+    return {
+        "tool_name": "Skill",
+        "tool_input": {"skill": skill},
+        "tool_result": "done",
+    }
 
 
-class TestPostToolUseSkillCodingTeam:
-    def test_removes_active_file_on_post(self):
-        """PostToolUse cleanup runs when second-opinion gate passes."""
-        # Create active file + declined marker so the gate passes
-        code = (
-            "import sys, json, os, io, time, runpy\n"
-            f"sys.path.insert(0, {str(HOOKS_DIR)!r})\n"
-            "with open('/tmp/coding-team-active', 'w') as _f:\n"
-            "    _f.write(str(time.time()))\n"
-            "with open('/tmp/second-opinion-declined', 'w') as _f:\n"
-            "    _f.write('skipped')\n"
+def _pre_event(skill: str = "coding-team") -> dict:
+    """PreToolUse event (no tool_result key)."""
+    return {
+        "tool_name": "Skill",
+        "tool_input": {"skill": skill},
+    }
+
+
+def _write_plan(repo_root: Path, name: str, body: str, mtime: float | None = None) -> Path:
+    """Create a plan file under docs/plans/ with optional mtime override."""
+    plans_dir = repo_root / "docs" / "plans"
+    plans_dir.mkdir(parents=True, exist_ok=True)
+    plan = plans_dir / name
+    plan.write_text(body)
+    if mtime is not None:
+        os.utime(plan, (mtime, mtime))
+    return plan
+
+
+def _active_plan(checklist_state: str = "[ ]", trailing: str = "") -> str:
+    """Build a canonical in-progress plan body with a Completion Checklist."""
+    return (
+        ACTIVE_FRONTMATTER
+        + "# Plan\n\n## Completion Checklist\n"
+        + f"- {checklist_state} Second-opinion review{trailing}\n"
+    )
+
+
+@pytest.fixture
+def repo(tmp_path: Path) -> Path:
+    """Fresh git repo under tmp_path; tests cd into this for the subprocess."""
+    _init_repo(tmp_path)
+    return tmp_path
+
+
+def _parse_or_none(stdout: str) -> dict | None:
+    stdout = stdout.strip()
+    if not stdout:
+        return None
+    try:
+        return json.loads(stdout)
+    except (json.JSONDecodeError, ValueError):
+        return None
+
+
+# ---------------------------------------------------------------------------
+# Plan-state behavior — basic gate
+# ---------------------------------------------------------------------------
+
+
+def test_no_plan_found_allows(repo: Path):
+    """No docs/plans dir -> silent allow (no pipeline state to gate)."""
+    result = _run_hook(_post_event(), cwd=repo)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == ""
+
+
+def test_unchecked_blocks(repo: Path):
+    """In-progress plan with `- [ ] Second-opinion review` blocks completion."""
+    _write_plan(repo, "plan.md", _active_plan("[ ]"))
+    result = _run_hook(_post_event(), cwd=repo)
+    assert result.returncode == 0, result.stderr
+    parsed = _parse_or_none(result.stdout)
+    assert parsed is not None, f"expected JSON output, got {result.stdout!r}"
+    assert parsed.get("decision") == "block"
+    assert "second-opinion" in parsed.get("reason", "").lower()
+
+
+def test_checked_allows(repo: Path):
+    """In-progress plan with `- [x] Second-opinion review` allows."""
+    _write_plan(repo, "plan.md", _active_plan("[x]"))
+    result = _run_hook(_post_event(), cwd=repo)
+    assert result.returncode == 0, result.stderr
+    parsed = _parse_or_none(result.stdout)
+    if parsed is not None:
+        assert parsed.get("decision") != "block"
+
+
+def test_skip_reason_allows(repo: Path):
+    """`- [x] Second-opinion review (skip: <reason>)` allows."""
+    _write_plan(repo, "plan.md", _active_plan("[x]", " (skip: vendor lib only)"))
+    result = _run_hook(_post_event(), cwd=repo)
+    assert result.returncode == 0, result.stderr
+    parsed = _parse_or_none(result.stdout)
+    if parsed is not None:
+        assert parsed.get("decision") != "block"
+
+
+def test_skip_reason_overrides_unchecked(repo: Path):
+    """Even an unchecked line allows if it contains `skip:`."""
+    _write_plan(repo, "plan.md", _active_plan("[ ]", " (skip: trivial doc edit)"))
+    result = _run_hook(_post_event(), cwd=repo)
+    assert result.returncode == 0, result.stderr
+    parsed = _parse_or_none(result.stdout)
+    if parsed is not None:
+        assert parsed.get("decision") != "block"
+
+
+def test_no_checklist_line_allows(repo: Path):
+    """In-progress plan without the checklist section allows (back-compat)."""
+    _write_plan(
+        repo,
+        "old-format.md",
+        ACTIVE_FRONTMATTER + "# Plan\n\nSome content but no Completion Checklist section.\n",
+    )
+    result = _run_hook(_post_event(), cwd=repo)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == ""
+
+
+# ---------------------------------------------------------------------------
+# Plan-state behavior — frontmatter-driven activation (new contract)
+# ---------------------------------------------------------------------------
+
+
+def test_status_in_progress_required(repo: Path):
+    """Plan without `status: in-progress` frontmatter -> no gate (no block)."""
+    # Plan is `status: planned`, not in-progress -> no gate
+    _write_plan(
+        repo,
+        "planned.md",
+        "---\nstatus: planned\n---\n\n# Plan\n\n## Completion Checklist\n"
+        "- [ ] Second-opinion review\n",
+    )
+    result = _run_hook(_post_event(), cwd=repo)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "", (
+        f"expected silent allow for status: planned plan, got {result.stdout!r}"
+    )
+
+
+def test_multiple_in_progress_blocks(repo: Path):
+    """Two plans with `status: in-progress` -> AmbiguousActivePlanError -> block."""
+    _write_plan(repo, "plan-a.md", _active_plan("[x]"))
+    _write_plan(repo, "plan-b.md", _active_plan("[x]"))
+    result = _run_hook(_post_event(), cwd=repo)
+    assert result.returncode == 0, result.stderr
+    parsed = _parse_or_none(result.stdout)
+    assert parsed is not None, f"expected JSON output, got {result.stdout!r}"
+    assert parsed.get("decision") == "block"
+    reason = parsed.get("reason", "").lower()
+    assert "cannot determine active plan state" in reason
+    assert "multiple plans" in reason or "in-progress" in reason
+
+
+def test_unreadable_plan_blocks(repo: Path):
+    """chmod 000 on an in-progress plan -> fail closed -> block."""
+    plan = _write_plan(repo, "locked.md", _active_plan("[x]"))
+    # Strip all permissions
+    plan.chmod(0)
+    try:
+        result = _run_hook(_post_event(), cwd=repo)
+    finally:
+        plan.chmod(stat.S_IRUSR | stat.S_IWUSR)  # restore so tmp cleanup works
+    assert result.returncode == 0, result.stderr
+    parsed = _parse_or_none(result.stdout)
+    assert parsed is not None, f"expected JSON output, got {result.stdout!r}"
+    assert parsed.get("decision") == "block"
+    reason = parsed.get("reason", "").lower()
+    assert "cannot determine active plan state" in reason
+    assert "unreadable" in reason
+
+
+def test_body_status_complete_ignored(repo: Path):
+    """A `status: complete` line in the BODY (not frontmatter) is ignored."""
+    body = (
+        ACTIVE_FRONTMATTER
+        + "# Plan\n\n"
+        + "Note: previous plan was status: complete. This one is in-progress.\n\n"
+        + "## Completion Checklist\n- [ ] Second-opinion review\n"
+    )
+    _write_plan(repo, "plan.md", body)
+    result = _run_hook(_post_event(), cwd=repo)
+    assert result.returncode == 0, result.stderr
+    parsed = _parse_or_none(result.stdout)
+    assert parsed is not None and parsed.get("decision") == "block", (
+        f"expected block: body 'status: complete' must be ignored, got {result.stdout!r}"
+    )
+
+
+def test_no_frontmatter_no_gate(repo: Path):
+    """Plan without leading `---` frontmatter -> no gate (no block)."""
+    _write_plan(
+        repo,
+        "noframe.md",
+        "# Plan\n\n## Completion Checklist\n- [ ] Second-opinion review\n",
+    )
+    result = _run_hook(_post_event(), cwd=repo)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "", (
+        f"expected silent allow for no-frontmatter plan, got {result.stdout!r}"
+    )
+
+
+def test_bom_frontmatter_parsed(repo: Path):
+    """UTF-8 BOM + frontmatter -> parsed correctly, gate fires."""
+    body = "﻿" + _active_plan("[ ]")
+    _write_plan(repo, "bom.md", body)
+    result = _run_hook(_post_event(), cwd=repo)
+    assert result.returncode == 0, result.stderr
+    parsed = _parse_or_none(result.stdout)
+    assert parsed is not None and parsed.get("decision") == "block", (
+        f"expected block on BOM-prefixed in-progress plan, got {result.stdout!r}"
+    )
+
+
+def test_checklist_outside_section_ignored(repo: Path):
+    """`- [x] Second-opinion review` outside `## Completion Checklist` doesn't satisfy gate."""
+    body = (
+        ACTIVE_FRONTMATTER
+        + "# Plan\n\n"
+        + "## Notes\n- [x] Second-opinion review (this is a doc example)\n\n"
+        + "## Completion Checklist\n- [ ] Second-opinion review\n"
+    )
+    _write_plan(repo, "plan.md", body)
+    result = _run_hook(_post_event(), cwd=repo)
+    assert result.returncode == 0, result.stderr
+    parsed = _parse_or_none(result.stdout)
+    assert parsed is not None and parsed.get("decision") == "block", (
+        f"expected block — only Completion Checklist counts, got {result.stdout!r}"
+    )
+
+
+def test_checklist_format_variations(repo: Path):
+    """Tolerates `- [X]`, extra whitespace, tab indent."""
+    body = (
+        ACTIVE_FRONTMATTER
+        + "# Plan\n\n## Completion Checklist\n"
+        + "\t-  [X]  Second-opinion review\n"
+    )
+    _write_plan(repo, "plan.md", body)
+    result = _run_hook(_post_event(), cwd=repo)
+    assert result.returncode == 0, result.stderr
+    parsed = _parse_or_none(result.stdout)
+    if parsed is not None:
+        assert parsed.get("decision") != "block", (
+            f"expected allow on `- [X]` with tab indent, got {result.stdout!r}"
         )
-        hook_path = str(HOOKS_DIR / "coding-team-lifecycle.py")
-        code += f"runpy.run_path({hook_path!r}, run_name='__main__')\n"
 
-        event = {"tool_name": "Skill", "tool_input": {"skill": "coding-team"},
-                 "tool_result": "done"}
-        result = subprocess.run(
-            ["python3", "-c", code],
-            input=json.dumps(event),
-            capture_output=True,
-            text=True,
-            timeout=10,
+
+def test_star_bullet_does_not_match(repo: Path):
+    """`* [x] Second-opinion review` does NOT match (canonical is `-`)."""
+    body = (
+        ACTIVE_FRONTMATTER
+        + "# Plan\n\n## Completion Checklist\n"
+        + "* [x] Second-opinion review\n"
+    )
+    _write_plan(repo, "plan.md", body)
+    result = _run_hook(_post_event(), cwd=repo)
+    assert result.returncode == 0, result.stderr
+    parsed = _parse_or_none(result.stdout)
+    # No `-` bullet match found -> falls through as no checklist line -> allow.
+    if parsed is not None:
+        assert parsed.get("decision") != "block", (
+            f"expected silent allow (no canonical bullet match), got {result.stdout!r}"
         )
-        assert result.returncode == 0
-        # The hook removes the active file on PostToolUse
-        assert not os.path.exists(ACTIVE_FILE)
 
 
-class TestSubSkillsPassThrough:
-    """Sub-skills must NOT be blocked when the pipeline is active.
+def test_long_session_no_expiry(repo: Path):
+    """Plan with mtime 7 days ago is still active when status is in-progress."""
+    week_old = time.time() - (7 * 24 * 3600)
+    _write_plan(repo, "long.md", _active_plan("[ ]"), mtime=week_old)
+    result = _run_hook(_post_event(), cwd=repo)
+    assert result.returncode == 0, result.stderr
+    parsed = _parse_or_none(result.stdout)
+    assert parsed is not None and parsed.get("decision") == "block", (
+        f"expected block on week-old in-progress plan (no mtime expiry), got {result.stdout!r}"
+    )
 
-    The recursion guard only protects against re-entering /coding-team itself.
-    Skills like /second-opinion, /debug, /harness-engineer are designed to be
-    invoked WITHIN the pipeline.
+
+# ---------------------------------------------------------------------------
+# Multi-plan resolution — frontmatter, not mtime
+# ---------------------------------------------------------------------------
+
+
+def test_complete_frontmatter_skipped(repo: Path):
+    """Plan with `status: complete` frontmatter is ignored.
+
+    Older plan is in-progress, newer plan is complete -> in-progress one wins.
     """
+    older_mtime = time.time() - 60   # 1 min ago
+    newer_mtime = time.time() - 30   # 30 sec ago
 
-    @pytest.mark.parametrize("skill_name", [
-        "second-opinion",
-        "debug",
-        "harness-engineer",
-        "prompt-craft",
-        "verify",
-        "tdd",
-        "review-feedback",
-        "scope-lock",
-        "scope-unlock",
-        "release",
-        "retrospective",
-        "doc-sync",
-        "parallel-fix",
-        "worktree",
-    ])
-    def test_sub_skill_allowed_when_pipeline_active(self, skill_name):
-        """Sub-skills pass through even when /tmp/coding-team-active exists."""
-        event = {"tool_name": "Skill", "tool_input": {"skill": skill_name}}
-        result = run_lifecycle_with_setup(event, create_active=True)
-        assert result.returncode == 0
-        # Should produce no output (silent allow), not a block
-        assert result.stdout.strip() == ""
+    _write_plan(repo, "older.md", _active_plan("[ ]"), mtime=older_mtime)
+    _write_plan(
+        repo,
+        "newer.md",
+        "---\nstatus: complete\n---\n\n# Newer plan\n\n## Completion Checklist\n"
+        "- [ ] Second-opinion review\n",
+        mtime=newer_mtime,
+    )
+
+    result = _run_hook(_post_event(), cwd=repo)
+    assert result.returncode == 0, result.stderr
+    parsed = _parse_or_none(result.stdout)
+    assert parsed is not None and parsed.get("decision") == "block", (
+        f"expected block on in-progress plan despite complete sibling, got {result.stdout!r}"
+    )
 
 
-class TestPostToolUseCleanup:
-    """PostToolUse for coding-team cleans up all marker files."""
-
-    def test_removes_second_opinion_marker_on_post(self):
-        """Second-opinion completion marker is cleaned up when pipeline ends."""
-        so_marker = "/tmp/second-opinion-completed"
-        # Create both the active file and second-opinion marker atomically
-        code = (
-            "import sys, json, os, io, time, runpy\n"
-            f"sys.path.insert(0, {str(HOOKS_DIR)!r})\n"
-            "with open('/tmp/coding-team-active', 'w') as _f:\n"
-            "    _f.write(str(time.time()))\n"
-            "with open('/tmp/second-opinion-completed', 'w') as _f:\n"
-            "    _f.write('done')\n"
-        )
-        hook_path = str(HOOKS_DIR / "coding-team-lifecycle.py")
-        code += f"runpy.run_path({hook_path!r}, run_name='__main__')\n"
-
-        event = {"tool_name": "Skill", "tool_input": {"skill": "coding-team"},
-                 "tool_result": "done"}
-        result = subprocess.run(
-            ["python3", "-c", code],
-            input=json.dumps(event),
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-        assert result.returncode == 0
-        assert not os.path.exists(so_marker)
-        assert not os.path.exists(ACTIVE_FILE)
+# ---------------------------------------------------------------------------
+# Surface guards
+# ---------------------------------------------------------------------------
 
 
-class TestSecondOpinionGate:
-    """PostToolUse for coding-team blocks completion unless second-opinion was addressed.
-
-    Fail-closed: if neither /tmp/second-opinion-completed nor /tmp/second-opinion-declined
-    exists, the hook blocks pipeline completion. This is structural enforcement — the LLM
-    cannot rationalize past it.
-    """
-
-    SO_COMPLETED = "/tmp/second-opinion-completed"
-    SO_DECLINED = "/tmp/second-opinion-declined"
-
-    def _run_post_with_markers(self, completed=False, declined=False):
-        """Run PostToolUse for coding-team with optional markers, atomically."""
-        code = (
-            "import sys, json, os, io, time, runpy\n"
-            f"sys.path.insert(0, {str(HOOKS_DIR)!r})\n"
-            "with open('/tmp/coding-team-active', 'w') as _f:\n"
-            "    _f.write(str(time.time()))\n"
-        )
-        if completed:
-            code += (
-                "with open('/tmp/second-opinion-completed', 'w') as _f:\n"
-                "    _f.write('done')\n"
-            )
-        if declined:
-            code += (
-                "with open('/tmp/second-opinion-declined', 'w') as _f:\n"
-                "    _f.write('skipped')\n"
-            )
-        hook_path = str(HOOKS_DIR / "coding-team-lifecycle.py")
-        code += f"runpy.run_path({hook_path!r}, run_name='__main__')\n"
-
-        event = {"tool_name": "Skill", "tool_input": {"skill": "coding-team"},
-                 "tool_result": "done"}
-        return subprocess.run(
-            ["python3", "-c", code],
-            input=json.dumps(event),
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-
-    def test_blocks_when_neither_marker_exists(self):
-        """Fail-closed: no markers → block completion."""
-        result = self._run_post_with_markers(completed=False, declined=False)
-        assert result.returncode == 0
-        parsed = json.loads(result.stdout)
-        assert parsed["decision"] == "block"
-        assert "second-opinion" in parsed["reason"].lower()
-
-    def test_allows_when_completed_marker_exists(self):
-        """User ran codex → allow completion."""
-        result = self._run_post_with_markers(completed=True)
-        assert result.returncode == 0
-        # Should produce no block output (silent allow + cleanup)
-        stdout = result.stdout.strip()
-        if stdout:
-            parsed = json.loads(stdout)
-            assert parsed.get("decision") != "block"
-
-    def test_allows_when_declined_marker_exists(self):
-        """User explicitly declined → allow completion."""
-        result = self._run_post_with_markers(declined=True)
-        assert result.returncode == 0
-        stdout = result.stdout.strip()
-        if stdout:
-            parsed = json.loads(stdout)
-            assert parsed.get("decision") != "block"
-
-    def test_cleans_up_completed_marker_after_gate_passes(self):
-        """Markers are cleaned up when the pipeline completes."""
-        self._run_post_with_markers(completed=True)
-        assert not os.path.exists(self.SO_COMPLETED)
-        assert not os.path.exists(ACTIVE_FILE)
-
-    def test_cleans_up_declined_marker_after_gate_passes(self):
-        """Declined marker is cleaned up when the pipeline completes."""
-        self._run_post_with_markers(declined=True)
-        assert not os.path.exists(self.SO_DECLINED)
-        assert not os.path.exists(ACTIVE_FILE)
-
-    def test_cleans_up_both_markers_after_gate_passes(self):
-        """Both markers cleaned up when both exist."""
-        self._run_post_with_markers(completed=True, declined=True)
-        assert not os.path.exists(self.SO_COMPLETED)
-        assert not os.path.exists(self.SO_DECLINED)
-        assert not os.path.exists(ACTIVE_FILE)
+def test_pretooluse_noop(repo: Path):
+    """PreToolUse event (no tool_result) -> no output, no exception."""
+    _write_plan(repo, "plan.md", _active_plan("[ ]"))
+    result = _run_hook(_pre_event(), cwd=repo)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == ""
+    assert result.stderr.strip() == ""
 
 
-class TestNonCodingTeamSkill:
-    def test_allows_silently_for_other_skills(self, run_hook, make_event):
-        event = make_event("Skill", skill="some-other-skill")
-        result = run_hook("coding-team-lifecycle.py", event)
-        assert result.returncode == 0
-        # No output means silent allow
-        assert result.stdout.strip() == ""
+def test_non_coding_team_skill_skips(repo: Path):
+    """skill_name is `debug` -> return early, no work, silent allow."""
+    _write_plan(repo, "plan.md", _active_plan("[ ]"))
+    result = _run_hook(_post_event(skill="debug"), cwd=repo)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == ""

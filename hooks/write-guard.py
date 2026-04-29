@@ -13,22 +13,18 @@ Execution order: first block wins, but advisory checks always run.
 import os, sys
 sys.path.insert(0, os.path.dirname(__file__))
 
-import json
 import re
-import time
+import subprocess
 from pathlib import Path
 
 from _lib import event as _event
 from _lib import output as _output
+from _lib.active_plan import find_active_plan, AmbiguousActivePlanError
+
 
 # ---------------------------------------------------------------------------
-# Phase 5 edit guard constants
+# Phase 5 edit guard
 # ---------------------------------------------------------------------------
-SESSION_FILE = Path("/tmp/coding-team-session.json")
-MAX_AGE_SECONDS = 30 * 60  # 30 minutes — stale marker cleanup; legitimate sessions have session JSON
-ACTIVE_MARKER = Path("/tmp/coding-team-active")
-
-
 def is_orchestrator_file(file_path: str) -> bool:
     """Return True only for files the orchestrator may always edit during Phase 5."""
     path_str = str(file_path)
@@ -37,6 +33,8 @@ def is_orchestrator_file(file_path: str) -> bool:
     if "/Documents/obsidian-vault/" in path_str:
         return True
     if "/memory/" in path_str or path_str.endswith("/memory"):
+        return True
+    if "/.paul/" in path_str:
         return True
     return False
 
@@ -60,74 +58,32 @@ def is_instruction_file(file_path: str) -> bool:
     return any(pattern in path_str for pattern in INSTRUCTION_PATTERNS)
 
 
-def read_session() -> tuple[dict | None, bool]:
-    """Read and validate the session file.
-
-    Returns (session_dict, had_error).
-    """
-    if not SESSION_FILE.exists():
-        return None, False
-    try:
-        data = json.loads(SESSION_FILE.read_text())
-    except json.JSONDecodeError:
-        return None, True
-    except OSError:
-        return None, False
-    try:
-        phase = data["phase"]
-        ts = data["ts"]
-    except KeyError:
-        return None, True
-    if time.time() - ts > MAX_AGE_SECONDS:
-        return None, False
-    return {"phase": phase, "ts": ts}, False
-
-
 def check_phase5(file_path: str) -> str | None:
-    """Check coding-team session edit guard. Returns block reason or None.
+    """Check coding-team pipeline edit guard. Returns block reason or None.
 
-    Blocks orchestrator edits to non-allowlisted files during ANY active
-    coding-team session (phase 'execution' or 'active').
+    Pipeline state is derived from the active plan file (under
+    `$MAIN_ROOT/docs/plans/`) via `find_active_plan()`. The active plan
+    is the unique plan whose YAML frontmatter declares
+    `status: in-progress`. When such a plan exists, instruction-file
+    edits are blocked so they go through the Agent tool — a 1-line
+    change to an agent prompt can cascade through the entire pipeline.
 
-    Tamper detection: if the active marker exists but the session JSON is
-    missing, the session file was deleted mid-session — block to maintain safety.
+    When no active plan exists, all edits are allowed: there is no
+    pipeline to gate against.
+
+    If multiple plans claim `status: in-progress` or a plan is
+    unreadable, fail closed and block with a remediation message.
     """
-    session, had_error = read_session()
-    if had_error:
+    try:
+        active = find_active_plan()
+    except AmbiguousActivePlanError as exc:
         return (
-            "BLOCKED: coding-team session file is corrupt or unreadable. "
-            "Cannot determine session state — blocking to maintain safety. "
-            "Delete /tmp/coding-team-session.json if no coding-team session is active."
+            f"BLOCKED: cannot determine active plan state — {exc}. "
+            f"Either fix the plan file's readability or remove its "
+            f"`status: in-progress` frontmatter and try again."
         )
-    if session is None:
-        # Session file missing — check if a session SHOULD be active
-        if ACTIVE_MARKER.exists():
-            # Check marker age — stale markers from crashed/compacted sessions
-            # should be cleaned up, not block indefinitely
-            try:
-                marker_content = ACTIVE_MARKER.read_text().strip()
-                marker_ts = float(marker_content) if marker_content else 0
-            except (ValueError, OSError):
-                marker_ts = 0
-            marker_age = time.time() - marker_ts if marker_ts > 0 else float("inf")
-            if marker_age > MAX_AGE_SECONDS:
-                # Stale marker — clean up silently and allow
-                try:
-                    ACTIVE_MARKER.unlink(missing_ok=True)
-                except OSError:
-                    pass
-                return None
-            return (
-                "BLOCKED: coding-team session file is missing but the session marker "
-                "(/tmp/coding-team-active) still exists. This suggests the session file "
-                "was deleted mid-session — blocking to maintain safety.\n\n"
-                "If the session is genuinely over, complete it through Phase 6 "
-                "(which cleans up both files via the lifecycle hook).\n\n"
-                "Known rationalization: 'The session file is blocking my edits' — "
-                "that IS the correct behavior. Delegate edits through the Agent tool."
-            )
-        return None
-    if session["phase"] not in ("execution", "active"):
+    if active is None:
+        # No active plan -> no pipeline state to gate.
         return None
     if is_orchestrator_file(file_path):
         return None
@@ -136,7 +92,7 @@ def check_phase5(file_path: str) -> str | None:
     # Source code: allowed for small edits (orchestrator uses ≤20 line threshold).
     if is_instruction_file(file_path):
         return (
-            f"BLOCKED: Instruction file edit during active coding-team session. "
+            f"BLOCKED: Instruction file edit during active coding-team pipeline. "
             f"Instruction files (agents, phases, prompts, skills, hooks, CLAUDE.md) "
             f"ALWAYS go through the Agent tool — a 1-line change can cascade.\n\n"
             f"File: {file_path}\n"
@@ -180,12 +136,39 @@ def is_migration_file(filepath: str) -> bool:
     return False
 
 
+def _is_tracked_in_git(filepath: str) -> bool:
+    """Return True if the file is tracked by git (i.e., has been committed at some point).
+
+    Untracked files (new, never-committed) return False — safe to edit, not yet deployed.
+    If git isn't available or the path isn't in a repo, default to True (conservative — keep blocking).
+    """
+    path = Path(filepath)
+    try:
+        result = subprocess.run(
+            ["git", "ls-files", "--error-unmatch", str(path)],
+            cwd=path.parent,
+            capture_output=True,
+            timeout=2,
+            check=False,
+        )
+        # Exit code 0 → tracked; non-zero (typically 1) → untracked or not in repo
+        return result.returncode == 0
+    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+        # git not installed, path invalid, timeout — default conservative (block)
+        return True
+
+
 def check_migration(tool_name: str, file_path: str) -> str | None:
     """Check migration guard. Returns block reason or None."""
     if tool_name == "Write" and not Path(file_path).exists():
         return None  # New file creation is allowed
 
     if not is_migration_file(file_path):
+        return None
+
+    # An untracked migration is not yet deployed — allow edits during the
+    # create-and-audit cycle, before the first commit.
+    if not _is_tracked_in_git(file_path):
         return None
 
     path = Path(file_path)
@@ -322,7 +305,7 @@ IDENTITY_MARKERS = [
 
 
 def is_identity_file(file_path: str) -> bool:
-    """Check if the file path matches known identity file patterns (agents, skills)."""
+    """Check if the file path matches known identity instruction file patterns."""
     for pattern in IDENTITY_FILE_PATTERNS:
         if re.search(pattern, file_path):
             return True
@@ -381,6 +364,60 @@ def check_identity_framing(tool_name: str, tool_input: dict) -> str | None:
             f"Agent/skill instruction files should start with identity framing: "
             f"'You are the [role]' — this sets behavioral defaults stronger than prohibitions.\n"
             f"See skill-files.md rule for guidance."
+        )
+    return None
+
+
+# ---------------------------------------------------------------------------
+# SKILL.md line cap constants
+# ---------------------------------------------------------------------------
+SKILL_MD_MAX_LINES = 200
+SKILL_MD_PATTERN = re.compile(r"\.claude/skills/.*/SKILL\.md(\.tmpl)?$")
+
+
+def check_skill_line_cap(tool_name: str, tool_input: dict) -> str | None:
+    """Block writes to SKILL.md or SKILL.md.tmpl files that exceed the line cap.
+
+    Gstack skills use a template system: SKILL.md.tmpl is the source of truth,
+    SKILL.md is generated with ~570 lines of expanded preamble boilerplate.
+    When a .tmpl exists, enforce the cap on the .tmpl only — the generated
+    SKILL.md is exempt (its size is driven by preamble expansion, not skill content).
+
+    For Write: checks content directly.
+    For Edit: estimates final line count from current + delta.
+    """
+    file_path = tool_input.get("file_path", "")
+    if not file_path or not SKILL_MD_PATTERN.search(file_path):
+        return None
+
+    # If editing SKILL.md (not .tmpl) and a .tmpl exists, skip — generated file is exempt
+    if file_path.endswith("SKILL.md") and not file_path.endswith(".tmpl"):
+        tmpl_path = file_path + ".tmpl"
+        if Path(tmpl_path).exists():
+            return None  # Gstack-generated file — enforce on .tmpl instead
+
+    if tool_name == "Write":
+        content = tool_input.get("content", "")
+        line_count = content.count("\n") + 1 if content else 0
+    else:
+        # Edit: estimate final line count
+        old_string = tool_input.get("old_string", "")
+        new_string = tool_input.get("new_string", "")
+        try:
+            current_lines = len(Path(file_path).read_text().splitlines())
+        except OSError:
+            return None
+        old_lines = old_string.count("\n") + 1 if old_string else 0
+        new_lines = new_string.count("\n") + 1 if new_string else 0
+        line_count = current_lines - old_lines + new_lines
+
+    if line_count > SKILL_MD_MAX_LINES:
+        file_label = "SKILL.md.tmpl" if file_path.endswith(".tmpl") else "SKILL.md"
+        return (
+            f"BLOCKED: {file_label} would be {line_count} lines (limit: {SKILL_MD_MAX_LINES}).\n"
+            f"Extract detail sections to phases/ or steps/ subdirs.\n"
+            f"Root must stay under {SKILL_MD_MAX_LINES} lines.\n"
+            f"See skill-files.md rule and Case Study 24."
         )
     return None
 
@@ -472,12 +509,18 @@ def main():
         _output.block(reason)
         return
 
-    # 4. Identity framing check (advisory — runs even if no block occurred)
+    # 4. SKILL.md line cap (blocking)
+    reason = check_skill_line_cap(tool_name, tool_input)
+    if reason:
+        _output.block(reason)
+        return
+
+    # 5. Identity framing check (advisory — runs even if no block occurred)
     reason = check_identity_framing(tool_name, tool_input)
     if reason:
         _output.advisory(reason)
 
-    # 5. Path safety check (advisory)
+    # 6. Path safety check (advisory)
     reason = check_path_safety(tool_name, tool_input)
     if reason:
         _output.advisory(reason)
