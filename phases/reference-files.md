@@ -48,6 +48,7 @@ Loaded on demand by the skill router. Not needed during active phase work.
 | `phases/planning-next-steps.md` | planning.md | Risk signals and second-opinion gate |
 | `phases/design-team-context-retrieval.md` | design-team.md | Episode & context retrieval for design workers |
 | `phases/reference-files.md` | SKILL.md | Standalone skills, phase details, on-demand files, agent definitions |
+| `phases/agent-standards.md` | global CLAUDE.md (moved 2026-05-20) | Model routing tiers + UI/UX standards for dispatched agents |
 | `agents/implementer-reference.md` | ct-implementer.md | Code exploration, CI fix context, escalation guidance |
 | `agents/harness-engineer-reference.md` | ct-harness-engineer.md | Report template, Phase 5 auditor protocol, hook design protocol |
 

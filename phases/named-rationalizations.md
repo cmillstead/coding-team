@@ -1,6 +1,8 @@
 # Named Rationalizations — Coding Team
 
-**Cross-reference:** See `rules/failure-taxonomy.md` for the consolidated taxonomy with recovery actions. This file adds coding-team-specific context.
+@~/.claude/rules-on-demand/failure-taxonomy.md
+
+**Cross-reference:** The consolidated taxonomy with recovery actions is loaded above via the `@`-reference. This file adds coding-team-specific context.
 
 These are bypass phrases that CC constructs to justify skipping steps. When you catch yourself reaching for one, it's a compliance trigger — do the opposite.
 
