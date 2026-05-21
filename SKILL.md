@@ -197,4 +197,4 @@ Instruction files ALWAYS delegate regardless of change size — a 1-line change 
 
 ## Reference Files
 
-For standalone skills, phase details, extracted on-demand files, and agent definitions, read `phases/reference-files.md`.
+For standalone skills, phase details, extracted on-demand files, and agent definitions, read `phases/reference-files.md`. For model-routing tiers and UI/UX standards that apply to dispatched agents, read `phases/agent-standards.md`.
