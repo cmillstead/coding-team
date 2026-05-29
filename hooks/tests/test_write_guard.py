@@ -67,8 +67,15 @@ def _write_plan(repo_root: Path, name: str, body: str | None = None) -> Path:
     return plan
 
 
-def _run(event: dict, cwd: Path | None = None) -> tuple[dict | None, str, str, int]:
+def _run(
+    event: dict, cwd: Path | None = None, env: dict | None = None
+) -> tuple[dict | None, str, str, int]:
     """Run write-guard.py with the given event; return (parsed_json, stdout, stderr, returncode)."""
+    import os
+
+    run_env = None
+    if env is not None:
+        run_env = {**os.environ, **env}
     result = subprocess.run(
         ["python3", str(HOOK_PATH)],
         input=json.dumps(event),
@@ -76,6 +83,7 @@ def _run(event: dict, cwd: Path | None = None) -> tuple[dict | None, str, str, i
         text=True,
         timeout=10,
         cwd=str(cwd) if cwd else None,
+        env=run_env,
     )
     try:
         parsed = json.loads(result.stdout) if result.stdout.strip() else None
@@ -351,6 +359,232 @@ class TestPhase5AmbiguousState:
         reason = parsed.get("reason", "").lower()
         assert "cannot determine active plan state" in reason
         assert "unreadable" in reason
+
+
+class TestPhase5ReferenceDataFilesAllowed:
+    """DEFECT 2: co-located reference/DATA docs under instruction dirs are
+    NOT behavioral instruction files and must be allowed even in-pipeline."""
+
+    def _make_instr_tree(self, repo: Path) -> Path:
+        skill_dir = repo / "skills" / "second-opinion"
+        skill_dir.mkdir(parents=True)
+        return skill_dir
+
+    def test_allows_codex_learnings_append_in_pipeline(self, repo: Path):
+        """The live-diagnosed case: appending to codex-learnings.md in-pipeline -> allow."""
+        _write_plan(repo, "plan.md")
+        skill_dir = self._make_instr_tree(repo)
+        learnings = skill_dir / "codex-learnings.md"
+        learnings.write_text("# Codex learnings\n| # | pattern |\n")
+
+        event = {
+            "tool_name": "Edit",
+            "tool_input": {
+                "file_path": str(learnings),
+                "new_string": "| P99 | new row |\n",
+            },
+        }
+        parsed, stdout, _stderr, _rc = _run(event, cwd=repo)
+        if parsed is not None:
+            assert parsed.get("decision") != "block", (
+                f"reference/data log must not be gated, got {stdout!r}"
+            )
+
+    def test_allows_reference_md_in_pipeline(self, repo: Path):
+        """A co-located reference.md (data doc) in-pipeline -> allow."""
+        _write_plan(repo, "plan.md")
+        skill_dir = self._make_instr_tree(repo)
+        ref = skill_dir / "reference.md"
+        ref.write_text("# Reference\n")
+
+        event = {
+            "tool_name": "Edit",
+            "tool_input": {"file_path": str(ref), "new_string": "more"},
+        }
+        parsed, _stdout, _stderr, _rc = _run(event, cwd=repo)
+        if parsed is not None:
+            assert parsed.get("decision") != "block"
+
+    def test_allows_references_subdir_doc_in_pipeline(self, repo: Path):
+        """skills/foo/references/api.md (data) in-pipeline -> allow."""
+        _write_plan(repo, "plan.md")
+        ref = repo / "skills" / "firecrawl" / "references" / "api.md"
+        ref.parent.mkdir(parents=True)
+        ref.write_text("# API\n")
+
+        event = {
+            "tool_name": "Edit",
+            "tool_input": {"file_path": str(ref), "new_string": "more"},
+        }
+        parsed, _stdout, _stderr, _rc = _run(event, cwd=repo)
+        if parsed is not None:
+            assert parsed.get("decision") != "block"
+
+    def test_still_blocks_skill_md_in_pipeline(self, repo: Path):
+        """Regression guard: SKILL.md must STILL be gated (the hole must not widen)."""
+        _write_plan(repo, "plan.md")
+        skill_dir = self._make_instr_tree(repo)
+        skill_md = skill_dir / "SKILL.md"
+        skill_md.write_text("# Demo\nYou are demo.\n")
+
+        event = {
+            "tool_name": "Edit",
+            "tool_input": {"file_path": str(skill_md), "new_string": "altered"},
+        }
+        parsed, stdout, _stderr, _rc = _run(event, cwd=repo)
+        assert parsed is not None and parsed.get("decision") == "block", (
+            f"SKILL.md must remain gated, got {stdout!r}"
+        )
+
+    def test_still_blocks_agent_md_in_pipeline(self, repo: Path):
+        """Regression guard: agents/*.md must STILL be gated."""
+        _write_plan(repo, "plan.md")
+        agent = repo / "skills" / "ct" / "agents" / "ct-foo.md"
+        agent.parent.mkdir(parents=True)
+        agent.write_text("# Agent\nYou are foo.\n")
+
+        event = {
+            "tool_name": "Edit",
+            "tool_input": {"file_path": str(agent), "new_string": "altered"},
+        }
+        parsed, stdout, _stderr, _rc = _run(event, cwd=repo)
+        assert parsed is not None and parsed.get("decision") == "block", (
+            f"agents/*.md must remain gated, got {stdout!r}"
+        )
+
+    def test_still_blocks_hook_py_in_pipeline(self, repo: Path):
+        """Regression guard: hooks/*.py must STILL be gated."""
+        _write_plan(repo, "plan.md")
+        hook = repo / "skills" / "ct" / "hooks" / "some-guard.py"
+        hook.parent.mkdir(parents=True)
+        hook.write_text("print('hi')\n")
+
+        event = {
+            "tool_name": "Edit",
+            "tool_input": {"file_path": str(hook), "new_string": "altered"},
+        }
+        parsed, stdout, _stderr, _rc = _run(event, cwd=repo)
+        assert parsed is not None and parsed.get("decision") == "block", (
+            f"hooks/*.py must remain gated, got {stdout!r}"
+        )
+
+    def test_allows_md_note_co_located_in_hooks_dir(self, repo: Path):
+        """A .md note under a hooks dir is data, not an executable hook -> allow."""
+        _write_plan(repo, "plan.md")
+        note = repo / "skills" / "ct" / "hooks" / "NOTES.md"
+        note.parent.mkdir(parents=True)
+        note.write_text("# notes\n")
+
+        event = {
+            "tool_name": "Edit",
+            "tool_input": {"file_path": str(note), "new_string": "more"},
+        }
+        parsed, _stdout, _stderr, _rc = _run(event, cwd=repo)
+        if parsed is not None:
+            assert parsed.get("decision") != "block"
+
+
+class TestPhase5BlockMessageDiagnosability:
+    """DEFECT 3: the block message must name the arming plan path."""
+
+    def test_block_message_names_arming_plan(self, repo: Path):
+        """Block on an instruction file must include the arming plan's path."""
+        plan = _write_plan(repo, "plan-18-02.md")
+        skill_md = repo / "skills" / "demo" / "SKILL.md"
+        skill_md.parent.mkdir(parents=True)
+        skill_md.write_text("# Demo\nYou are demo.\n")
+
+        event = {
+            "tool_name": "Edit",
+            "tool_input": {"file_path": str(skill_md), "new_string": "altered"},
+        }
+        parsed, stdout, _stderr, _rc = _run(event, cwd=repo)
+        assert parsed is not None and parsed.get("decision") == "block"
+        reason = parsed.get("reason", "")
+        assert str(plan) in reason, (
+            f"block message must name the arming plan {plan}, got {reason!r}"
+        )
+        assert "arming plan" in reason.lower()
+
+    def test_stale_plan_surfaces_advisory_note(self, repo: Path):
+        """A plan older than the staleness threshold surfaces a STALE note."""
+        import os
+        import time
+
+        plan = _write_plan(repo, "stale.md")
+        old = time.time() - 11 * 86400  # 11 days, like the real plan-18-02 case
+        os.utime(plan, (old, old))
+
+        skill_md = repo / "skills" / "demo" / "SKILL.md"
+        skill_md.parent.mkdir(parents=True)
+        skill_md.write_text("# Demo\nYou are demo.\n")
+
+        event = {
+            "tool_name": "Edit",
+            "tool_input": {"file_path": str(skill_md), "new_string": "altered"},
+        }
+        parsed, _stdout, _stderr, _rc = _run(event, cwd=repo)
+        assert parsed is not None and parsed.get("decision") == "block"
+        assert "stale" in parsed.get("reason", "").lower()
+
+    def test_block_message_does_not_prescribe_agent_tool_route(self, repo: Path):
+        """DEFECT 1: the old impossible 'dispatch with PROMPT_CRAFT_ADVISORY'
+        instruction must be gone."""
+        _write_plan(repo, "plan.md")
+        skill_md = repo / "skills" / "demo" / "SKILL.md"
+        skill_md.parent.mkdir(parents=True)
+        skill_md.write_text("# Demo\nYou are demo.\n")
+
+        event = {
+            "tool_name": "Edit",
+            "tool_input": {"file_path": str(skill_md), "new_string": "altered"},
+        }
+        parsed, _stdout, _stderr, _rc = _run(event, cwd=repo)
+        reason = parsed.get("reason", "")
+        assert "PROMPT_CRAFT_ADVISORY" not in reason
+        # The real override path must be named.
+        assert "WRITE_GUARD_ALLOW_INSTRUCTION_EDIT" in reason
+
+
+class TestPhase5OverrideEscapeHatch:
+    """DEFECT 1: a deliberate env-var override allows the edit (default blocks)."""
+
+    def test_override_env_allows_instruction_edit(self, repo: Path):
+        """WRITE_GUARD_ALLOW_INSTRUCTION_EDIT=1 -> allow even in-pipeline."""
+        _write_plan(repo, "plan.md")
+        skill_md = repo / "skills" / "demo" / "SKILL.md"
+        skill_md.parent.mkdir(parents=True)
+        skill_md.write_text("# Demo\nYou are demo.\n")
+
+        event = {
+            "tool_name": "Edit",
+            "tool_input": {"file_path": str(skill_md), "new_string": "altered"},
+        }
+        parsed, stdout, _stderr, _rc = _run(
+            event, cwd=repo, env={"WRITE_GUARD_ALLOW_INSTRUCTION_EDIT": "1"}
+        )
+        if parsed is not None:
+            assert parsed.get("decision") != "block", (
+                f"override must allow the edit, got {stdout!r}"
+            )
+
+    def test_override_env_recovers_ambiguous_state(self, repo: Path):
+        """Override also unblocks the fail-closed ambiguous/wedged state."""
+        _write_plan(repo, "plan-a.md")
+        _write_plan(repo, "plan-b.md")  # two in-progress -> ambiguous
+        skill_md = repo / "skills" / "demo" / "SKILL.md"
+        skill_md.parent.mkdir(parents=True)
+        skill_md.write_text("# Demo\nYou are demo.\n")
+
+        event = {
+            "tool_name": "Edit",
+            "tool_input": {"file_path": str(skill_md), "new_string": "altered"},
+        }
+        parsed, _stdout, _stderr, _rc = _run(
+            event, cwd=repo, env={"WRITE_GUARD_ALLOW_INSTRUCTION_EDIT": "1"}
+        )
+        if parsed is not None:
+            assert parsed.get("decision") != "block"
 
 
 # ---------------------------------------------------------------------------
