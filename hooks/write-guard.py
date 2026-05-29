@@ -10,7 +10,8 @@ You are a file-write integrity guardian. Consolidates 4 guards into one:
 Execution order: first block wins, but advisory checks always run.
 """
 
-import os, sys
+import os
+import sys
 sys.path.insert(0, os.path.dirname(__file__))
 
 import re
@@ -39,23 +40,105 @@ def is_orchestrator_file(file_path: str) -> bool:
     return False
 
 
-# Instruction files: high impact surface — always delegate regardless of edit size.
-# A 1-line change to an agent prompt can cascade through the entire pipeline.
-INSTRUCTION_PATTERNS = [
-    "/agents/",
-    "/phases/",
-    "/prompts/",
-    "/skills/",
-    "/hooks/",
-    "CLAUDE.md",
-    "SKILL.md",
-]
+# Behavioral instruction files: high-impact surface — always delegate
+# regardless of edit size. A 1-line change to an agent prompt, a skill
+# definition, or a hook can cascade through the entire pipeline.
+#
+# Classification is a POSITIVE allowlist of behavioral roles, NOT mere
+# membership under /skills/. The bare "/skills/" substring used to live in
+# this list and over-classified co-located reference/DATA files (e.g.
+# `codex-learnings.md`, `reference.md`, `references/*.md`) as behavioral
+# instruction files — appending a row to a learnings table cannot cascade
+# through any pipeline. We gate by role instead:
+#
+#   - basename SKILL.md / SKILL.md.tmpl / CLAUDE.md  -> behavioral
+#   - any .md inside an agents/prompts/phases/workers/commands/steps dir
+#     -> behavioral (these dirs hold prompt/role content)
+#   - any .py/.sh inside a hooks dir                  -> behavioral
+#
+# Everything else co-located under /skills/ (references/, docs/, cookbook/,
+# memory/, top-level *-learnings.md / reference.md / README.md, etc.) is a
+# reference/data doc and is NOT gated. memory/ is also covered by
+# is_orchestrator_file().
+BEHAVIORAL_INSTRUCTION_BASENAMES = {"SKILL.md", "SKILL.md.tmpl", "CLAUDE.md"}
+BEHAVIORAL_INSTRUCTION_DIRS = {
+    "agents",
+    "prompts",
+    "phases",
+    "workers",
+    "commands",
+    "steps",
+}
 
 
 def is_instruction_file(file_path: str) -> bool:
-    """Return True for files that MUST be delegated — high impact surface."""
-    path_str = str(file_path)
-    return any(pattern in path_str for pattern in INSTRUCTION_PATTERNS)
+    """Return True only for behavioral instruction files — high-impact surface.
+
+    Uses structural Path matching (Path.parts / basename), not substring
+    checks, so co-located reference/data docs are not swept in by a parent
+    directory name. See BEHAVIORAL_INSTRUCTION_* for the exact rule.
+    """
+    path = Path(file_path)
+    name = path.name
+    if name in BEHAVIORAL_INSTRUCTION_BASENAMES:
+        return True
+
+    parts = path.parts
+    suffix = path.suffix.lower()
+
+    # Hooks: only executable hook scripts are behavioral; co-located .md
+    # notes / test data under a hooks dir are not.
+    if "hooks" in parts and suffix in (".py", ".sh"):
+        return True
+
+    # Prompt/role docs live in dedicated behavioral subdirs.
+    if suffix == ".md" and any(d in parts for d in BEHAVIORAL_INSTRUCTION_DIRS):
+        return True
+
+    return False
+
+
+# Acknowledged-override escape hatch. This hook is a process-global
+# PreToolUse Edit|Write hook that fires identically inside a dispatched
+# sub-agent — Claude Code's PreToolUse event payload carries no reliable
+# "this edit is inside a sub-agent" or "PROMPT_CRAFT_ADVISORY" signal
+# (only tool_name / tool_input / tool_result are exposed; raw events add
+# session_id / cwd / transcript_path, none of which distinguish a
+# sub-agent edit from an orchestrator edit). So "go through the Agent
+# tool" is NOT a real escape — it loops back into this same block. The
+# only deliberate-human path is this opt-in env var, mirroring the
+# `# mock-ok:` escape hatch (Golden Principle #1). Default is block.
+INSTRUCTION_EDIT_OVERRIDE_ENV = "WRITE_GUARD_ALLOW_INSTRUCTION_EDIT"
+
+# A plan left `status: in-progress` for longer than this is almost
+# certainly stale (the orchestrator forgot the Phase 6 -> complete
+# transition). We don't auto-unblock on staleness (fail-safe), but we
+# surface it in the block message so the operator can fix it in one read.
+STALE_PLAN_AGE_DAYS = 3
+
+
+def _instruction_edit_overridden() -> bool:
+    """True if the operator has explicitly acknowledged an instruction-file edit."""
+    value = os.environ.get(INSTRUCTION_EDIT_OVERRIDE_ENV, "")
+    return value.strip().lower() in ("1", "true", "yes", "on")
+
+
+def _plan_staleness_note(plan: Path) -> str:
+    """Return an advisory line if the arming plan looks stale, else ''."""
+    try:
+        import time
+
+        age_days = (time.time() - plan.stat().st_mtime) / 86400.0
+    except OSError:
+        return ""
+    if age_days >= STALE_PLAN_AGE_DAYS:
+        return (
+            f"\nNOTE: this plan was last modified {age_days:.0f} days ago — "
+            f"it may be STALE (an orchestrator that finished Phase 6 should "
+            f"have set `status: complete`). If the pipeline is actually done, "
+            f"mark the plan complete to disarm this gate."
+        )
+    return ""
 
 
 def check_phase5(file_path: str) -> str | None:
@@ -64,23 +147,32 @@ def check_phase5(file_path: str) -> str | None:
     Pipeline state is derived from the active plan file (under
     `$MAIN_ROOT/docs/plans/`) via `find_active_plan()`. The active plan
     is the unique plan whose YAML frontmatter declares
-    `status: in-progress`. When such a plan exists, instruction-file
-    edits are blocked so they go through the Agent tool — a 1-line
-    change to an agent prompt can cascade through the entire pipeline.
+    `status: in-progress`. When such a plan exists, behavioral
+    instruction-file edits are blocked — a 1-line change to an agent
+    prompt, skill, or hook can cascade through the entire pipeline.
 
     When no active plan exists, all edits are allowed: there is no
     pipeline to gate against.
 
     If multiple plans claim `status: in-progress` or a plan is
     unreadable, fail closed and block with a remediation message.
+
+    Escape hatch: set WRITE_GUARD_ALLOW_INSTRUCTION_EDIT=1 to allow a
+    deliberate instruction-file edit (the override also covers the
+    ambiguous/stale-state block so a wedged gate is recoverable).
     """
+    overridden = _instruction_edit_overridden()
     try:
         active = find_active_plan()
     except AmbiguousActivePlanError as exc:
+        if overridden:
+            return None
         return (
-            f"BLOCKED: cannot determine active plan state — {exc}. "
-            f"Either fix the plan file's readability or remove its "
-            f"`status: in-progress` frontmatter and try again."
+            f"BLOCKED: cannot determine active plan state — {exc}.\n\n"
+            f"Fix the plan file's readability, or remove/resolve its "
+            f"`status: in-progress` frontmatter, then retry.\n"
+            f"To proceed deliberately for this one edit, set "
+            f"{INSTRUCTION_EDIT_OVERRIDE_ENV}=1 in the environment."
         )
     if active is None:
         # No active plan -> no pipeline state to gate.
@@ -88,20 +180,34 @@ def check_phase5(file_path: str) -> str | None:
     if is_orchestrator_file(file_path):
         return None
 
-    # Instruction files: ALWAYS delegate — high impact surface regardless of edit size.
-    # Source code: allowed for small edits (orchestrator uses ≤20 line threshold).
+    # Behavioral instruction files: ALWAYS delegate — high-impact surface
+    # regardless of edit size. Source code: allowed for small edits
+    # (orchestrator uses a ≤20-line threshold).
     if is_instruction_file(file_path):
+        if overridden:
+            return None
+        # DEFECT 3: name the arming plan so the block is diagnosable in one
+        # read, and surface staleness so an orphaned in-progress plan is
+        # obvious instead of silently wedging every instruction edit.
         return (
-            f"BLOCKED: Instruction file edit during active coding-team pipeline. "
-            f"Instruction files (agents, phases, prompts, skills, hooks, CLAUDE.md) "
-            f"ALWAYS go through the Agent tool — a 1-line change can cascade.\n\n"
-            f"File: {file_path}\n"
-            f"Use the Agent tool to dispatch this edit with PROMPT_CRAFT_ADVISORY.\n\n"
+            f"BLOCKED: behavioral instruction-file edit while a coding-team "
+            f"pipeline is in-progress.\n\n"
+            f"File:        {file_path}\n"
+            f"Arming plan: {active}{_plan_staleness_note(active)}\n\n"
+            f"This is a process-global hook: dispatching the edit through the "
+            f"Agent tool fires this same guard inside the sub-agent, so that is "
+            f"NOT a way around it. Real paths to proceed:\n"
+            f"  1. Let the pipeline finish — when the arming plan reaches "
+            f"`status: complete` this gate disarms automatically.\n"
+            f"  2. If the plan is stale/abandoned, set the arming plan's "
+            f"frontmatter to `status: complete` (or remove `status: in-progress`).\n"
+            f"  3. For a deliberate one-off edit, set "
+            f"{INSTRUCTION_EDIT_OVERRIDE_ENV}=1 in the environment and retry.\n\n"
             f"Known rationalization: 'This instruction file change is trivial' — "
             f"impact surface determines routing, not perceived complexity."
         )
 
-    # Non-instruction source code: allow (orchestrator judges ≤20 line threshold)
+    # Non-instruction source code: allow (orchestrator judges ≤20-line threshold)
     return None
 
 
@@ -175,7 +281,7 @@ def check_migration(tool_name: str, file_path: str) -> str | None:
     return (
         f"BLOCKED: editing deployed migration file '{path.name}'.\n\n"
         f"Deployed migrations are immutable. Create a new migration instead.\n"
-        f"See rules/migration-files.md for migration file rules.\n\n"
+        f"See rules-on-demand/migration-files.md for migration file rules.\n\n"
         f"Golden Principle #9: Ask Before High-Impact Changes.\n"
         f"Modifying a deployed migration can cause:\n"
         f"  - Schema drift between environments\n"
