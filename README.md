@@ -406,10 +406,11 @@ cookbook/                          # on-demand phase details and references
     reference-files.md            #     index of all reference files
   references/                     #   on-demand reference material
     builder-reference.md          #     builder agent reference
-hooks/                            # Claude Code hooks (8 active, deployed to ~/.claude/hooks/)
+hooks/                            # Claude Code hooks (9 active, deployed to ~/.claude/hooks/)
   builder-self-check.py           #   validates builder agent output quality
   codesight-hooks.py              #   codesight indexing integration
   coding-team-lifecycle.py        #   session lifecycle management (start/end markers)
+  deploy-drift-check.py           #   SessionStart — detects source↔deployed hook drift
   git-safety-guard.py             #   prevents force push, main branch commits, etc.
   hook-health-check.py            #   SessionStart — verifies all Python hooks are healthy
   lint-warning-enforcer.py        #   treats lint warnings as errors
