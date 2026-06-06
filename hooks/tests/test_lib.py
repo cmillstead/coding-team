@@ -206,3 +206,31 @@ class TestOutputFunctions:
         parsed = json.loads(result.stdout)
         assert parsed["decision"] == "allow"
         assert parsed["reason"] == "advisory msg"
+
+
+# ---------------------------------------------------------------------------
+# update_input (merge semantics)
+# ---------------------------------------------------------------------------
+
+class TestUpdateInput:
+    """update_input must MERGE `partial` over the event's original tool input.
+
+    CC's updatedInput replaces the tool input wholesale, so the helper merges
+    internally. This test fails on the old replace-only implementation, which
+    emitted only `partial` and dropped the sibling original fields.
+    """
+
+    def test_merges_partial_over_original(self):
+        event = {"tool_input": {"prompt": "ORIGINAL", "description": "D", "keep": "K"}}
+        code = (
+            "from _lib.event import parse_event\n"
+            "from _lib import output\n"
+            "ev = parse_event()\n"
+            "output.update_input(ev, {'prompt': 'WINS'})\n"
+        )
+        result = run_python(code, stdin_data=json.dumps(event))
+        assert result.returncode == 0, result.stderr
+        merged = json.loads(result.stdout)["hookSpecificOutput"]["updatedInput"]
+        assert merged["prompt"] == "WINS"      # partial wins on key collision
+        assert merged["description"] == "D"    # sibling original field preserved
+        assert merged["keep"] == "K"           # sibling original field preserved

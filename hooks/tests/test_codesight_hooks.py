@@ -67,3 +67,31 @@ class TestNonAgentTool:
         event = make_event("Read", file_path="/tmp/file.py")
         result = run_hook("codesight-hooks.py", event)
         assert result.stdout.strip() == ""
+
+
+class TestFieldPreservation:
+    """Regression: the merge must preserve non-prompt Agent fields (e.g. description).
+
+    A prior bug emitted updatedInput={"prompt": ...} only, stripping the Agent
+    tool's required `description` and causing every dispatch to fail schema
+    validation. See update_input merge contract in _lib/output.py.
+    """
+
+    def test_preserves_other_agent_fields(self, run_hook, make_event):
+        event = make_event(
+            "Agent",
+            prompt="Search for the function definition",
+            description="my subagent task",
+            subagent_type="Explore",
+            model="sonnet",
+        )
+        result = run_hook("codesight-hooks.py", event)
+        assert result.parsed is not None
+        updated = result.parsed["hookSpecificOutput"]["updatedInput"]
+        # Non-prompt fields survive the merge
+        assert updated["description"] == "my subagent task"
+        assert updated["subagent_type"] == "Explore"
+        assert updated["model"] == "sonnet"
+        # Prompt is still augmented with the injection
+        assert "MANDATORY SEARCH RULES" in updated["prompt"]
+        assert updated["prompt"].startswith("Search for the function definition")

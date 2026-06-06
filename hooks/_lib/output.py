@@ -2,6 +2,8 @@
 
 import json
 
+from .event import get_tool_input
+
 
 def block(reason: str) -> None:
     """Print a block decision."""
@@ -23,12 +25,25 @@ def advisory(reason: str) -> None:
     allow_with_reason(reason)
 
 
-def update_input(tool_input: dict) -> None:
-    """Print an allow decision with updated tool input."""
+def update_input(event: dict, partial: dict) -> None:
+    """Print an allow decision with merged tool input.
+
+    Merges `partial` over the event's original tool input.  CC's
+    ``updatedInput`` fully replaces the tool input at the CC layer (it does
+    not merge), so this helper performs the merge here: fields in `partial`
+    win on key collision; all other original fields are preserved.
+
+    Precondition: pass the same `event` whose `tool_input` the caller read.
+    If `event` has no dict `tool_input`, there is nothing to merge over and
+    the output contains only `partial` — the caller is responsible for
+    validating the event before calling (the sole caller guards via an
+    early return on empty prompt).
+    """
+    merged = {**get_tool_input(event), **partial}
     print(json.dumps({
         "hookSpecificOutput": {
             "hookEventName": "PreToolUse",
             "permissionDecision": "allow",
-            "updatedInput": tool_input,
+            "updatedInput": merged,
         }
     }))
