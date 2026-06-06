@@ -1,6 +1,18 @@
 """Tests for codesight-hooks.py hook."""
 
 
+class TestPreToolUseAgentEdgeCases:
+    def test_non_string_prompt_no_crash(self, run_hook):
+        # Build event manually: prompt is a list (non-string truthy value).
+        # make_event can't inject a non-string prompt because it guards on the
+        # string value — construct the event dict directly.
+        event = {"tool_name": "Agent", "tool_input": {"prompt": ["a list"]}}
+        result = run_hook("codesight-hooks.py", event)
+        assert result.returncode == 0
+        # Guard must return without output — no crash, no hookSpecificOutput
+        assert result.stdout.strip() == ""
+
+
 class TestPreToolUseAgent:
     def test_injects_codesight_instruction_into_agent_prompt(self, run_hook, make_event):
         event = make_event("Agent", prompt="Search for the function definition")

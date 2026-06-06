@@ -234,3 +234,38 @@ class TestUpdateInput:
         assert merged["prompt"] == "WINS"      # partial wins on key collision
         assert merged["description"] == "D"    # sibling original field preserved
         assert merged["keep"] == "K"           # sibling original field preserved
+
+    def test_non_dict_partial_is_noop(self):
+        event = {"tool_input": {"prompt": "P", "description": "D"}}
+        code = (
+            "import json, sys\n"
+            "sys.path.insert(0, '/Users/cevin/.claude/skills/coding-team/hooks')\n"
+            "from _lib.event import parse_event\n"
+            "from _lib import output\n"
+            "ev = parse_event()\n"
+            "output.update_input(ev, ['bad'])\n"
+        )
+        result = run_python(code, stdin_data=json.dumps(event))
+        assert result.returncode == 0, result.stderr
+        parsed = json.loads(result.stdout)
+        updated = parsed["hookSpecificOutput"]["updatedInput"]
+        assert updated["prompt"] == "P"
+        assert updated["description"] == "D"
+
+    def test_non_serializable_value_fails_open(self):
+        event = {"tool_input": {"prompt": "P"}}
+        code = (
+            "import sys\n"
+            "sys.path.insert(0, '/Users/cevin/.claude/skills/coding-team/hooks')\n"
+            "from _lib.event import parse_event\n"
+            "from _lib import output\n"
+            "ev = parse_event()\n"
+            # Pass a dict with an object() value which is not JSON-serializable
+            "output.update_input(ev, {'x': object()})\n"
+        )
+        result = run_python(code, stdin_data=json.dumps(event))
+        assert result.returncode == 0, result.stderr
+        parsed = json.loads(result.stdout)
+        # Fail-open: emits plain allow, NOT hookSpecificOutput
+        assert parsed == {"decision": "allow"}
+        assert "hookSpecificOutput" not in parsed

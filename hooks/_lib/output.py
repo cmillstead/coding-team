@@ -38,12 +38,27 @@ def update_input(event: dict, partial: dict) -> None:
     the output contains only `partial` — the caller is responsible for
     validating the event before calling (the sole caller guards via an
     early return on empty prompt).
+
+    Note: `partial` wins on key collision — callers must not pass a required
+    field set to a null/empty value they do not intend, as it will override
+    the corresponding original field.
     """
+    if not isinstance(partial, dict):
+        # Defensive: a non-dict partial would crash the {**...} merge. Treat it
+        # as a no-op override (emit the original input unchanged) rather than fail.
+        partial = {}
     merged = {**get_tool_input(event), **partial}
-    print(json.dumps({
-        "hookSpecificOutput": {
-            "hookEventName": "PreToolUse",
-            "permissionDecision": "allow",
-            "updatedInput": merged,
-        }
-    }))
+    try:
+        payload = json.dumps({
+            "hookSpecificOutput": {
+                "hookEventName": "PreToolUse",
+                "permissionDecision": "allow",
+                "updatedInput": merged,
+            }
+        })
+    except (TypeError, ValueError):
+        # Fail-open: a non-serializable merged value must not crash the hook.
+        # Emit a plain allow so the dispatch proceeds unmodified (advisory hook).
+        allow()
+        return
+    print(payload)

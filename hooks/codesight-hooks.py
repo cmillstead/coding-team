@@ -7,6 +7,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 import hashlib
 import shutil
 import subprocess
+import tempfile
 import time
 
 from _lib.event import parse_event, get_tool_name, get_tool_input
@@ -62,7 +63,7 @@ def find_project_root(file_path: str) -> str | None:
 def should_debounce(project_root: str) -> bool:
     """Return True if reindex should be skipped (debounced)."""
     root_hash = hashlib.md5(project_root.encode()).hexdigest()
-    debounce_file = f"/tmp/codesight-reindex-{root_hash}"
+    debounce_file = os.path.join(tempfile.gettempdir(), f"codesight-reindex-{root_hash}")
     now = int(time.time())
     try:
         with open(debounce_file) as f:
@@ -85,7 +86,7 @@ def handle_pre_agent(event: dict) -> None:
     """Inject codesight search instructions and code standards into Agent prompts."""
     tool_input = get_tool_input(event)
     prompt = tool_input.get("prompt", "")
-    if not prompt:
+    if not isinstance(prompt, str) or not prompt:
         return
 
     injected = prompt + CODESIGHT_INSTRUCTION
@@ -116,17 +117,17 @@ def handle_post_write(event: dict) -> None:
 
     log_dir = "/private/tmp/claude"
     os.makedirs(log_dir, exist_ok=True)
-    log_file = open(os.path.join(log_dir, "codesight-reindex.log"), "a")
 
     env = os.environ.copy()
     env["IRONMUNCH_ALLOWED_ROOTS"] = os.path.expanduser("~/src")
 
-    subprocess.Popen(
-        [binary, "index", project_root, "--no-ai"],
-        stdout=log_file,
-        stderr=log_file,
-        env=env,
-    )
+    with open(os.path.join(log_dir, "codesight-reindex.log"), "a") as log_file:
+        subprocess.Popen(
+            [binary, "index", project_root, "--no-ai"],
+            stdout=log_file,
+            stderr=log_file,
+            env=env,
+        )
 
 
 def main() -> None:
