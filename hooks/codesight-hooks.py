@@ -93,7 +93,7 @@ def handle_pre_agent(event: dict) -> None:
     if is_code_work(prompt):
         injected += STYLE_INSTRUCTION
 
-    update_input({"prompt": injected})
+    update_input(event, {"prompt": injected})
 
 
 def handle_post_write(event: dict) -> None:
