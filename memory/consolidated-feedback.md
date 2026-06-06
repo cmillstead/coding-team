@@ -24,6 +24,7 @@ type: feedback
 14. Do not pause for user confirmation between severity phases during scan-fix workflows. Print a progress summary, then continue automatically. User has Esc to interrupt.
 15. When diagnosing behavioral issues, try identity framing and named rationalizations first (prompt-craft tiers 1-2). Only escalate to prohibitions and restructuring if those don't hold.
 16. Delegation is the default, not a choice. Do NOT offer self-execution as an option ("should I just execute directly?"). Spec clarity determines model tier (haiku vs sonnet), not whether to delegate. Named rationalization: "the spec is already clear."
+17. For any hook change, edit the canonical SOURCE (`skills/coding-team/hooks/<file>`) then run `scripts/deploy.sh` — NEVER hand-edit the deployed copy at `~/.claude/hooks/`. `~/.claude/hooks/` is a generated artifact; the next `deploy.sh` overwrites it from source, silently reverting any edit made only there. A hotfix applied to the deployed copy looks fixed but reverts on next deploy (this recurred in a fix on 2026-06-06; see [[deploy-drift-check]] hook, which now detects it). Verify both: tests run against source (`conftest.HOOKS_DIR`), the live hook is the deployed copy — `deploy.sh` between source edit and "done" is mandatory. Named rationalization: "the deployed file is the one that runs, so I'll just edit it there."
 
 ## Case Study Principles
 
