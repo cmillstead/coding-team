@@ -115,6 +115,17 @@ def is_commit_or_push(command: str) -> bool:
     return bool(re.search(r'\bgit\s+(commit|push)\b', command))
 
 
+def is_commit_push_or_merge(command: str) -> bool:
+    """Return True if the command contains a git commit, push, or merge anywhere.
+
+    Uses a regex scan rather than first-subcommand detection so that chained
+    commands like `git add f && git commit -m x` are not misclassified by
+    first-subcommand extraction (which would return 'add' and skip the branch
+    check entirely).
+    """
+    return bool(re.search(r'\bgit\s+(commit|push|merge)\b', command))
+
+
 def is_delete_only_push(command: str) -> bool:
     """Return True iff command is a push that deletes remote branches and nothing else.
 
@@ -491,7 +502,7 @@ def main():
             return
 
     # --- 2. Branch check (commit/push/merge) ---
-    if git_subcmd in ("commit", "push", "merge") and not is_delete_only_push(command):
+    if is_commit_push_or_merge(command) and not is_delete_only_push(command):
         target_root = resolve_commit_target_root(command)
         if git.is_protected_branch(cwd=target_root):
             output.block(
