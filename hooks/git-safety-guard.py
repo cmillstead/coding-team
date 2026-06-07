@@ -16,11 +16,13 @@ PostToolUse on Bash:
   not just that they were run.
 """
 
-import os, sys
+import os
+import sys
 sys.path.insert(0, os.path.dirname(__file__))
 
 import glob
 import re
+import subprocess
 import time
 from pathlib import Path
 
@@ -113,6 +115,74 @@ def is_commit_or_push(command: str) -> bool:
     return bool(re.search(r'\bgit\s+(commit|push)\b', command))
 
 
+def is_delete_only_push(command: str) -> bool:
+    """Return True iff command is a push that deletes remote branches and nothing else.
+
+    Two supported forms:
+    - Flag form:   git push [opts] --delete|-d <remote> <branch>...
+    - Colon form:  git push [opts] <remote> :<ref>... (every refspec starts with ':')
+
+    Mixed pushes (some refspecs are deletions, some are normal) return False so
+    the safety guards still apply. On any parsing uncertainty, returns False
+    (fail-safe: guards stay ON).
+    """
+    # Must contain a git push; anything else is immediately False.
+    if not re.search(r'\bgit\s+push\b', command):
+        return False
+
+    # --- Flag form: --delete or -d is present ---
+    # We only need to confirm the push has the flag; the branches are positional
+    # arguments after the remote so there is nothing unsafe about exempting this.
+    if re.search(r'\bgit\s+push\b.*?(?:--delete|-d)\b', command, re.DOTALL):
+        return True
+
+    # --- Colon form: every non-flag, non-remote argument starts with ':' ---
+    # Isolate the git push invocation from any leading shell fragment (e.g. "cd /x && ").
+    push_match = re.search(r'\bgit\s+push\b(.*)', command)
+    if not push_match:
+        return False
+
+    push_args_str = push_match.group(1)
+
+    # Tokenize safely: shlex handles quoting but may raise on unbalanced shell syntax.
+    import shlex
+    try:
+        tokens = shlex.split(push_args_str)
+    except ValueError:
+        try:
+            tokens = push_args_str.split()
+        except Exception:
+            return False  # Cannot parse — fail safe
+
+    # Walk the token list: skip flags (start with '-'), consume the remote name
+    # (first non-flag), then collect refspecs.
+    saw_remote = False
+    refspecs: list[str] = []
+    i = 0
+    while i < len(tokens):
+        tok = tokens[i]
+        if tok.startswith("-"):
+            # Flags that take a value: consume the next token too.
+            # Known value-taking push flags: --repo, --push-option/-o, --recurse-submodules
+            if tok in ("--repo", "--push-option", "-o", "--recurse-submodules"):
+                i += 2
+                continue
+            # --flag=value style: nothing extra to consume
+            i += 1
+            continue
+        if not saw_remote:
+            saw_remote = True
+            i += 1
+            continue
+        refspecs.append(tok)
+        i += 1
+
+    # Must have at least one refspec and ALL must start with ':'.
+    if not refspecs:
+        return False
+    return all(r.startswith(":") for r in refspecs)
+
+
 def extract_commit_message(command: str) -> str | None:
     """Extract commit message from git commit command.
 
@@ -159,12 +229,133 @@ def extract_commit_message(command: str) -> str | None:
     return None
 
 
-def has_project_infrastructure() -> bool:
-    """Check if the CWD has build/test infrastructure (not docs-only)."""
-    cwd = os.getcwd()
-    if any(os.path.exists(os.path.join(cwd, m)) for m in PROJECT_MARKERS):
+def has_project_infrastructure(root: str | None = None) -> bool:
+    """Check if a repo root has build/test infrastructure (not docs-only).
+
+    Args:
+        root: Directory to inspect for project markers. Defaults to
+            os.getcwd() to preserve legacy call sites.
+    """
+    if root is None:
+        root = os.getcwd()
+    if any(os.path.exists(os.path.join(root, m)) for m in PROJECT_MARKERS):
         return True
-    return any(glob.glob(os.path.join(cwd, g)) for g in GLOB_MARKERS)
+    return any(glob.glob(os.path.join(root, g)) for g in GLOB_MARKERS)
+
+
+def resolve_commit_target_root(command: str) -> str:
+    """Resolve the repo root the commit actually targets.
+
+    Parses a leading `cd <path>` from the command (the harness runs commits as
+    `cd /abs/path && git commit ...`, and that `cd` does NOT affect the hook
+    process cwd), then resolves that directory to its git repo root. Falls back
+    to the candidate directory itself when it is not inside a git repo, which
+    keeps the docs-only check fail-safe: an unresolvable code dir with markers
+    still requires verification.
+    """
+    target_dir = git.resolve_command_target_dir(command)
+    repo_root = git.resolve_repo_root(target_dir)
+    return repo_root if repo_root is not None else target_dir
+
+
+# Documentation file extensions that are safe to commit without test/lint checks.
+_DOCS_EXTENSIONS = {".md", ".markdown", ".txt", ".rst", ".adoc"}
+
+
+def is_pointer_only_commit(command: str, target_root: str) -> bool:
+    """Return True iff command is a git commit and every staged entry is a submodule pointer.
+
+    A submodule pointer (gitlink) has mode 160000 in the destination-mode field of
+    ``git diff --cached --raw`` output. The raw format per entry is::
+
+        :<old-mode> <new-mode> <old-sha> <new-sha> <status>\\t<path>
+
+    The destination mode (new-mode) is the second space-separated field on the
+    colon-prefixed metadata line. An entry is a gitlink when that field equals
+    ``160000``.
+
+    Fail-safe: returns False on any subprocess error, timeout, empty staged list,
+    non-commit command, or mixed staged content. Never raises.
+
+    Args:
+        command:     The full bash command string (e.g. "cd /repo && git commit -m ...").
+        target_root: The repo root to inspect for staged entries.
+    """
+    # Only exempt git commit — pushes are out of scope.
+    if not re.search(r'\bgit\s+commit\b', command):
+        return False
+
+    try:
+        result = subprocess.run(
+            ["git", "-C", target_root, "diff", "--cached", "--raw"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if result.returncode != 0:
+            return False
+
+        lines = [line.strip() for line in result.stdout.splitlines() if line.strip()]
+    except (subprocess.SubprocessError, OSError, ValueError):
+        return False
+
+    # Fail-safe: nothing staged → cannot confirm pointer-only → apply checklist.
+    if not lines:
+        return False
+
+    for line in lines:
+        # Each raw-format metadata line starts with ':'.
+        if not line.startswith(":"):
+            return False
+        # Format: :<old-mode> <new-mode> <old-sha> <new-sha> <status>\t<path>
+        # The destination mode is the 2nd whitespace-separated field.
+        try:
+            parts = line[1:].split()  # strip leading ':'
+            dest_mode = parts[1]
+        except (IndexError, ValueError):
+            return False
+        if dest_mode != "160000":
+            return False
+
+    return True
+
+
+def is_docs_only_commit(command: str, target_root: str) -> bool:
+    """Return True iff command is a git commit and every staged file is documentation.
+
+    Fail-safe: returns False on any subprocess error, timeout, empty staged list,
+    non-commit command, or mixed code+docs staging. Never raises.
+
+    Args:
+        command:     The full bash command string (e.g. "cd /repo && git commit -m ...").
+        target_root: The repo root to inspect for staged files.
+    """
+    # Only exempt git commit — pushes are out of scope.
+    if not re.search(r'\bgit\s+commit\b', command):
+        return False
+
+    try:
+        result = subprocess.run(
+            ["git", "-C", target_root, "diff", "--cached", "--name-only"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if result.returncode != 0:
+            return False
+
+        staged_files = [line.strip() for line in result.stdout.splitlines() if line.strip()]
+    except (subprocess.SubprocessError, OSError, ValueError):
+        return False
+
+    # Fail-safe: nothing staged → cannot confirm docs-only → apply checklist.
+    if not staged_files:
+        return False
+
+    return all(
+        Path(f).suffix.lower() in _DOCS_EXTENSIONS
+        for f in staged_files
+    )
 
 
 
@@ -178,10 +369,10 @@ def _extract_exit_code(tool_result) -> int | None:
         # CC provides exit_code in structured result
         if "exit_code" in tool_result:
             return int(tool_result["exit_code"])
-        # Fallback: check stdout for common exit code patterns
-        stdout = str(tool_result.get("stdout", ""))
+        # Fallback: check stdout for common exit code patterns (not reliably parseable)
+        pass
     elif isinstance(tool_result, str):
-        stdout = tool_result
+        pass
     else:
         return None
     # If the tool_result is from a failed command, CC typically wraps it
@@ -300,8 +491,9 @@ def main():
             return
 
     # --- 2. Branch check (commit/push/merge) ---
-    if git_subcmd in ("commit", "push", "merge"):
-        if git.is_protected_branch():
+    if git_subcmd in ("commit", "push", "merge") and not is_delete_only_push(command):
+        target_root = resolve_commit_target_root(command)
+        if git.is_protected_branch(cwd=target_root):
             output.block(
                 "Create a feature branch first. Direct commits to "
                 "main/master are not allowed. Run: git checkout -b <feature-name>"
@@ -309,9 +501,14 @@ def main():
             return
 
     # --- 3. Verification checklist (commit/push) ---
-    if is_commit_or_push(command):
-        if not has_project_infrastructure():
+    if is_commit_or_push(command) and not is_delete_only_push(command):
+        # Evaluate the docs-only exemption against the repo the commit actually
+        # targets (parsed from `cd <path> && git ...`), NOT the hook process cwd.
+        target_root = resolve_commit_target_root(command)
+        if not has_project_infrastructure(target_root):
             return  # docs-only repo, no verification needed
+        if is_docs_only_commit(command, target_root) or is_pointer_only_commit(command, target_root):
+            return  # docs- or pointer-only — nothing to test/lint
 
         state_file = state.get_state_file("claude-verification")
         st = state.load_state(state_file, {"verifications": [], "last_updated": time.time()})

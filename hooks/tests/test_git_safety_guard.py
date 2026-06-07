@@ -3,6 +3,7 @@
 import hashlib
 import json
 import os
+import subprocess
 import time
 from pathlib import Path
 
@@ -320,5 +321,195 @@ class TestExitCodeCheck:
             result = run_hook("git-safety-guard.py", event)
             assert result.parsed is not None
             assert "pre-existing failure" in result.parsed["reason"].lower()
+        finally:
+            os.chdir(old_cwd)
+
+
+# ---------------------------------------------------------------------------
+# Helpers for submodule-pointer (gitlink) tests
+# ---------------------------------------------------------------------------
+
+def _git(args: list[str], cwd: Path, check: bool = True) -> subprocess.CompletedProcess:
+    """Run a git command in the given directory."""
+    return subprocess.run(
+        ["git"] + args,
+        cwd=str(cwd),
+        capture_output=True,
+        text=True,
+        check=check,
+        env={**os.environ, "GIT_AUTHOR_NAME": "Test", "GIT_AUTHOR_EMAIL": "t@test.com",
+             "GIT_COMMITTER_NAME": "Test", "GIT_COMMITTER_EMAIL": "t@test.com"},
+    )
+
+
+def _make_repo_with_commit(path: Path, branch: str = "feat/test") -> None:
+    """Initialise a git repo at *path* with a single commit on *branch*.
+
+    Uses a non-protected branch name by default so the branch guard does not
+    fire during tests that focus on the docs-only / pointer-only exemptions.
+    """
+    _git(["init", "-b", branch, str(path)], cwd=path.parent)
+    (path / "README.md").write_text("# inner\n")
+    _git(["add", "README.md"], cwd=path)
+    _git(["commit", "-m", "chore: initial"], cwd=path)
+
+
+def _stage_gitlink(outer: Path, inner: Path) -> None:
+    """Stage the inner repo as a gitlink in the outer repo.
+
+    git treats an un-tracked directory that is itself a git repo as a
+    gitlink (mode 160000) when added — exactly what a submodule pointer is.
+    """
+    _git(["add", str(inner)], cwd=outer)
+
+
+def _verify_gitlink_staged(outer: Path, inner: Path) -> bool:
+    """Return True if the inner path is staged as mode 160000 in the outer repo."""
+    result = _git(["diff", "--cached", "--raw"], cwd=outer)
+    rel = inner.relative_to(outer)
+    for line in result.stdout.splitlines():
+        # Format: :old-mode new-mode old-sha new-sha status\tpath
+        if str(rel) in line and "160000" in line:
+            return True
+    return False
+
+
+class TestPointerOnlyCommit:
+    """Tests for is_pointer_only_commit exemption (submodule gitlink-only commits)."""
+
+    def test_pointer_only_returns_true_and_hook_skips_checklist(
+        self, run_hook, make_event, tmp_state_dir, tmp_path
+    ):
+        """Staging only a gitlink change → hook allows commit without checklist."""
+        # Arrange: outer repo with infrastructure already committed, inner repo staged
+        # as a new gitlink entry (mode 160000 addition).
+        outer = tmp_path / "outer"
+        inner = outer / "sub"
+        outer.mkdir()
+
+        # Bootstrap the outer repo with Makefile (so infrastructure check fires).
+        _git(["init", "-b", "feat/test", str(outer)], cwd=outer.parent)
+        (outer / "Makefile").touch()
+        (outer / "README.md").write_text("# outer\n")
+        _git(["add", "Makefile", "README.md"], cwd=outer)
+        _git(["commit", "-m", "chore: initial"], cwd=outer)
+
+        # Create and bootstrap the inner repo.
+        inner.mkdir()
+        _make_repo_with_commit(inner)
+
+        # Stage the inner repo as a gitlink (new addition, mode 160000).
+        _stage_gitlink(outer, inner)
+
+        assert _verify_gitlink_staged(outer, inner), (
+            "Setup failed: inner repo not staged as mode 160000 in outer repo"
+        )
+
+        old_cwd = os.getcwd()
+        os.chdir(str(outer))
+        # Do NOT seed verification state — checklist would block if it fires.
+        try:
+            command = f'cd {outer} && git commit -m "chore: bump sub pointer"'
+            event = make_event("Bash", command=command)
+            result = run_hook("git-safety-guard.py", event)
+            # Hook should allow (no block output) because it's pointer-only.
+            assert result.stdout.strip() == "", (
+                f"Expected silent allow for pointer-only commit, got: {result.stdout!r}"
+            )
+        finally:
+            os.chdir(old_cwd)
+
+    def test_mixed_gitlink_and_py_file_is_not_exempt(
+        self, run_hook, make_event, tmp_state_dir, tmp_path
+    ):
+        """Staging a gitlink plus a .py file → not pointer-only → checklist applies."""
+        # Arrange: outer repo with infrastructure committed first, then both a
+        # gitlink and a .py file staged together.
+        outer = tmp_path / "outer"
+        inner = outer / "sub"
+        outer.mkdir()
+
+        # Bootstrap outer with infrastructure only (no sub yet).
+        _git(["init", "-b", "feat/test", str(outer)], cwd=outer.parent)
+        (outer / "Makefile").touch()
+        _git(["add", "Makefile"], cwd=outer)
+        _git(["commit", "-m", "chore: initial"], cwd=outer)
+
+        inner.mkdir()
+        _make_repo_with_commit(inner)
+
+        # Stage both the gitlink and a .py file
+
+        old_cwd = os.getcwd()
+        os.chdir(str(outer))
+        # No verification state → checklist fires and blocks.
+        try:
+            command = f'cd {outer} && git commit -m "feat: add module"'
+            event = make_event("Bash", command=command)
+            result = run_hook("git-safety-guard.py", event)
+            # Should be blocked by the verification checklist (not pointer-only).
+            assert result.parsed is not None, (
+                f"Expected block for mixed commit, got empty stdout: {result.stderr!r}"
+            )
+            assert result.parsed["decision"] == "block"
+        finally:
+            os.chdir(old_cwd)
+
+    def test_docs_only_commit_still_exempt(
+        self, run_hook, make_event, tmp_state_dir, tmp_path
+    ):
+        """Regression: a docs-only .md commit remains exempt after pointer logic added."""
+        # Arrange: repo with infrastructure committed, then only a .md file staged.
+        outer = tmp_path / "outer"
+        outer.mkdir()
+
+        _git(["init", "-b", "feat/test", str(outer)], cwd=outer.parent)
+        (outer / "Makefile").touch()
+        _git(["add", "Makefile"], cwd=outer)
+        _git(["commit", "-m", "chore: initial"], cwd=outer)
+
+        (outer / "NOTES.md").write_text("# notes\n")
+        _git(["add", "NOTES.md"], cwd=outer)
+
+        old_cwd = os.getcwd()
+        os.chdir(str(outer))
+        # No verification state — exemption must fire before checklist.
+        try:
+            command = f'cd {outer} && git commit -m "docs: update notes"'
+            event = make_event("Bash", command=command)
+            result = run_hook("git-safety-guard.py", event)
+            assert result.stdout.strip() == "", (
+                f"Expected silent allow for docs-only commit, got: {result.stdout!r}"
+            )
+        finally:
+            os.chdir(old_cwd)
+
+    def test_empty_staged_is_not_pointer_only(
+        self, run_hook, make_event, tmp_state_dir, tmp_path
+    ):
+        """Empty staged set → is_pointer_only_commit returns False (fail-safe)."""
+        # Arrange: repo with infrastructure committed, nothing else staged.
+        outer = tmp_path / "outer"
+        outer.mkdir()
+
+        _git(["init", "-b", "feat/test", str(outer)], cwd=outer.parent)
+        (outer / "Makefile").touch()
+        _git(["add", "Makefile"], cwd=outer)
+        _git(["commit", "-m", "chore: initial"], cwd=outer)
+        # Nothing staged now.
+
+        old_cwd = os.getcwd()
+        os.chdir(str(outer))
+        # No verification state — if fail-safe fires correctly, checklist blocks.
+        try:
+            command = f'cd {outer} && git commit -m "chore: empty"'
+            event = make_event("Bash", command=command)
+            result = run_hook("git-safety-guard.py", event)
+            # Should be blocked (by checklist, since nothing is staged and both
+            # pointer-only and docs-only must return False for empty staged set).
+            assert result.parsed is not None, (
+                f"Expected block for empty staged commit, got: {result.stderr!r}"
+            )
+            assert result.parsed["decision"] == "block"
         finally:
             os.chdir(old_cwd)
