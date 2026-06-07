@@ -115,6 +115,17 @@ def is_commit_or_push(command: str) -> bool:
     return bool(re.search(r'\bgit\s+(commit|push)\b', command))
 
 
+def is_commit_push_or_merge(command: str) -> bool:
+    """Return True if the command contains a git commit, push, or merge anywhere.
+
+    Uses a regex scan rather than first-subcommand detection so that chained
+    commands like `git add f && git commit -m x` are not misclassified by
+    first-subcommand extraction (which would return 'add' and skip the branch
+    check entirely).
+    """
+    return bool(re.search(r'\bgit\s+(commit|push|merge)\b', command))
+
+
 def is_delete_only_push(command: str) -> bool:
     """Return True iff command is a push that deletes remote branches and nothing else.
 
@@ -229,8 +240,38 @@ def extract_commit_message(command: str) -> str | None:
     return None
 
 
+def _package_json_has_verification_script(path: str) -> bool:
+    """Return True iff a package.json declares a runnable test/lint/typecheck script.
+
+    Fail-safe: returns True (assume verification IS required) on any read/parse
+    error — better to over-require verification than to silently exempt a repo
+    that may have test infrastructure we cannot inspect.
+    """
+    import json as _json
+
+    VERIFY_SCRIPT_KEYS = (
+        "test", "lint", "typecheck", "type-check", "check",
+        "tsc", "eslint", "vitest", "jest",
+    )
+    try:
+        with open(path) as fh:
+            data = _json.load(fh)
+        scripts = data.get("scripts", {})
+        if not isinstance(scripts, dict):
+            return False
+        keys = [k.lower() for k in scripts.keys()]
+        return any(any(vk in k for vk in VERIFY_SCRIPT_KEYS) for k in keys)
+    except (OSError, ValueError):
+        return True  # fail-safe: cannot read → assume verification required
+
+
 def has_project_infrastructure(root: str | None = None) -> bool:
     """Check if a repo root has build/test infrastructure (not docs-only).
+
+    A script-less package.json (one with no test/lint/typecheck keys in
+    ``scripts``) is explicitly excluded: it provides no runnable verification
+    command and would make the checklist permanently un-satisfiable.  All
+    other PROJECT_MARKERS are accepted unconditionally.
 
     Args:
         root: Directory to inspect for project markers. Defaults to
@@ -238,7 +279,12 @@ def has_project_infrastructure(root: str | None = None) -> bool:
     """
     if root is None:
         root = os.getcwd()
-    if any(os.path.exists(os.path.join(root, m)) for m in PROJECT_MARKERS):
+    for m in PROJECT_MARKERS:
+        marker_path = os.path.join(root, m)
+        if not os.path.exists(marker_path):
+            continue
+        if m == "package.json" and not _package_json_has_verification_script(marker_path):
+            continue  # script-less package.json provides no runnable verification
         return True
     return any(glob.glob(os.path.join(root, g)) for g in GLOB_MARKERS)
 
@@ -491,7 +537,7 @@ def main():
             return
 
     # --- 2. Branch check (commit/push/merge) ---
-    if git_subcmd in ("commit", "push", "merge") and not is_delete_only_push(command):
+    if is_commit_push_or_merge(command) and not is_delete_only_push(command):
         target_root = resolve_commit_target_root(command)
         if git.is_protected_branch(cwd=target_root):
             output.block(

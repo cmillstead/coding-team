@@ -513,3 +513,211 @@ class TestPointerOnlyCommit:
             assert result.parsed["decision"] == "block"
         finally:
             os.chdir(old_cwd)
+
+
+# ---------------------------------------------------------------------------
+# Helpers for branch-check chaining tests
+# ---------------------------------------------------------------------------
+
+def _make_repo_on_branch(path: Path, branch: str = "main") -> None:
+    """Initialise a git repo at *path* with a single commit on *branch*."""
+    _git(["init", "-b", branch, str(path)], cwd=path.parent)
+    (path / "README.md").write_text(f"# repo on {branch}\n")
+    _git(["add", "README.md"], cwd=path)
+    _git(["commit", "-m", "chore: initial"], cwd=path)
+
+
+class TestBranchCheckChainingBypass:
+    """Tests for the chained-command branch-check bypass bug.
+
+    Bug: git_subcmd = extract_git_command(command) returns the FIRST git
+    subcommand.  For `git add f && git commit -m x`, git_subcmd is 'add',
+    so the condition `git_subcmd in ('commit', 'push', 'merge')` is False
+    and the branch check is skipped — a direct commit to main slips through.
+
+    Fix: replace the fragile first-token condition with is_commit_push_or_merge(command),
+    which uses a regex to find commit/push/merge *anywhere* in the command.
+    """
+
+    def test_chained_add_then_commit_blocked_on_main(self, run_hook, make_event, tmp_path):
+        """BUG REPRO: chained `git add f && git commit -m x` on main → BLOCKED.
+
+        This test must be RED before the fix (the bug lets the commit through).
+        """
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        _make_repo_on_branch(repo, branch="main")
+
+        # Stage a new file for the chained command to commit.
+        (repo / "new_file.py").write_text("x = 1\n")
+
+        old_cwd = os.getcwd()
+        os.chdir(str(repo))
+        try:
+            command = f'cd {repo} && git add new_file.py && git commit -m "feat: add x"'
+            event = make_event("Bash", command=command)
+            result = run_hook("git-safety-guard.py", event)
+            assert result.parsed is not None, (
+                f"Expected BLOCK for chained commit on main, got silent allow. "
+                f"stderr: {result.stderr!r}"
+            )
+            assert result.parsed["decision"] == "block"
+            assert "feature branch" in result.parsed["reason"].lower()
+        finally:
+            os.chdir(old_cwd)
+
+    def test_plain_commit_on_main_still_blocked(self, run_hook, make_event, tmp_path):
+        """Regression: plain `git commit -m x` on main → still BLOCKED after fix."""
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        _make_repo_on_branch(repo, branch="main")
+
+        old_cwd = os.getcwd()
+        os.chdir(str(repo))
+        try:
+            command = f'cd {repo} && git commit -m "feat: plain commit"'
+            event = make_event("Bash", command=command)
+            result = run_hook("git-safety-guard.py", event)
+            assert result.parsed is not None, (
+                f"Expected BLOCK for plain commit on main, got: {result.stdout!r}"
+            )
+            assert result.parsed["decision"] == "block"
+            assert "feature branch" in result.parsed["reason"].lower()
+        finally:
+            os.chdir(old_cwd)
+
+    def test_chained_add_then_commit_allowed_on_feature_branch(
+        self, run_hook, make_event, tmp_path
+    ):
+        """Chained `git add f && git commit -m x` on a feature branch → NOT blocked."""
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        _make_repo_on_branch(repo, branch="feature/x")
+
+        (repo / "new_file.py").write_text("x = 1\n")
+
+        old_cwd = os.getcwd()
+        os.chdir(str(repo))
+        try:
+            command = f'cd {repo} && git add new_file.py && git commit -m "feat: add x"'
+            event = make_event("Bash", command=command)
+            result = run_hook("git-safety-guard.py", event)
+            # The branch check must NOT fire (we're on a feature branch).
+            # The verification checklist may fire (no infra in repo), but
+            # that's a different block — we verify it's not a branch-guard block.
+            if result.parsed is not None and result.parsed.get("decision") == "block":
+                reason = result.parsed["reason"]
+                assert "feature branch" not in reason.lower(), (
+                    f"Branch guard incorrectly fired on feature branch: {reason!r}"
+                )
+        finally:
+            os.chdir(old_cwd)
+
+    def test_git_merge_on_main_blocked(self, run_hook, make_event, tmp_path):
+        """git merge on main → BLOCKED (verifies merge is covered by the fix)."""
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        _make_repo_on_branch(repo, branch="main")
+
+        old_cwd = os.getcwd()
+        os.chdir(str(repo))
+        try:
+            command = f'cd {repo} && git merge feature/x'
+            event = make_event("Bash", command=command)
+            result = run_hook("git-safety-guard.py", event)
+            assert result.parsed is not None, (
+                f"Expected BLOCK for merge on main, got: {result.stdout!r}"
+            )
+            assert result.parsed["decision"] == "block"
+            assert "feature branch" in result.parsed["reason"].lower()
+        finally:
+            os.chdir(old_cwd)
+
+    def test_delete_only_push_on_main_not_blocked(self, run_hook, make_event, tmp_path):
+        """Delete-only push on main → NOT blocked (is_delete_only_push exemption preserved)."""
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        _make_repo_on_branch(repo, branch="main")
+
+        old_cwd = os.getcwd()
+        os.chdir(str(repo))
+        try:
+            command = f'cd {repo} && git push origin :old-branch'
+            event = make_event("Bash", command=command)
+            result = run_hook("git-safety-guard.py", event)
+            # A delete-only push must NOT be blocked by the branch guard.
+            if result.parsed is not None and result.parsed.get("decision") == "block":
+                reason = result.parsed["reason"]
+                assert "feature branch" not in reason.lower(), (
+                    f"Branch guard incorrectly blocked delete-only push: {reason!r}"
+                )
+        finally:
+            os.chdir(old_cwd)
+
+
+# ---------------------------------------------------------------------------
+# Tests for has_project_infrastructure with script-less package.json fix
+# ---------------------------------------------------------------------------
+
+class TestHasProjectInfrastructurePackageJson:
+    """Unit tests for has_project_infrastructure() with package.json refinement.
+
+    A script-less package.json (scripts: {} or no test/lint keys) must NOT
+    count as infrastructure — it provides no runnable verification command
+    and would make the verification checklist permanently un-satisfiable.
+    """
+
+    def _infra(self, tmp_path: Path) -> bool:
+        """Load and call has_project_infrastructure from the hook file directly.
+
+        Uses spec_from_file_location because the filename contains a hyphen and
+        cannot be imported as a regular Python module name.  Reloads each call
+        so post-fix state is always reflected.
+        """
+        import importlib.util
+        hook_path = Path(__file__).parent.parent / "git-safety-guard.py"
+        spec = importlib.util.spec_from_file_location("git_safety_guard", str(hook_path))
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod.has_project_infrastructure(str(tmp_path))
+
+    def test_scriptless_package_json_is_not_infra(self, tmp_path):
+        """(a) BUG REPRO: package.json with empty scripts → not infrastructure.
+
+        RED before the fix (currently returns True unconditionally).
+        """
+        (tmp_path / "package.json").write_text(json.dumps({"scripts": {}}))
+        assert self._infra(tmp_path) is False
+
+    def test_package_json_with_test_script_is_infra(self, tmp_path):
+        """(b) package.json with a 'test' script → infrastructure."""
+        (tmp_path / "package.json").write_text(json.dumps({"scripts": {"test": "jest"}}))
+        assert self._infra(tmp_path) is True
+
+    def test_package_json_with_lint_script_is_infra(self, tmp_path):
+        """(c) package.json with a 'lint' script → infrastructure."""
+        (tmp_path / "package.json").write_text(json.dumps({"scripts": {"lint": "eslint ."}}))
+        assert self._infra(tmp_path) is True
+
+    def test_package_json_build_only_is_not_infra(self, tmp_path):
+        """(d) BUG REPRO: package.json with only a 'build' script → not infrastructure.
+
+        RED before the fix (currently returns True unconditionally).
+        """
+        (tmp_path / "package.json").write_text(json.dumps({"scripts": {"build": "webpack"}}))
+        assert self._infra(tmp_path) is False
+
+    def test_scriptless_package_json_plus_pyproject_is_infra(self, tmp_path):
+        """(e) Script-less package.json + pyproject.toml → True (other marker counts)."""
+        (tmp_path / "package.json").write_text(json.dumps({"scripts": {}}))
+        (tmp_path / "pyproject.toml").write_text("[tool.poetry]\n")
+        assert self._infra(tmp_path) is True
+
+    def test_malformed_package_json_is_infra_fail_safe(self, tmp_path):
+        """(f) Malformed/truncated package.json → True (fail-safe: assume verification needed)."""
+        (tmp_path / "package.json").write_text("{ not json")
+        assert self._infra(tmp_path) is True
+
+    def test_empty_dir_is_not_infra(self, tmp_path):
+        """(g) Empty dir with no markers → False (docs-only behavior preserved)."""
+        assert self._infra(tmp_path) is False
