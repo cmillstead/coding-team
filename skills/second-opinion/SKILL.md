@@ -156,7 +156,7 @@ When both Claude and Codex have reviewed the same code, produce a cross-model an
 After every Codex review that produces findings (any mode), before cleanup:
 
 1. Read `skills/second-opinion/codex-learnings.md`
-2. For each finding Codex raised: does it match an existing pattern (P1-P21, C1-C16)?
+2. For each finding Codex raised: does it match an existing pattern (any existing P## / C## entry)?
    - **Yes**: no action — pre-flight should have caught it. If it didn't, check why pre-flight missed it and tighten the pattern description.
    - **No**: is this a one-off or a recurring class of mistake?
      - **One-off** (project-specific logic error): skip
