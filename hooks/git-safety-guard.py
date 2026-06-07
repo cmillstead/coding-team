@@ -240,8 +240,38 @@ def extract_commit_message(command: str) -> str | None:
     return None
 
 
+def _package_json_has_verification_script(path: str) -> bool:
+    """Return True iff a package.json declares a runnable test/lint/typecheck script.
+
+    Fail-safe: returns True (assume verification IS required) on any read/parse
+    error — better to over-require verification than to silently exempt a repo
+    that may have test infrastructure we cannot inspect.
+    """
+    import json as _json
+
+    VERIFY_SCRIPT_KEYS = (
+        "test", "lint", "typecheck", "type-check", "check",
+        "tsc", "eslint", "vitest", "jest",
+    )
+    try:
+        with open(path) as fh:
+            data = _json.load(fh)
+        scripts = data.get("scripts", {})
+        if not isinstance(scripts, dict):
+            return False
+        keys = [k.lower() for k in scripts.keys()]
+        return any(any(vk in k for vk in VERIFY_SCRIPT_KEYS) for k in keys)
+    except (OSError, ValueError):
+        return True  # fail-safe: cannot read → assume verification required
+
+
 def has_project_infrastructure(root: str | None = None) -> bool:
     """Check if a repo root has build/test infrastructure (not docs-only).
+
+    A script-less package.json (one with no test/lint/typecheck keys in
+    ``scripts``) is explicitly excluded: it provides no runnable verification
+    command and would make the checklist permanently un-satisfiable.  All
+    other PROJECT_MARKERS are accepted unconditionally.
 
     Args:
         root: Directory to inspect for project markers. Defaults to
@@ -249,7 +279,12 @@ def has_project_infrastructure(root: str | None = None) -> bool:
     """
     if root is None:
         root = os.getcwd()
-    if any(os.path.exists(os.path.join(root, m)) for m in PROJECT_MARKERS):
+    for m in PROJECT_MARKERS:
+        marker_path = os.path.join(root, m)
+        if not os.path.exists(marker_path):
+            continue
+        if m == "package.json" and not _package_json_has_verification_script(marker_path):
+            continue  # script-less package.json provides no runnable verification
         return True
     return any(glob.glob(os.path.join(root, g)) for g in GLOB_MARKERS)
 

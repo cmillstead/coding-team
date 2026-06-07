@@ -653,3 +653,71 @@ class TestBranchCheckChainingBypass:
                 )
         finally:
             os.chdir(old_cwd)
+
+
+# ---------------------------------------------------------------------------
+# Tests for has_project_infrastructure with script-less package.json fix
+# ---------------------------------------------------------------------------
+
+class TestHasProjectInfrastructurePackageJson:
+    """Unit tests for has_project_infrastructure() with package.json refinement.
+
+    A script-less package.json (scripts: {} or no test/lint keys) must NOT
+    count as infrastructure — it provides no runnable verification command
+    and would make the verification checklist permanently un-satisfiable.
+    """
+
+    def _infra(self, tmp_path: Path) -> bool:
+        """Load and call has_project_infrastructure from the hook file directly.
+
+        Uses spec_from_file_location because the filename contains a hyphen and
+        cannot be imported as a regular Python module name.  Reloads each call
+        so post-fix state is always reflected.
+        """
+        import importlib.util
+        hook_path = Path(__file__).parent.parent / "git-safety-guard.py"
+        spec = importlib.util.spec_from_file_location("git_safety_guard", str(hook_path))
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod.has_project_infrastructure(str(tmp_path))
+
+    def test_scriptless_package_json_is_not_infra(self, tmp_path):
+        """(a) BUG REPRO: package.json with empty scripts → not infrastructure.
+
+        RED before the fix (currently returns True unconditionally).
+        """
+        (tmp_path / "package.json").write_text(json.dumps({"scripts": {}}))
+        assert self._infra(tmp_path) is False
+
+    def test_package_json_with_test_script_is_infra(self, tmp_path):
+        """(b) package.json with a 'test' script → infrastructure."""
+        (tmp_path / "package.json").write_text(json.dumps({"scripts": {"test": "jest"}}))
+        assert self._infra(tmp_path) is True
+
+    def test_package_json_with_lint_script_is_infra(self, tmp_path):
+        """(c) package.json with a 'lint' script → infrastructure."""
+        (tmp_path / "package.json").write_text(json.dumps({"scripts": {"lint": "eslint ."}}))
+        assert self._infra(tmp_path) is True
+
+    def test_package_json_build_only_is_not_infra(self, tmp_path):
+        """(d) BUG REPRO: package.json with only a 'build' script → not infrastructure.
+
+        RED before the fix (currently returns True unconditionally).
+        """
+        (tmp_path / "package.json").write_text(json.dumps({"scripts": {"build": "webpack"}}))
+        assert self._infra(tmp_path) is False
+
+    def test_scriptless_package_json_plus_pyproject_is_infra(self, tmp_path):
+        """(e) Script-less package.json + pyproject.toml → True (other marker counts)."""
+        (tmp_path / "package.json").write_text(json.dumps({"scripts": {}}))
+        (tmp_path / "pyproject.toml").write_text("[tool.poetry]\n")
+        assert self._infra(tmp_path) is True
+
+    def test_malformed_package_json_is_infra_fail_safe(self, tmp_path):
+        """(f) Malformed/truncated package.json → True (fail-safe: assume verification needed)."""
+        (tmp_path / "package.json").write_text("{ not json")
+        assert self._infra(tmp_path) is True
+
+    def test_empty_dir_is_not_infra(self, tmp_path):
+        """(g) Empty dir with no markers → False (docs-only behavior preserved)."""
+        assert self._infra(tmp_path) is False
