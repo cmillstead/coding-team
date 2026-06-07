@@ -317,6 +317,8 @@ bash scripts/deploy.sh
 
 This deploys hooks to `~/.claude/hooks/`, agents to `~/.claude/agents/`, rules to `~/.claude/rules/`, and config to `~/.claude/`. Always run deploy BEFORE updating `settings.json` hook references.
 
+After deploying, `deploy.sh` rewrites a managed block in `~/.claude/.gitignore` listing every deployed artifact (so the claude-harness repo does not dual-track source and deployed copies). Run with `--dry-run` to preview what would be deployed and what the `.gitignore` block would contain without writing anything.
+
 ### Full pipeline only
 
 If you only want the `/coding-team` orchestrated pipeline, you're done after deploy.

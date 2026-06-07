@@ -266,6 +266,13 @@ def _is_tracked_in_git(filepath: str) -> bool:
 
 def check_migration(tool_name: str, file_path: str) -> str | None:
     """Check migration guard. Returns block reason or None."""
+    # Test files are never deployed migrations, even when they live under a
+    # tests/.../migrations/ directory (e.g. migration-NN-*.test.ts). Exempt
+    # them so the migration-immutability guard doesn't block legitimate test
+    # edits. Real migrations (incl. Prisma's migration.sql) are not test files.
+    if is_test_file(file_path):
+        return None
+
     if tool_name == "Write" and not Path(file_path).exists():
         return None  # New file creation is allowed
 

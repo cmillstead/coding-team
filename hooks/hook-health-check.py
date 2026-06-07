@@ -31,6 +31,7 @@ SETTINGS_PATH = Path.home() / ".claude" / "settings.json"
 METRICS_DIR = Path.home() / ".claude" / "metrics"
 TIMEOUT_SECONDS = 5
 MAX_METRICS_FILES = 3
+METRICS_STALENESS_DAYS = 7
 
 
 def check_hook(hook_path: Path) -> str | None:
@@ -232,6 +233,10 @@ def load_recent_metrics():
     if not METRICS_DIR.exists():
         return []
     files = sorted(METRICS_DIR.glob("tool-usage-*.jsonl"), reverse=True)
+    cutoff = datetime.now().timestamp() - (METRICS_STALENESS_DAYS * 86400)
+    files = [f for f in files if f.stat().st_mtime >= cutoff]
+    if not files:
+        return []
     records = []
     for f in files[:MAX_METRICS_FILES]:
         try:
@@ -440,6 +445,8 @@ def get_skill_failure_rates():
         return None
 
     files = sorted(METRICS_DIR.glob("agent-quality-*.jsonl"), reverse=True)
+    cutoff = datetime.now().timestamp() - (METRICS_STALENESS_DAYS * 86400)
+    files = [f for f in files if f.stat().st_mtime >= cutoff]
     if not files:
         return None
 

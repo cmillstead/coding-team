@@ -539,6 +539,63 @@ class TestCheckMetrics:
         finally:
             hhc.METRICS_DIR = original
 
+    def test_stale_metrics_files_filtered_out(self, hhc, tmp_path):
+        """Files older than METRICS_STALENESS_DAYS are ignored by load_recent_metrics.
+
+        The deployed hook-health-check.py adds an mtime staleness filter:
+        files modified more than METRICS_STALENESS_DAYS ago are skipped so
+        ancient session data does not pollute the anomaly report.
+        """
+        import os
+        import time
+
+        metrics_dir = tmp_path / "metrics"
+        metrics_dir.mkdir()
+
+        session_id = "old-session"
+        records = [{"tool": "Edit", "session": session_id}] * 12
+        stale_file = metrics_dir / "tool-usage-old.jsonl"
+        with open(stale_file, "w") as f:
+            for r in records:
+                f.write(json.dumps(r) + "\n")
+
+        # Set mtime to 30 days ago — well beyond the 7-day staleness threshold
+        old_mtime = time.time() - 30 * 86400
+        os.utime(stale_file, (old_mtime, old_mtime))
+
+        original = hhc.METRICS_DIR
+        hhc.METRICS_DIR = metrics_dir
+        try:
+            result = hhc.load_recent_metrics()
+            assert result == [], (
+                "stale metrics files (>7 days) must be filtered by mtime staleness check"
+            )
+        finally:
+            hhc.METRICS_DIR = original
+
+    def test_fresh_metrics_files_not_filtered(self, hhc, tmp_path):
+        """Files within METRICS_STALENESS_DAYS are included by load_recent_metrics."""
+        metrics_dir = tmp_path / "metrics"
+        metrics_dir.mkdir()
+
+        session_id = "fresh-session"
+        records = [{"tool": "Edit", "session": session_id}] * 5
+        fresh_file = metrics_dir / "tool-usage-fresh.jsonl"
+        with open(fresh_file, "w") as f:
+            for r in records:
+                f.write(json.dumps(r) + "\n")
+        # mtime is current (just written), so it's within the 7-day window
+
+        original = hhc.METRICS_DIR
+        hhc.METRICS_DIR = metrics_dir
+        try:
+            result = hhc.load_recent_metrics()
+            assert len(result) == 5, (
+                "fresh metrics files must be included by load_recent_metrics"
+            )
+        finally:
+            hhc.METRICS_DIR = original
+
 
 class TestIntegration:
     def test_no_output_when_hooks_healthy(self, run_hook):

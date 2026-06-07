@@ -593,16 +593,72 @@ class TestPhase5OverrideEscapeHatch:
 
 
 class TestMigrationGuard:
-    def test_blocks_edit_to_existing_tracked_migration(self, repo: Path):
-        """Tracked migration file -> blocked even with no active plan."""
+    def test_blocks_edit_to_existing_tracked_migration(self):
+        """Tracked migration file -> blocked even with no active plan.
+
+        Uses a fixed non-test-like path under /tmp/ct_migration_repo so the
+        path does not match is_test_file() patterns (pytest tmp_path generates
+        paths like test_blocks_edit0/... which do match, and the new test-file
+        exemption in check_migration() would then correctly allow them).
+        """
+        import shutil
+        repo = Path("/tmp/ct_migration_repo")
+        if repo.exists():
+            shutil.rmtree(repo)
+        repo.mkdir(parents=True)
+        try:
+            _init_repo(repo)
+            migration_dir = repo / "migrations"
+            migration_dir.mkdir()
+            migration_file = migration_dir / "001_create.py"
+            migration_file.write_text("# migration")
+
+            # Track and commit so the guard's git ls-files check returns tracked=True.
+            subprocess.run(
+                ["git", "add", str(migration_file)],
+                cwd=repo,
+                check=True,
+                capture_output=True,
+            )
+            subprocess.run(
+                [
+                    "git", "-c", "user.email=t@t", "-c", "user.name=t",
+                    "commit", "-q", "-m", "init",
+                ],
+                cwd=repo,
+                check=True,
+                capture_output=True,
+            )
+
+            event = {
+                "tool_name": "Edit",
+                "tool_input": {
+                    "file_path": str(migration_file),
+                    "new_string": "altered",
+                },
+            }
+            parsed, stdout, _stderr, _rc = _run(event, cwd=repo)
+            assert parsed is not None, f"expected JSON output, got {stdout!r}"
+            assert parsed["decision"] == "block"
+            assert "migration" in parsed["reason"].lower()
+        finally:
+            shutil.rmtree(repo, ignore_errors=True)
+
+    def test_exempts_test_file_in_migration_dir(self, repo: Path):
+        """Test files inside a migrations dir are allowed (test-file exemption).
+
+        A *.test.ts or test_*.py file under a migrations/ directory is not a
+        deployed migration — it is a test fixture. The deployed write-guard
+        exempts is_test_file() paths from the migration-immutability guard.
+        """
         migration_dir = repo / "migrations"
         migration_dir.mkdir()
-        migration_file = migration_dir / "001_create.py"
-        migration_file.write_text("# migration")
+        test_file = migration_dir / "migration-01-up.test.ts"
+        test_file.write_text("// test")
 
-        # Track and commit so the guard's git ls-files check returns tracked=True.
+        # Track and commit to ensure _is_tracked_in_git returns True
         subprocess.run(
-            ["git", "add", str(migration_file)],
+            ["git", "add", str(test_file)],
             cwd=repo,
             check=True,
             capture_output=True,
@@ -620,14 +676,17 @@ class TestMigrationGuard:
         event = {
             "tool_name": "Edit",
             "tool_input": {
-                "file_path": str(migration_file),
-                "new_string": "altered",
+                "file_path": str(test_file),
+                "new_string": "// altered",
             },
         }
         parsed, stdout, _stderr, _rc = _run(event, cwd=repo)
-        assert parsed is not None, f"expected JSON output, got {stdout!r}"
-        assert parsed["decision"] == "block"
-        assert "migration" in parsed["reason"].lower()
+        # Must NOT be blocked — test files are exempt from migration guard
+        if parsed is not None:
+            assert parsed.get("decision") != "block", (
+                f"test file in migrations/ must not be blocked by migration guard, "
+                f"got {stdout!r}"
+            )
 
 
 # ---------------------------------------------------------------------------
