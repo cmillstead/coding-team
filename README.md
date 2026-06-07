@@ -317,7 +317,7 @@ bash scripts/deploy.sh
 
 This deploys hooks to `~/.claude/hooks/`, agents to `~/.claude/agents/`, rules to `~/.claude/rules/`, and config to `~/.claude/`. Always run deploy BEFORE updating `settings.json` hook references.
 
-After deploying, `deploy.sh` rewrites a managed block in `~/.claude/.gitignore` listing every deployed artifact (so the claude-harness repo does not dual-track source and deployed copies). Run with `--dry-run` to preview what would be deployed and what the `.gitignore` block would contain without writing anything.
+`deploy.sh` creates **relative symlinks** at the destination rather than copies — there is one physical file per artifact (the source in this repo), and the deployed path is just a link pointing back to it. This makes drift impossible. Run with `--dry-run` to preview what symlinks would be created without writing anything.
 
 ### Full pipeline only
 
