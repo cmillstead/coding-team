@@ -77,7 +77,7 @@ Before starting work on a code task or when prior context would help, check avai
 ### Compaction awareness
 - At 50% context, start being concise — shorter explanations, less recapping
 - At 70% context, persist critical state: open files, current task, blockers
-- At 80% context, compaction is imminent — write a handoff note to `/tmp/claude-handoff-{session}.md` with: current task, files modified, what's left, decisions made
+- At 80% context, compaction is imminent — write a handoff note with: current task, files modified, what's left, decisions made. Prefer a durable in-repo location: `<repo>/docs/handoff/YYYY-MM-DD-<slug>.md` (git-tracked, survives across sessions/machines). Only fall back to `/tmp/claude-handoff-{session}.md` when not inside a git repo — `/tmp` is cleared between sessions, so handoffs written there are routinely lost.
 
 ### What to persist before compaction
 - Current branch and uncommitted file list
@@ -86,7 +86,7 @@ Before starting work on a code task or when prior context would help, check avai
 - Failing test output or error messages being debugged
 
 ### Resuming after compaction
-- Check `/tmp/claude-handoff-*.md` for prior session state
+- Check `<repo>/docs/handoff/*.md` first (durable handoffs), then `/tmp/claude-handoff-*.md`, for prior session state
 - Run `git status` and `git diff --stat` to see current working state
 - Read the most recently modified files to rebuild context
 - Do NOT restart work from scratch — continue from where compaction interrupted
