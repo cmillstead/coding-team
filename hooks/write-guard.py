@@ -109,6 +109,7 @@ def is_instruction_file(file_path: str) -> bool:
 # only deliberate-human path is this opt-in env var, mirroring the
 # `# mock-ok:` escape hatch (Golden Principle #1). Default is block.
 INSTRUCTION_EDIT_OVERRIDE_ENV = "WRITE_GUARD_ALLOW_INSTRUCTION_EDIT"
+MIGRATION_EDIT_OVERRIDE_ENV = "WRITE_GUARD_ALLOW_MIGRATION_EDIT"
 
 # A plan left `status: in-progress` for longer than this is almost
 # certainly stale (the orchestrator forgot the Phase 6 -> complete
@@ -120,6 +121,12 @@ STALE_PLAN_AGE_DAYS = 3
 def _instruction_edit_overridden() -> bool:
     """True if the operator has explicitly acknowledged an instruction-file edit."""
     value = os.environ.get(INSTRUCTION_EDIT_OVERRIDE_ENV, "")
+    return value.strip().lower() in ("1", "true", "yes", "on")
+
+
+def _migration_edit_overridden() -> bool:
+    """True if the operator has explicitly acknowledged a migration-file edit."""
+    value = os.environ.get(MIGRATION_EDIT_OVERRIDE_ENV, "")
     return value.strip().lower() in ("1", "true", "yes", "on")
 
 
@@ -284,6 +291,10 @@ def check_migration(tool_name: str, file_path: str) -> str | None:
     if not _is_tracked_in_git(file_path):
         return None
 
+    # Sanctioned escape hatch: operator has explicitly acknowledged this edit.
+    if _migration_edit_overridden():
+        return None
+
     path = Path(file_path)
     return (
         f"BLOCKED: editing deployed migration file '{path.name}'.\n\n"
@@ -295,7 +306,10 @@ def check_migration(tool_name: str, file_path: str) -> str | None:
         f"  - Failed rollbacks\n"
         f"  - Data loss\n\n"
         f"Known rationalization: 'It's just a comment/docstring change' — "
-        f"any edit to deployed migrations risks inconsistency."
+        f"any edit to deployed migrations risks inconsistency.\n\n"
+        f"If this migration edit is explicitly user-approved (e.g. adding idempotency "
+        f"guards, not a schema change), set {MIGRATION_EDIT_OVERRIDE_ENV}=1 for the "
+        f"approved edit."
     )
 
 

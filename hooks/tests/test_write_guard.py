@@ -688,6 +688,158 @@ class TestMigrationGuard:
                 f"got {stdout!r}"
             )
 
+    def test_migration_blocked_without_override(self):
+        """Tracked migration file is BLOCKED when WRITE_GUARD_ALLOW_MIGRATION_EDIT is unset.
+
+        Confirms the default deny behavior (regression guard for the escape hatch).
+        """
+        import shutil
+        repo = Path("/tmp/ct_migration_override_repo")
+        if repo.exists():
+            shutil.rmtree(repo)
+        repo.mkdir(parents=True)
+        try:
+            _init_repo(repo)
+            migration_dir = repo / "migrations"
+            migration_dir.mkdir()
+            migration_file = migration_dir / "002_add_index.py"
+            migration_file.write_text("# migration")
+
+            subprocess.run(
+                ["git", "add", str(migration_file)],
+                cwd=repo,
+                check=True,
+                capture_output=True,
+            )
+            subprocess.run(
+                [
+                    "git", "-c", "user.email=t@t", "-c", "user.name=t",
+                    "commit", "-q", "-m", "init",
+                ],
+                cwd=repo,
+                check=True,
+                capture_output=True,
+            )
+
+            event = {
+                "tool_name": "Edit",
+                "tool_input": {
+                    "file_path": str(migration_file),
+                    "new_string": "altered",
+                },
+            }
+            # Explicitly unset the override env var to confirm default-block behavior
+            parsed, stdout, _stderr, _rc = _run(
+                event, cwd=repo, env={"WRITE_GUARD_ALLOW_MIGRATION_EDIT": ""}
+            )
+            assert parsed is not None, f"expected JSON output, got {stdout!r}"
+            assert parsed["decision"] == "block"
+            assert "migration" in parsed["reason"].lower()
+        finally:
+            shutil.rmtree(repo, ignore_errors=True)
+
+    def test_migration_allowed_with_override_env(self):
+        """WRITE_GUARD_ALLOW_MIGRATION_EDIT=1 allows editing a tracked migration.
+
+        This is the sanctioned escape hatch for user-approved migration edits
+        (e.g. adding idempotency guards), mirroring WRITE_GUARD_ALLOW_INSTRUCTION_EDIT.
+        """
+        import shutil
+        repo = Path("/tmp/ct_migration_override_allow_repo")
+        if repo.exists():
+            shutil.rmtree(repo)
+        repo.mkdir(parents=True)
+        try:
+            _init_repo(repo)
+            migration_dir = repo / "migrations"
+            migration_dir.mkdir()
+            migration_file = migration_dir / "003_add_idempotency.py"
+            migration_file.write_text("# migration")
+
+            subprocess.run(
+                ["git", "add", str(migration_file)],
+                cwd=repo,
+                check=True,
+                capture_output=True,
+            )
+            subprocess.run(
+                [
+                    "git", "-c", "user.email=t@t", "-c", "user.name=t",
+                    "commit", "-q", "-m", "init",
+                ],
+                cwd=repo,
+                check=True,
+                capture_output=True,
+            )
+
+            event = {
+                "tool_name": "Edit",
+                "tool_input": {
+                    "file_path": str(migration_file),
+                    "new_string": "# idempotency guard added",
+                },
+            }
+            parsed, stdout, _stderr, _rc = _run(
+                event, cwd=repo, env={"WRITE_GUARD_ALLOW_MIGRATION_EDIT": "1"}
+            )
+            if parsed is not None:
+                assert parsed.get("decision") != "block", (
+                    f"WRITE_GUARD_ALLOW_MIGRATION_EDIT=1 must allow the edit, got {stdout!r}"
+                )
+        finally:
+            shutil.rmtree(repo, ignore_errors=True)
+
+    def test_block_message_names_migration_override_env(self):
+        """Block message on a migration edit must mention WRITE_GUARD_ALLOW_MIGRATION_EDIT.
+
+        The sanctioned path must be visible in the block output so the operator
+        knows how to proceed for a legitimate user-approved edit.
+        """
+        import shutil
+        repo = Path("/tmp/ct_migration_msg_repo")
+        if repo.exists():
+            shutil.rmtree(repo)
+        repo.mkdir(parents=True)
+        try:
+            _init_repo(repo)
+            migration_dir = repo / "migrations"
+            migration_dir.mkdir()
+            migration_file = migration_dir / "004_add_col.py"
+            migration_file.write_text("# migration")
+
+            subprocess.run(
+                ["git", "add", str(migration_file)],
+                cwd=repo,
+                check=True,
+                capture_output=True,
+            )
+            subprocess.run(
+                [
+                    "git", "-c", "user.email=t@t", "-c", "user.name=t",
+                    "commit", "-q", "-m", "init",
+                ],
+                cwd=repo,
+                check=True,
+                capture_output=True,
+            )
+
+            event = {
+                "tool_name": "Edit",
+                "tool_input": {
+                    "file_path": str(migration_file),
+                    "new_string": "altered",
+                },
+            }
+            parsed, stdout, _stderr, _rc = _run(event, cwd=repo)
+            assert parsed is not None, f"expected JSON output, got {stdout!r}"
+            assert parsed["decision"] == "block"
+            reason = parsed["reason"]
+            assert "WRITE_GUARD_ALLOW_MIGRATION_EDIT" in reason, (
+                f"block message must name the override env var, got {reason!r}"
+            )
+        finally:
+            shutil.rmtree(repo, ignore_errors=True)
+
 
 # ---------------------------------------------------------------------------
 # No-mocks guard — independent of pipeline detection
