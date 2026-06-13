@@ -16,14 +16,15 @@ Use agent teams for multi-agent coordination.
 Fall back to subagents only if AGENT_TEAMS_AVAILABLE = false.
 ```
 
-**Name the tools explicitly.** CC uses whatever tool name appears in the instructions. If you write "dispatch agents" CC picks whichever tool it's most familiar with. If you write `Teammate({ operation: "spawnTeam" })` CC uses that exact tool.
+**Name the tools explicitly.** CC uses whatever tool name appears in the instructions. If you write "dispatch agents" CC picks whichever tool it's most familiar with. If you name the exact tool, CC uses that tool. Name a tool that actually exists in the session — a check for a non-existent tool (e.g. a literal `Teammate` tool, which does not exist; teams surface via `TeamCreate` / `Agent({ team_name })` / `TaskCreate` / `SendMessage`) silently fails and forces the fallback path.
 
 ```markdown
 # BAD — ambiguous
 Dispatch workers to analyze the problem.
 
-# GOOD — explicit
-Spawn teammates via Teammate({ operation: "spawnTeam" }).
+# GOOD — explicit, real tool names
+Spawn a team via TeamCreate({ team_name }).
+Add teammates via Agent({ team_name, prompt }).
 Create tasks via TaskCreate({ subject, description }).
 ```
 
