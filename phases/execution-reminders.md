@@ -6,7 +6,7 @@
 
 Before dispatching the FIRST task, verify:
 
-> **Pre-execution check:** Did you offer `/second-opinion review` on the plan? If Codex is available and you did not ask, STOP and go back to `phases/planning-next-steps.md` step 3. The second-opinion gate is mandatory regardless of plan size.
+> **Pre-execution check:** Did you offer `/second-opinion review` on the plan? If Codex is available and the EFFECTIVE (or planned) tier is ≥ Medium and you did not ask, STOP and go back to `phases/planning-next-steps.md` step 3. The plan second-opinion gate is required at tier ≥ Medium per `phases/task-weight.md`; the user override (see `planning-next-steps.md`) applies.
 >
 > Known rationalization: "The plan was already approved" — approval and second-opinion are independent gates.
 

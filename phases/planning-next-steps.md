@@ -15,7 +15,7 @@ After the plan passes review and is saved:
 
 2. Run: `command -v codex >/dev/null 2>&1` to check if Codex CLI is available.
 
-3. **If Codex is available**, ALWAYS offer second opinion — risk signals determine the framing, not whether to ask. Print this VERBATIM (substitute actual values), then STOP — do not print anything after this block. Your next message depends on the user's answer:
+3. **If Codex is available AND the planned tier is ≥ Medium** (per `phases/task-weight.md`): offer the plan second-opinion (REQUIRED). If the planned tier is Trivial or Small: SKIP the plan second-opinion — proceed directly to step 4. Risk signals determine the framing of the offer, not whether to make it. Print this VERBATIM (substitute actual values), then STOP — do not print anything after this block. Your next message depends on the user's answer:
 
 > ---
 >
@@ -50,10 +50,9 @@ After the plan passes review and is saved:
 >
 > ---
 
-**Named rationalizations (compliance triggers):**
+**Named rationalizations (compliance triggers) and user override — equal-force rules:**
 - "The user wants to move fast" — speed does not exempt the gate. The question takes 5 seconds to ask. Skipping it risks hours of rework.
 - "The plan was already reviewed by the plan reviewer" — plan reviewer checks internal consistency. Second-opinion checks cross-model blind spots. These are different quality dimensions.
-- "It's a small plan" — risk signals determine framing, not whether to ask. Even small plans get the offer.
+- "It's a small/trivial plan" — Trivial and Small plans skip the plan second-opinion (per `phases/task-weight.md` gate matrix). Medium+ plans run it. Tier-scoped skips are correct; unscoped "skip because small" is still a violation.
 - "Codex will slow things down" — the user decides whether to accept the offer. Your job is to present it, not pre-decide.
-
-**User override:** If the user has said "never ask about second opinion" or "skip second-opinion gates" in this session, skip second-opinion in planning for the rest of the session.
+- **User override (equal force):** If the user has said "never ask about second opinion" or "skip second-opinion gates" in this session, skip second-opinion in planning for the rest of the session. A valid user override is as authoritative as a tier-skip — honor it without resistance.
