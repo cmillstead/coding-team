@@ -48,7 +48,9 @@ If no episodes found or scores are below threshold: skip and note in status: 'Ep
 
 ### Golden principles
 
-Read `~/.claude/golden-principles.md` using the Read tool. Pass the full contents to the Team Leader as a "## Golden Principles" section in the context. Design workers making architecture recommendations MUST check their proposals against these principles.
+**Tier gate:** If the planned tier is Trivial AND the task contains no architectural decision, SKIP the golden-principles read and pass-through. Trivial tasks with no arch decision do not need architecture-governance review — loading and passing the full file adds context cost with no signal benefit.
+
+If the planned tier is Small/Medium/Large, OR the task contains an architectural decision at any tier: Read `~/.claude/golden-principles.md` using the Read tool. Pass the full contents to the Team Leader as a "## Golden Principles" section in the context. Design workers making architecture recommendations MUST check their proposals against these principles.
 
 If the file doesn't exist, skip and note in status: 'Golden principles not available — skipped'
 
