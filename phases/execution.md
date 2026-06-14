@@ -110,9 +110,15 @@ For each task in plan:
        - If zero matches: skip and note in status: 'No security-sensitive files detected — skipped'
 
   GATE
-  9. VERIFY: Dispatch a verification subagent to re-run tests independently.
-     If context budget is exhausted (>80%), accept the implementer's reported
-     output as fallback.
+  9. VERIFY: Check the EFFECTIVE tier (from the single end-of-execution recompute
+     in `phases/task-weight.md`). Small/Medium/Large RUN the per-task verification
+     sweep — dispatch a verification subagent to re-run tests independently.
+     Trivial SKIP the verification sweep. The >80%-context escape is an independent
+     secondary condition: if context budget is exhausted (>80%) AND the tier would
+     otherwise require the sweep, accept the implementer's reported output as
+     fallback. Both conditions are orthogonal — tier governs whether to run;
+     context governs the fallback path when tier says run. See gate matrix:
+     `phases/task-weight.md`.
   10. Mark task complete
   11. Next task
 ```
