@@ -66,7 +66,10 @@ class TestGetStateFile:
     def test_returns_session_specific_path(self):
         session_id = f"test-{uuid.uuid4().hex[:8]}"
         result = run_python(
-            f"import os; os.environ['CLAUDE_SESSION_ID'] = {session_id!r}\n"
+            "import os\n"
+            # Clear higher-priority vars so CLAUDE_SESSION_ID is the winner
+            "os.environ.pop('CLAUDE_CODE_SESSION_ID', None)\n"
+            f"os.environ['CLAUDE_SESSION_ID'] = {session_id!r}\n"
             "from _lib.state import get_state_file; print(get_state_file('prefix'))",
         )
         assert result.returncode == 0
@@ -269,3 +272,60 @@ class TestUpdateInput:
         # Fail-open: emits plain allow, NOT hookSpecificOutput
         assert parsed == {"decision": "allow"}
         assert "hookSpecificOutput" not in parsed
+
+
+# ---------------------------------------------------------------------------
+# get_session_id env-var precedence
+# ---------------------------------------------------------------------------
+
+class TestGetSessionIdPrecedence:
+    def test_prefers_claude_code_session_id(self):
+        """CLAUDE_CODE_SESSION_ID wins over CLAUDE_SESSION_ID."""
+        result = run_python(
+            "import os\n"
+            "os.environ['CLAUDE_CODE_SESSION_ID'] = 'real-session'\n"
+            "os.environ['CLAUDE_SESSION_ID'] = 'legacy'\n"
+            "from _lib.state import get_session_id\n"
+            "print(get_session_id())\n"
+        )
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.strip() == "real-session"
+
+    def test_falls_back_to_claude_session_id(self):
+        """Falls back to CLAUDE_SESSION_ID when CLAUDE_CODE_SESSION_ID is absent."""
+        result = run_python(
+            "import os\n"
+            "os.environ.pop('CLAUDE_CODE_SESSION_ID', None)\n"
+            "os.environ['CLAUDE_SESSION_ID'] = 'legacy'\n"
+            "os.environ.pop('SESSION_ID', None)\n"
+            "from _lib.state import get_session_id\n"
+            "print(get_session_id())\n"
+        )
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.strip() == "legacy"
+
+    def test_falls_back_to_session_id(self):
+        """Falls back to SESSION_ID when neither CLAUDE_CODE_SESSION_ID nor CLAUDE_SESSION_ID is set."""
+        result = run_python(
+            "import os\n"
+            "os.environ.pop('CLAUDE_CODE_SESSION_ID', None)\n"
+            "os.environ.pop('CLAUDE_SESSION_ID', None)\n"
+            "os.environ['SESSION_ID'] = 'session-var'\n"
+            "from _lib.state import get_session_id\n"
+            "print(get_session_id())\n"
+        )
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.strip() == "session-var"
+
+    def test_falls_back_to_pid(self):
+        """Falls back to pid-<ppid> when no session env vars are set."""
+        result = run_python(
+            "import os\n"
+            "os.environ.pop('CLAUDE_CODE_SESSION_ID', None)\n"
+            "os.environ.pop('CLAUDE_SESSION_ID', None)\n"
+            "os.environ.pop('SESSION_ID', None)\n"
+            "from _lib.state import get_session_id\n"
+            "print(get_session_id())\n"
+        )
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.strip().startswith("pid-")

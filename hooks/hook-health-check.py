@@ -25,6 +25,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 from _lib.output import allow_with_reason
+from _lib.state import get_session_id
 
 HOOKS_DIR = Path.home() / ".claude" / "hooks"
 SETTINGS_PATH = Path.home() / ".claude" / "settings.json"
@@ -525,7 +526,7 @@ def check_metrics():
     if not records:
         return []
 
-    current_session = os.environ.get("CLAUDE_SESSION_ID", "unknown")
+    current_session = get_session_id()
 
     sessions = {}
     for r in records:

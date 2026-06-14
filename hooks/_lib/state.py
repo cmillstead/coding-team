@@ -8,9 +8,17 @@ from pathlib import Path
 
 
 def get_session_id() -> str:
-    """Get the current session ID from environment."""
-    return os.environ.get("CLAUDE_SESSION_ID",
-                          os.environ.get("SESSION_ID", f"pid-{os.getppid()}"))
+    """Get the current session ID from environment.
+
+    Prefers CLAUDE_CODE_SESSION_ID (the real Claude Code runtime var), then the
+    legacy CLAUDE_SESSION_ID / SESSION_ID, then a ppid-derived fallback.
+    """
+    return (
+        os.environ.get("CLAUDE_CODE_SESSION_ID")
+        or os.environ.get("CLAUDE_SESSION_ID")
+        or os.environ.get("SESSION_ID")
+        or f"pid-{os.getppid()}"
+    )
 
 
 def get_state_file(prefix: str) -> Path:

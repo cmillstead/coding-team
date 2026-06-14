@@ -105,12 +105,24 @@ def make_event():
 
 @pytest.fixture
 def tmp_state_dir(tmp_path):
-    """Set CLAUDE_SESSION_ID to a unique test value and clean up state files after."""
+    """Set session env vars to a unique test value and clean up state files after.
+
+    Overrides both CLAUDE_CODE_SESSION_ID (preferred) and CLAUDE_SESSION_ID (legacy)
+    so that get_session_id() uses the test-controlled value in subprocess hooks.
+    """
     test_session_id = f"test-{uuid.uuid4().hex[:12]}"
+    old_cc_session = os.environ.get("CLAUDE_CODE_SESSION_ID")
     old_session = os.environ.get("CLAUDE_SESSION_ID")
+    # Set both so the highest-priority var controls the test session
+    os.environ["CLAUDE_CODE_SESSION_ID"] = test_session_id
     os.environ["CLAUDE_SESSION_ID"] = test_session_id
     yield test_session_id
-    # Restore
+    # Restore CLAUDE_CODE_SESSION_ID
+    if old_cc_session is None:
+        os.environ.pop("CLAUDE_CODE_SESSION_ID", None)
+    else:
+        os.environ["CLAUDE_CODE_SESSION_ID"] = old_cc_session
+    # Restore CLAUDE_SESSION_ID
     if old_session is None:
         os.environ.pop("CLAUDE_SESSION_ID", None)
     else:
