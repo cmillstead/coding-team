@@ -24,15 +24,18 @@ Plan passed through **11 Codex (`/second-opinion review`) rounds**; every round 
 - [x] Branch hygiene: committed in-flight codex-learnings work (`e7222ef`), cut clean branch, committed audit brief (`a328102`).
 - [x] Plan written + 11 Codex rounds + iteration 12 final.
 - [x] **Task 1 (builder-self-check off hot path) — DONE, commit `eb00d3d`.** Fire-and-forget `_spawn_background_worker`/`_run_worker` (`--worker` mode), findings deferred to LOG_FILE. Tests green, deployed, symlink verified.
+- [x] **Discussion checkpoint 2026-06-14:** user confirmed proceed-as-planned, no scope change. Plan remains `status: planned`.
+- [x] **BATCH 1 COMPLETE (2026-06-14).** Commits: Task 3 `03b514d`, Task 4 `e919a13`, Task 4b `9c2b843`, Task 5 `232f9c4`, Task 6 `6485dc9`. All deployed; symlinks verified to repo source; qmd fully retired (settings.json + symlink + source greps all 0). Safety gate `test_in_place_status_flip_is_seen_immediately` passes (cache never leaves write-guard disarmed).
+- [x] **Task 7 gate GREEN.** Full suite: 554 passed, 8 skipped, **10 pre-existing failures** (7 `TestSkillEvalHarness::test_skill_routing`, 2 `TestMigrationGuard`, 1 `test_ignores_internal_hooks`) — independently confirmed pre-existing by reproducing all 10 identically at baseline `e919a13` (before any write-guard change). Zero Batch 1 regressions. Deploy "All hooks registered." + deploy parity verified on all 6 modified artifacts.
 
 ## Remaining work (in order)
 **Batch 1 (each task = full text in the plan; dispatch a sonnet `Coding Team Implementer`, give full task text, do NOT make it read the plan):**
-- [ ] Task 3 — loop-detection.py conditional save_state (only write when failure list changed). Independent file.
-- [ ] Task 4 — hook-health-check.py: non-blocking `get_pr_throughput` (gh) + 1h cache. **Shared file** (see below).
-- [ ] Task 4b — `_lib/state.py:get_session_id()` prefer `CLAUDE_CODE_SESSION_ID` (additive) + fix `hook-health-check.py:502` to use it. Prereq for Task 5. **Shared file.**
-- [ ] Task 5 — `_lib/active_plan.py` cross-invocation file cache (candidate-file `(path, st_mtime_ns)` signature, NOT dir mtime; uses `get_session_id`; never caches AmbiguousActivePlanError), wired into BOTH write-guard.py AND coding-team-lifecycle.py. Safety test: in-place planned→in-progress flip seen immediately. Depends on 4b.
-- [ ] Task 6 — REMOVE qmd-vault-embed (see decision 3). **Shared file** (hook-health-check.py qmd probe).
-- [ ] Task 7 (gate) — full `pytest hooks/tests/ -q` + deploy parity (`readlink` each deployed hook == source); confirm qmd fully gone (`grep -rn qmd hooks/ --include=*.py --include=*.sh` == 0).
+- [x] Task 3 — loop-detection.py conditional save_state. `03b514d`.
+- [x] Task 4 — hook-health-check.py non-blocking `get_pr_throughput` + 1h cache. `e919a13`.
+- [x] Task 4b — `_lib/state.py:get_session_id()` prefers `CLAUDE_CODE_SESSION_ID` + health-check uses shared helper. `9c2b843`.
+- [x] Task 5 — `_lib/active_plan.py` cross-invocation file cache, wired into write-guard.py + coding-team-lifecycle.py. In-place flip safety test passes. `232f9c4`.
+- [x] Task 6 — REMOVED qmd-vault-embed (hook + test + settings.json + symlink + health-probe). `6485dc9`.
+- [x] Task 7 (gate) — GREEN. 554 passed / 10 pre-existing failures (confirmed at baseline e919a13) / deploy parity verified / qmd source greps == 0.
 
 **Shared-file sequencing (MANDATORY — no parallel on same file):** `hook-health-check.py` is touched by Task 4 (get_pr_throughput) → 4b (session-id :502) → 6 (qmd probe), different functions — run sequentially in that order. Task 5 after 4b. Task 1 & Task 3 are independent (could parallelize).
 
