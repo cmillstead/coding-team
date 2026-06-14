@@ -225,7 +225,7 @@ class TestCheckMcpHealth:
     def test_all_issues_mention_binary_names(self, hhc):
         """Every issue string references a known MCP binary name."""
         result = hhc.check_mcp_health()
-        known_names = {"codesight-mcp", "qmd"}
+        known_names = {"codesight-mcp"}
         for issue in result:
             assert any(name in issue for name in known_names), (
                 f"Issue does not reference a known binary: {issue}"

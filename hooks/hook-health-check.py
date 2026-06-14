@@ -187,9 +187,9 @@ def check_instruction_file_lengths() -> list[str]:
 def check_mcp_health() -> list[str]:
     """Probe configured MCP servers for availability.
 
-    Checks whether codesight-mcp and qmd binaries are reachable via PATH
-    or common install locations. Returns a list of warning strings for
-    any servers that cannot be found.
+    Checks whether the codesight-mcp binary is reachable via PATH or common
+    install locations. Returns a list of warning strings for any servers that
+    cannot be found.
     """
     issues = []
 
@@ -201,15 +201,6 @@ def check_mcp_health() -> list[str]:
         ]
         if not any(p.exists() for p in common_paths):
             issues.append("codesight-mcp binary not found in PATH or common locations")
-
-    # Check qmd binary availability
-    if not shutil.which("qmd"):
-        common_paths = [
-            Path("/opt/homebrew/bin/qmd"),
-            Path("/usr/local/bin/qmd"),
-        ]
-        if not any(p.exists() for p in common_paths):
-            issues.append("qmd binary not found in PATH or common locations")
 
     return issues
 
