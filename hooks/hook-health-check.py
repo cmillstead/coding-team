@@ -384,11 +384,28 @@ def format_branch_summary(branch_data):
     return "Branch cost summary:\n" + "\n".join(lines)
 
 
+_PR_THROUGHPUT_CACHE_TTL = 3600  # seconds
+
+
 def get_pr_throughput():
-    """Compute PR throughput metrics using gh CLI.
+    """Compute PR throughput metrics using gh CLI, cached for 1 hour.
 
     Returns a formatted string or None if gh fails or no PR data available.
+    Reads from a cache file if it is < 1h old to keep SessionStart non-blocking.
     """
+    import time
+
+    cache_file = METRICS_DIR / ".pr-throughput-cache.json"
+
+    # Return cached value if fresh (< TTL seconds old)
+    if cache_file.is_file():
+        try:
+            cached = json.loads(cache_file.read_text())
+            if time.time() - cached["ts"] < _PR_THROUGHPUT_CACHE_TTL:
+                return cached["value"]
+        except (json.JSONDecodeError, KeyError, OSError):
+            pass  # Corrupt or unreadable cache — fall through to gh
+
     try:
         result = subprocess.run(
             [
@@ -397,7 +414,7 @@ def get_pr_throughput():
             ],
             capture_output=True,
             text=True,
-            timeout=10,
+            timeout=3,
         )
         if result.returncode != 0:
             return None
@@ -433,7 +450,16 @@ def get_pr_throughput():
         avg_hours = sum(merged_recent) / len(merged_recent)
         parts.append(f"avg merge time: {avg_hours:.1f}h")
 
-    return ", ".join(parts)
+    value = ", ".join(parts)
+
+    # Write cache — best-effort, do not fail if METRICS_DIR does not exist
+    try:
+        METRICS_DIR.mkdir(parents=True, exist_ok=True)
+        cache_file.write_text(json.dumps({"value": value, "ts": time.time()}))
+    except OSError:
+        pass
+
+    return value
 
 
 def get_skill_failure_rates():
