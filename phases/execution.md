@@ -148,7 +148,11 @@ Before declaring execution complete, verify the full plan was executed:
 
 **Full-suite verification:** Run the complete test suite and linter after ALL tasks complete. This catches integration failures between tasks that per-task GATE checks miss. All tests must pass and linter must be clean before proceeding.
 
-## Feature-Level QA Review (after full-suite verification)
+## Effective-Tier Recompute (once, here — FIRST exit-gate action)
+
+**Recompute the effective tier once, here.** Per `phases/task-weight.md` "recompute ONCE at end-of-execution": effective tier = max(planned tier, actual-diff tier). SIZE = actual diff (`git diff $(git merge-base HEAD main) --name-only | wc -l` + changed-line count); RISK = re-apply the `phases/task-weight.md` SEMANTIC risk-signal checklist to what the diff DOES (NOT a grep — filename patterns are hints only; classify by effect). Promote-only — never lower the tier. **Carry this effective tier into ALL following exit gates — QA reviewer, doc-drift scan, per-task verification sweep, post-exec Codex review, and the Phase-6 gates. They each evaluate the EFFECTIVE tier, never the planned tier.**
+
+## Feature-Level QA Review (after effective-tier recompute)
 
 After all tasks pass and the full test suite is clean, dispatch the QA reviewer to check the **complete feature diff** holistically. This catches integration issues, dark features, and behavioral gaps that per-task auditors miss.
 
@@ -168,7 +172,7 @@ After all tasks pass and the full test suite is clean, dispatch the QA reviewer 
 4. If the QA reviewer reports FAIL or has 2+ HIGH findings: fix all HIGH/MEDIUM findings before proceeding. Max 2 fix rounds for QA findings.
 5. If the QA reviewer reports PASS or PASS_WITH_CONCERNS with no HIGH findings: proceed.
 
-**Skip condition:** If the feature has only 1 task AND touches 3 or fewer files, the per-task audit is sufficient — skip the QA review. Feature-level QA adds value when multiple tasks interact.
+**Skip condition:** Skip the QA review ONLY when the EFFECTIVE tier (recomputed above) is Trivial — a Small/Medium/Large feature always runs it. (Trivial = 1 file, ≤20 lines, no risk signals; stricter than the old `1 task AND ≤3 files`, which was the Small boundary and would have let Small changes skip QA.) Feature-level QA adds value at every tier above Trivial.
 
 Read `phases/doc-drift-scan.md` and follow its instructions.
 

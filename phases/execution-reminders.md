@@ -59,16 +59,17 @@ After the LAST task in the plan passes its audit, print this checklist VERBATIM 
 > ---
 > **All {N} tasks complete.** Before Phase 6, these steps are MANDATORY:
 >
+> 0. **Recompute the effective tier (once, here — FIRST exit-gate action).** Per `phases/task-weight.md`: effective tier = max(planned tier, actual-diff tier). SIZE = `git diff $(git merge-base HEAD main) --name-only | wc -l` + changed-line count; RISK = re-apply the SEMANTIC risk-signal checklist in `phases/task-weight.md` to what the diff DOES (not a grep). Promote-only — never lower. Carry this effective tier into steps 1–4 below.
 > 1. **Full-suite verification** — Run complete test suite + linter. All must pass.
-> 2. **Feature-Level QA Review** — Dispatch `ct-qa-reviewer` per the "Feature-Level QA Review" section in `execution.md`. Skip ONLY if 1 task AND ≤3 files changed.
+> 2. **Feature-Level QA Review** — Dispatch `ct-qa-reviewer` per the "Feature-Level QA Review" section in `execution.md`. Skip ONLY when the EFFECTIVE tier is Trivial (per `phases/task-weight.md`).
 > 3. **Doc-drift scan** — Read `phases/doc-drift-scan.md` and follow.
 > 4. **Post-execution review** — Read `phases/post-execution-review.md` and follow (risk signals + second-opinion gate).
 >
-> Do NOT proceed to Phase 6 until all 4 steps are done.
+> Do NOT proceed to Phase 6 until all 5 steps are done.
 > ---
 
 **Named rationalizations (compliance triggers):**
 - "All tasks passed their per-task audits" — per-task audits catch per-task bugs. Feature-level QA catches integration bugs between tasks. These are different quality dimensions.
 - "The test suite already passed after each task" — per-task test runs verify individual tasks. The full-suite run after ALL tasks catches cross-task integration failures.
-- "This is a small feature, QA is overkill" — the skip condition is explicit: 1 task AND ≤3 files. A 45-task job with 5 batches does not qualify. If in doubt, run QA.
+- "This is a small feature, QA is overkill" — the skip condition is explicit: the EFFECTIVE tier is Trivial (1 file, ≤20 lines, no risk signals). `1 task AND ≤3 files` is the Small boundary, NOT the QA-skip test — a Small change still runs QA. If in doubt, run QA.
 - "I'll do the second-opinion later" — the post-execution review gate exists to catch issues BEFORE Phase 6 completion. Later means never under context pressure.
