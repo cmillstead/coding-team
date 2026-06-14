@@ -40,12 +40,17 @@ After the header, every plan includes a context brief. The planning worker fills
 - **Known landmines:** [areas where technically correct changes have caused problems before]
 ```
 
-The planning worker MUST fill this section. If no organizational context is known, write: "No non-obvious context identified. Standard development environment."
+**Tier gate:**
+- **Trivial:** The Context Brief is OPTIONAL. If no non-obvious organizational context exists for this task, omit the section entirely rather than writing a boilerplate fallback like "No non-obvious context identified." A missing section signals "no context" cleanly; a boilerplate line adds noise with no signal.
+- **Small/Medium/Large:** The planning worker MUST fill this section. If no organizational context is known, write: "No non-obvious context identified. Standard development environment."
+
 Do NOT invent context you do not have evidence for. If a field's answer is unknown, omit the field entirely. Fabricated context is worse than no context — it causes implementers to work around constraints that don't exist.
 
 ## Project-Specific Eval Criteria (optional)
 
-The planning worker produces eval criteria from two sources: (1) accumulated criteria loaded from `$REPO_ROOT/docs/project-evals.md` in Step 0.7, and (2) new criteria generated from the current context brief. Auditors MUST check all listed criteria beyond their standard lens.
+**Tier gate:**
+- **Trivial:** SKIP this section. Trivial plans have no audit rounds to consume eval criteria — writing them produces unused boilerplate. Omit the section entirely.
+- **Small/Medium/Large:** The planning worker produces eval criteria from two sources: (1) accumulated criteria loaded from `$REPO_ROOT/docs/project-evals.md` in Step 0.7, and (2) new criteria generated from the current context brief. Auditors MUST check all listed criteria beyond their standard lens.
 
 ```markdown
 ## Project-Specific Eval Criteria
