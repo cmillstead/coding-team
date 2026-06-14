@@ -69,7 +69,7 @@ These skips are SCOPED to the quantified tiers + risk signals above. An UNSCOPED
 
 ## Canonical Codex principle (stated ONCE here)
 
-**Codex `challenge` is always OFFERED, never REQUIRED.** `review` is tier-gated per the matrix; `challenge` is only ever offered, at every tier. Other files reference this line; they do not restate the rule.
+**Codex `challenge` is always OFFERED, never REQUIRED.** `review` is tier-gated per the matrix; `challenge` is only ever offered, at every tier. Other files reference this line; where they restate it for local readability (e.g. inside a printed user-facing block), they attribute it here.
 
 ## Classification procedure
 
