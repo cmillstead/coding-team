@@ -175,8 +175,10 @@ def main():
             return
     else:
         pattern = normalize_command(command)
-        state["failures"] = [f for f in state["failures"] if f["pattern"] != pattern]
-        _save_loop_state(state_path, state)
+        new_failures = [f for f in state["failures"] if f["pattern"] != pattern]
+        if new_failures != state["failures"]:
+            state["failures"] = new_failures
+            _save_loop_state(state_path, state)
 
 
 if __name__ == "__main__":
