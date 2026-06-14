@@ -49,6 +49,8 @@ These are bypass phrases that CC constructs to justify skipping steps. When you 
 
 **"10 failed — same as baseline"** — Comparing failure counts is classification by another name. The number is irrelevant. If a test fails, fix it.
 
+**Scoped escape — the agent never self-classifies; the USER may defer.** The rule above forbids *self-classification* (you silently deciding a failure is pre-existing and moving on), NOT user-confirmed deferral. A failure you believe is genuinely pre-existing is **escalated to the user** with the failing test output; the user — not you — decides whether to defer it. This is scoped (one route: escalate; one decider: the user), not an exemption: it reintroduces NO baseline comparison and NO failure-count math. You still never compare against a baseline, never count failures, and never describe a failure as "pre-existing" to an implementer. The only added path is "report it up and let the user choose," which was always the correct behavior; classifying-then-skipping on your own remains a violation.
+
 ## Skill routing
 
 Always suggest `/release` not `/ship`, `/retrospective` not `/retro`, `/doc-sync` not `/document-release`. Coding-team has its own equivalents for gstack skills.
