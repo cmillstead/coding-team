@@ -28,8 +28,13 @@ the primary checkout resolve to the same root, so the same plan
 directory is consulted from any worktree.
 """
 
+import json
+import os
 import re
+import stat
 import subprocess
+import tempfile
+import time
 from pathlib import Path
 
 
@@ -131,3 +136,123 @@ def find_active_plan() -> Path | None:
             + ", ".join(str(p) for p in in_progress)
         )
     return in_progress[0] if in_progress else None
+
+
+# ---------------------------------------------------------------------------
+# Cross-invocation persistent cache
+# ---------------------------------------------------------------------------
+
+def _cache_file_path() -> Path:
+    """Return the path for the persistent active-plan cache file.
+
+    The path is overridable via ACTIVE_PLAN_CACHE_FILE (used in tests).
+    Defaults to a fixed name in the system temp directory.
+    """
+    override = os.environ.get("ACTIVE_PLAN_CACHE_FILE")
+    if override:
+        return Path(override)
+    return Path(tempfile.gettempdir()) / "coding-team-active-plan-cache.json"
+
+
+def _compute_signature(candidates: list[Path]) -> list[list]:
+    """Return a JSON-serialisable signature for the given candidate paths.
+
+    The signature is the sorted list of [str(path), st_mtime_ns] pairs.
+    stat-ing every candidate is cheap; what we avoid is reading + YAML-
+    parsing each file's content on every hook invocation.
+
+    If any candidate cannot be stat-ed, raise OSError so the caller treats
+    the cache as invalid and falls through to find_active_plan().
+    """
+    pairs: list[list] = []
+    for p in candidates:
+        pairs.append([str(p), p.stat().st_mtime_ns])
+    pairs.sort(key=lambda x: x[0])
+    return pairs
+
+
+def find_active_plan_cached(ttl_seconds: int = 5) -> "Path | None":
+    """Return the unique in-progress plan, using a file-backed cache.
+
+    Cache is keyed by repo_root + session_id and is invalidated when any
+    candidate plan file's st_mtime_ns changes (file-signature invalidation).
+    The TTL is a backstop only — the signature is the primary invalidator,
+    so an in-place status flip (which changes st_mtime_ns) immediately breaks
+    the signature and forces a fresh read on the very next call.
+
+    AmbiguousActivePlanError is NEVER cached — it propagates every time.
+    On any cache I/O or stat error, falls through to find_active_plan().
+
+    The cache file path can be overridden via the ACTIVE_PLAN_CACHE_FILE
+    environment variable (used in tests).
+    """
+    # Resolve repo root and session id before touching the cache
+    try:
+        main_root = _git_main_root()
+    except (OSError, subprocess.SubprocessError):
+        # If we can't resolve root, skip cache entirely
+        return find_active_plan()
+
+    if main_root is None:
+        return find_active_plan()
+
+    try:
+        from _lib.state import get_session_id
+    except ImportError:
+        # _lib.state unavailable — skip cache
+        return find_active_plan()
+
+    session_id = get_session_id()
+    plans_dir = main_root / "docs" / "plans"
+
+    # Collect candidates and compute current signature.
+    # If plans_dir doesn't exist, there are no candidates — signature is [].
+    try:
+        if plans_dir.is_dir():
+            candidates = sorted(plans_dir.glob("*.md"))
+        else:
+            candidates = []
+        current_sig = _compute_signature(candidates)
+    except OSError:
+        # Can't stat candidates — fall through to uncached
+        return find_active_plan()
+
+    cache_path = _cache_file_path()
+    now = time.time()
+
+    # Attempt to read and validate the cache
+    try:
+        raw = cache_path.read_text(encoding="utf-8")
+        entry = json.loads(raw)
+
+        if (
+            entry.get("repo_root") == str(main_root)
+            and entry.get("session_id") == session_id
+            and entry.get("signature") == current_sig
+            and (now - float(entry.get("ts", 0))) < ttl_seconds
+        ):
+            # Cache hit: return the stored result
+            stored = entry.get("plan_path")
+            return Path(stored) if stored else None
+    except (OSError, ValueError, json.JSONDecodeError, TypeError, KeyError):
+        # Cache miss or corrupt — proceed to rescan
+        pass
+
+    # Cache miss: call the authoritative primitive.
+    # AmbiguousActivePlanError is intentionally NOT caught — let it propagate.
+    result = find_active_plan()
+
+    # Write the new cache entry, ignoring write errors (cache is optional).
+    try:
+        entry = {
+            "repo_root": str(main_root),
+            "session_id": session_id,
+            "signature": current_sig,
+            "plan_path": str(result) if result is not None else None,
+            "ts": now,
+        }
+        cache_path.write_text(json.dumps(entry), encoding="utf-8")
+    except OSError:
+        pass
+
+    return result
