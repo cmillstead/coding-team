@@ -5,11 +5,10 @@ Runs language-appropriate checks after the builder edits a file:
 1. Python: ruff check + mypy (if available)
 2. TypeScript/JavaScript: tsc --noEmit (if tsconfig exists)
 3. Test files: run the specific test file
-4. Any failure: return advisory with fix instructions
+4. Any failure: deferred to LOG_FILE (never blocks the hot path)
 
-This hook is advisory (not blocking) — it tells the builder what to fix,
-but doesn't prevent the edit. The builder's pre-report self-check catches
-anything that slips through.
+This hook fires and forgets — checks run in a detached background worker.
+Findings are appended to LOG_FILE; nothing is emitted inline on the hot path.
 """
 
 import os
@@ -232,9 +231,54 @@ def _run_test_file(file_path: str) -> str | None:
 
 
 # ---------------------------------------------------------------------------
+# Background worker
+# ---------------------------------------------------------------------------
+def _spawn_background_worker(file_path: str) -> None:
+    """Fire-and-forget: run checks in a detached process; results land in LOG_FILE."""
+    try:
+        subprocess.Popen(
+            [sys.executable, os.path.abspath(__file__), "--worker", file_path],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+    except OSError:
+        _log(f"could not spawn background worker for {file_path}")
+
+
+def _run_worker(file_path: str) -> None:
+    """Detached worker: run the existing checks and log findings (never block)."""
+    ext = _get_extension(file_path)
+    findings: list[str] = []
+    if ext in PYTHON_EXTENSIONS:
+        for runner, label in ((_run_ruff, "ruff"), (_run_mypy, "mypy")):
+            out = runner(file_path)
+            if out:
+                findings.append(f"{label} found issues:\n{out}")
+    if ext in TS_JS_EXTENSIONS:
+        out = _run_tsc(file_path)
+        if out:
+            findings.append(f"tsc --noEmit found issues:\n{out}")
+    if _is_test_file(file_path):
+        out = _run_test_file(file_path)
+        if out:
+            findings.append(f"Test execution failed:\n{out}")
+    if findings:
+        _log("BUILDER SELF-CHECK (deferred): " + "\n\n".join(findings))
+    else:
+        _log(f"All deferred checks passed for {file_path}")
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 def main() -> None:
+    # Worker mode: run checks in background and log findings
+    if len(sys.argv) >= 3 and sys.argv[1] == "--worker":
+        _run_worker(sys.argv[2])
+        return
+
     event = _event.parse_event()
     if not event:
         return
@@ -248,41 +292,8 @@ def main() -> None:
     if not file_path:
         return
 
-    ext = _get_extension(file_path)
-    findings: list[str] = []
-
-    # Python checks
-    if ext in PYTHON_EXTENSIONS:
-        ruff_output = _run_ruff(file_path)
-        if ruff_output:
-            findings.append(f"ruff check found issues:\n{ruff_output}")
-
-        mypy_output = _run_mypy(file_path)
-        if mypy_output:
-            findings.append(f"mypy found issues:\n{mypy_output}")
-
-    # TypeScript/JavaScript checks
-    if ext in TS_JS_EXTENSIONS:
-        tsc_output = _run_tsc(file_path)
-        if tsc_output:
-            findings.append(f"tsc --noEmit found issues:\n{tsc_output}")
-
-    # Test file execution
-    if _is_test_file(file_path):
-        test_output = _run_test_file(file_path)
-        if test_output:
-            findings.append(f"Test execution failed:\n{test_output}")
-
-    if findings:
-        combined = "\n\n".join(findings)
-        _output.advisory(
-            f"BUILDER SELF-CHECK: issues found in {file_path}:\n\n"
-            f"{combined}\n\n"
-            f"Fix these before reporting DONE."
-        )
-        _log(f"Advisory issued for {file_path}: {len(findings)} finding(s)")
-    else:
-        _log(f"All checks passed for {file_path}")
+    # Fire-and-forget: spawn detached worker; hot path returns immediately
+    _spawn_background_worker(file_path)
 
 
 if __name__ == "__main__":

@@ -3,6 +3,7 @@
 import json
 import os
 import subprocess
+import time
 from pathlib import Path
 
 import pytest
@@ -31,7 +32,11 @@ class TestPythonFileTriggersRuff:
     """Verify that editing a Python file triggers ruff check."""
 
     def test_python_edit_with_ruff_error(self, run_hook, make_event, tmp_path):
-        """A Python file with a lint error should produce an advisory."""
+        """A Python file with a lint error should spawn a background worker (not block inline).
+
+        After the fire-and-forget refactor, the hook returns silently (no inline advisory).
+        Findings are deferred to LOG_FILE by the background worker.
+        """
         bad_file = tmp_path / "bad_code.py"
         bad_file.write_text("import os\nimport sys\n")  # unused imports
 
@@ -42,12 +47,9 @@ class TestPythonFileTriggersRuff:
         )
         result = run_hook("builder-self-check.py", event)
 
-        # If ruff is installed and catches the unused imports, expect advisory
-        if result.parsed:
-            assert result.parsed["decision"] == "allow"
-            if "reason" in result.parsed:
-                assert "BUILDER SELF-CHECK" in result.parsed["reason"]
-                assert "ruff" in result.parsed["reason"].lower()
+        # Hot path returns silently — no inline advisory (findings deferred to LOG_FILE)
+        assert result.stdout.strip() == ""
+        assert result.returncode == 0
 
     def test_clean_python_file_is_silent(self, run_hook, make_event, tmp_path):
         """A Python file with no lint errors should produce no output."""
@@ -182,7 +184,7 @@ class TestWriteToolSupport:
     """Verify the hook works with Write tool events, not just Edit."""
 
     def test_write_tool_triggers_checks(self, run_hook, make_event, tmp_path):
-        """Write tool should trigger the same checks as Edit."""
+        """Write tool should trigger the same fire-and-forget behavior as Edit."""
         bad_file = tmp_path / "new_file.py"
         bad_file.write_text("import os\nimport sys\n")
 
@@ -193,6 +195,33 @@ class TestWriteToolSupport:
         )
         result = run_hook("builder-self-check.py", event)
 
-        # Same behavior as Edit — ruff advisory if ruff is installed
-        if result.parsed:
-            assert result.parsed["decision"] == "allow"
+        # Hot path returns silently — no inline advisory (findings deferred to LOG_FILE)
+        assert result.stdout.strip() == ""
+        assert result.returncode == 0
+
+
+class TestNonBlockingHotPath:
+    def test_test_file_does_not_run_synchronously_inline(self, run_hook, make_event, tmp_path):
+        """A failing, slow test file must NOT block the edit or emit an inline advisory.
+
+        DETERMINISTIC: the test-file path (_is_test_file -> _run_test_file) runs pytest
+        SYNCHRONOUSLY in current code and emits an inline 'BUILDER SELF-CHECK' advisory.
+        After the fix, the hook returns immediately and defers findings to LOG_FILE.
+        """
+        slow_failing = tmp_path / "test_slow_fail.py"
+        slow_failing.write_text(
+            "import time\n"
+            "def test_x():\n"
+            "    time.sleep(3)\n"
+            "    assert False\n"
+        )
+        event = make_event("Edit", file_path=str(slow_failing),
+                            new_string="def test_x():\n    assert False\n")
+        start = time.monotonic()
+        result = run_hook("builder-self-check.py", event)
+        elapsed = time.monotonic() - start
+        # CONTRACT (durable): no inline synchronous advisory on the edit itself.
+        if result.parsed and result.parsed.get("reason"):
+            assert "BUILDER SELF-CHECK" not in result.parsed["reason"]
+        # Secondary corroboration: the hot path did not wait out the 3s test run.
+        assert elapsed < 2.0, f"hot path blocked for {elapsed:.1f}s (ran the test synchronously)"
