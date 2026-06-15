@@ -31,13 +31,32 @@ End with exactly: VERDICT: APPROVED or VERDICT: REVISE" \
   2>&1 | tee /tmp/second-opinion-review-${REVIEW_ID}.txt
 ```
 
+#### Verification gate (used by both revision loops)
+
+You are the quality gate. After you apply fixes in response to Codex findings — for a plan revision OR a diff/code fix — run the project's verification command(s) via the Bash tool and confirm GREEN BEFORE you re-dispatch to Codex. This runs before EVERY re-dispatch, on every round.
+
+1. **Discover the command(s):** check `package.json` scripts, `Makefile`, `CLAUDE.md`, or `pyproject.toml` for `test`, `lint`, and `typecheck` commands. Do NOT guess a vague "run tests" — find the actual command(s).
+2. **Baseline first.** BEFORE applying this round's fixes — or as the first thing in this round — run the discovered command(s) and record the prior state (which tests/checks, if any, were already failing).
+3. **Run them again after your fixes** with the Bash tool. Read the full output.
+4. **If GREEN:** proceed to re-dispatch to Codex.
+5. **If a NEW failure appeared (not in the baseline):** it is a regression YOU introduced this round. Fix it locally first, then re-run verification. Do NOT spend a Codex round on a regression you can catch locally — the next round would just rediscover what you already broke.
+6. **If verification stays red ONLY due to pre-existing baseline failures (no new failures from your fixes):** do NOT loop indefinitely. STATE the failing command and which failures are pre-existing vs new, and get USER APPROVAL before re-dispatching without a green run. Do NOT silently treat a pre-existing red as license to skip verifying your own changes.
+7. **If the project has NO runnable test/lint/typecheck command:** STATE that explicitly (e.g., "No verification command found in package.json/Makefile/CLAUDE.md/pyproject.toml — proceeding without local verification") and proceed. Do NOT silently skip, and do NOT block.
+
+Scope note: this baseline branch governs pre-existing RED TESTS at the verification step (introduced-vs-pre-existing at the TEST level). It is DISTINCT from, and does NOT modify, the fix-all-pre-existing FINDINGS rule in SKILL.md ("ALL findings must be addressed"), which stays out of scope. Do not conflate a pre-existing failing test with a pre-existing Codex finding.
+
+Known rationalizations — these are bypasses, not exemptions:
+- "I'll verify at the end" — NO. The gate runs before EACH re-dispatch, not once at the end. A regression introduced in round 2 must be caught before round 3, not after round 5.
+- "The fix was small / a one-liner" — NO. Size does not exempt the gate. One-line fixes cause regressions too. The gate runs every round regardless of fix size.
+
 ### Iterative revision (plan review only)
 
 If Codex returns VERDICT: REVISE:
 1. Read Codex's feedback
 2. Revise the plan — address each issue with real improvements
-3. Summarize revisions for the user
-4. Re-submit using session resume:
+3. **Verification gate (MANDATORY) — see "#### Verification gate (used by both revision loops)" above.** Run the project's verification command(s) and confirm GREEN (or follow the baseline branch) before re-submitting.
+4. Summarize revisions for the user
+5. Re-submit using session resume:
 
 ```bash
 codex exec resume ${CODEX_SESSION_ID} \
@@ -48,6 +67,16 @@ Please re-review. End with VERDICT: APPROVED or VERDICT: REVISE" \
 ```
 
 Max 5 rounds. If `resume` fails (session expired), fall back to a fresh `codex exec` with prior context in the prompt.
+
+### Iterative revision (diff / code-fix review)
+
+When a diff/code review (`codex review --base main`, `codex review --uncommitted`, or a `codex exec` diff review) returns findings you intend to fix and re-review:
+1. Read Codex's findings.
+2. Apply fixes to the diff.
+3. **Verification gate (MANDATORY) — see "#### Verification gate (used by both revision loops)" above.** Run the project's verification command(s) and confirm GREEN (or follow the baseline branch) before re-dispatching. This is the loop that most often introduces regressions — do NOT skip it.
+4. Re-dispatch the diff review: `codex review --base main` (or `--uncommitted`), or `codex exec` with the updated `git diff`. Capture output as usual.
+
+Max 5 rounds, consistent with the plan-revision loop. If findings persist after the cap, present remaining findings to the user rather than looping further.
 
 ### Challenge: adversarial review
 ```bash
