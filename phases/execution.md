@@ -110,15 +110,18 @@ For each task in plan:
        - If zero matches: skip and note in status: 'No security-sensitive files detected — skipped'
 
   GATE
-  9. VERIFY: Check the EFFECTIVE tier (from the single end-of-execution recompute
-     in `phases/task-weight.md`). Small/Medium/Large RUN the per-task verification
-     sweep — dispatch a verification subagent to re-run tests independently.
-     Trivial SKIP the verification sweep. The >80%-context escape is an independent
-     secondary condition: if context budget is exhausted (>80%) AND the tier would
-     otherwise require the sweep, accept the implementer's reported output as
-     fallback. Both conditions are orthogonal — tier governs whether to run;
-     context governs the fallback path when tier says run. See gate matrix:
-     `phases/task-weight.md`.
+  9. VERIFY: Check the PLANNED tier (the floor assigned at planning — the
+     end-of-execution effective-tier recompute has not run yet at per-task time).
+     Small/Medium/Large RUN the per-task verification sweep — dispatch a
+     verification subagent to re-run tests independently. Trivial SKIP the
+     verification sweep. The >80%-context escape is an independent secondary
+     condition: if context budget is exhausted (>80%) AND the tier would otherwise
+     require the sweep, accept the implementer's reported output as fallback. Both
+     conditions are orthogonal — tier governs whether to run; context governs the
+     fallback path when tier says run. A task planned Trivial that GROWS during
+     implementation is still covered at exit: the unconditional full-suite
+     verification (below) plus the effective-tier QA reviewer re-examine the grown
+     diff after the recompute. See gate matrix: `phases/task-weight.md`.
   10. Mark task complete
   11. Next task
 ```
@@ -156,7 +159,7 @@ Before declaring execution complete, verify the full plan was executed:
 
 ## Effective-Tier Recompute (once, here — FIRST exit-gate action)
 
-**Recompute the effective tier once, here.** Per `phases/task-weight.md` "recompute ONCE at end-of-execution": effective tier = max(planned tier, actual-diff tier). SIZE = actual diff (`git diff $(git merge-base HEAD main) --name-only | wc -l` + changed-line count); RISK = re-apply the `phases/task-weight.md` SEMANTIC risk-signal checklist to what the diff DOES (NOT a grep — filename patterns are hints only; classify by effect). Promote-only — never lower the tier. **Carry this effective tier into ALL following exit gates — QA reviewer, doc-drift scan, per-task verification sweep, post-exec Codex review, and the Phase-6 gates. They each evaluate the EFFECTIVE tier, never the planned tier.**
+**Recompute the effective tier once, here.** Per `phases/task-weight.md` "recompute ONCE at end-of-execution": effective tier = max(planned tier, actual-diff tier). SIZE = actual diff (`git diff $(git merge-base HEAD main) --name-only | wc -l` + changed-line count); RISK = re-apply the `phases/task-weight.md` SEMANTIC risk-signal checklist to what the diff DOES (NOT a grep — filename patterns are hints only; classify by effect). Promote-only — never lower the tier. **Carry this effective tier into ALL following exit gates — QA reviewer, doc-drift scan, post-exec Codex review, and the Phase-6 gates. They each evaluate the EFFECTIVE tier, never the planned tier.**
 
 ## Feature-Level QA Review (after effective-tier recompute)
 

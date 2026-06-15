@@ -2,10 +2,14 @@
 
 After plan completeness verification passes and before proceeding to Phase 6, check for documentation drift across the full diff.
 
-**Skip this scan when ANY of these conditions hold:**
-- The EFFECTIVE tier is Trivial (from the single end-of-execution recompute in
-  `phases/task-weight.md`). Small/Medium/Large RUN the doc-drift scan — do NOT skip
-  for Small. Gate matrix: `phases/task-weight.md`.
+**Tier gate:** SKIP this scan ONLY when the EFFECTIVE tier (from the single
+end-of-execution recompute in `phases/task-weight.md`) is Trivial. Small/Medium/Large
+RUN the doc-drift scan — do NOT skip for Small. Gate matrix: `phases/task-weight.md`.
+
+**No-doc-impact early-exits (orthogonal to tier — apply at ANY tier when there is
+provably nothing to scan):** These are NOT tier-based; they fire only when the diff
+demonstrably has no documentation surface to check, which is legitimate at any tier.
+Skip the scan (regardless of tier) when ANY of these hold:
 - The feature only modified test files (no behavior change to document)
 - Every implementer reported "No doc impact" for all tasks
 - The plan explicitly noted "no documentation surface" in the NOT in scope section
