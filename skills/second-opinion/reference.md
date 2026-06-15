@@ -35,15 +35,15 @@ End with exactly: VERDICT: APPROVED or VERDICT: REVISE" \
 
 You are the quality gate. After you apply fixes in response to Codex findings — for a plan revision OR a diff/code fix — run the project's verification command(s) via the Bash tool and confirm GREEN BEFORE you re-dispatch to Codex. This runs before EVERY re-dispatch, on every round.
 
-1. **Discover the command(s):** check `package.json` scripts, `Makefile`, `CLAUDE.md`, or `pyproject.toml` for `test`, `lint`, and `typecheck` commands. Do NOT guess a vague "run tests" — find the actual command(s).
+1. **Discover the command(s):** find THIS repo's actual test/lint/typecheck commands from whatever build manifest or CI config it uses — e.g. `package.json` scripts, `Cargo.toml` (`cargo test`/`cargo clippy`), `go.mod` (`go test`/`go vet`), `pyproject.toml`, `Makefile`, `pom.xml`/`build.gradle`, or `.github/workflows`/`CLAUDE.md`. Do NOT assume Node/Python only. Do NOT guess a vague "run tests" — find the actual command(s) for this repo's ecosystem.
 2. **Baseline first.** BEFORE applying this round's fixes — or as the first thing in this round — run the discovered command(s) and record the prior state (which tests/checks, if any, were already failing).
 3. **Run them again after your fixes** with the Bash tool. Read the full output.
 4. **If GREEN:** proceed to re-dispatch to Codex.
 5. **If a NEW failure appeared (not in the baseline):** it is a regression YOU introduced this round. Fix it locally first, then re-run verification. Do NOT spend a Codex round on a regression you can catch locally — the next round would just rediscover what you already broke.
-6. **If verification stays red ONLY due to pre-existing baseline failures (no new failures from your fixes):** do NOT loop indefinitely. STATE the failing command and which failures are pre-existing vs new, and get USER APPROVAL before re-dispatching without a green run. Do NOT silently treat a pre-existing red as license to skip verifying your own changes.
-7. **If the project has NO runnable test/lint/typecheck command:** STATE that explicitly (e.g., "No verification command found in package.json/Makefile/CLAUDE.md/pyproject.toml — proceeding without local verification") and proceed. Do NOT silently skip, and do NOT block.
+6. **If verification stays red ONLY due to pre-existing baseline failures (no new failures from your fixes):** do NOT loop indefinitely. STATE the failing command and which failures are pre-existing vs new, and get USER APPROVAL before re-dispatching without a green run. Do NOT silently treat a pre-existing red as license to skip verifying your own changes. If a failure looks intermittent (passes on a clean re-run with no change), treat it as flaky: re-run once to confirm, and a subsequent green needs no user approval.
+7. **If the project has NO runnable test/lint/typecheck command:** STATE that explicitly (e.g., "No verification command found in the repo's build manifests or CI config — proceeding without local verification") and proceed. Do NOT silently skip, and do NOT block.
 
-Scope note: this baseline branch governs pre-existing RED TESTS at the verification step (introduced-vs-pre-existing at the TEST level). It is DISTINCT from, and does NOT modify, the fix-all-pre-existing FINDINGS rule in SKILL.md ("ALL findings must be addressed"), which stays out of scope. Do not conflate a pre-existing failing test with a pre-existing Codex finding.
+Scope note: this baseline branch governs pre-existing RED TESTS at the verification step (introduced-vs-pre-existing at the TEST level). It is DISTINCT from, and does NOT modify, the SKILL.md Rules entry "ALL findings must be addressed … 'Pre-existing' is NOT valid to skip a finding" — that rule governs CODEX FINDINGS (what Codex flags in code); this baseline branch governs VERIFICATION FAILURES (test/lint/typecheck output). They are orthogonal: a pre-existing failing test does not exempt you from fixing a Codex finding.
 
 Known rationalizations — these are bypasses, not exemptions:
 - "I'll verify at the end" — NO. The gate runs before EACH re-dispatch, not once at the end. A regression introduced in round 2 must be caught before round 3, not after round 5.
@@ -74,7 +74,8 @@ When a diff/code review (`codex review --base main`, `codex review --uncommitted
 1. Read Codex's findings.
 2. Apply fixes to the diff.
 3. **Verification gate (MANDATORY) — see "#### Verification gate (used by both revision loops)" above.** Run the project's verification command(s) and confirm GREEN (or follow the baseline branch) before re-dispatching. This is the loop that most often introduces regressions — do NOT skip it.
-4. Re-dispatch the diff review: `codex review --base main` (or `--uncommitted`), or `codex exec` with the updated `git diff`. Capture output as usual.
+4. Summarize the fixes you made in response to the findings (so the re-review has visibility into what changed).
+5. Re-dispatch the diff review: `codex review --base main` (or `--uncommitted`), or `codex exec` with the updated `git diff`. Capture output as usual.
 
 Max 5 rounds, consistent with the plan-revision loop. If findings persist after the cap, present remaining findings to the user rather than looping further.
 
