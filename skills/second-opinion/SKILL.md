@@ -72,7 +72,16 @@ Independent review of a plan or diff. Use `codex review --base main` for diffs, 
 
 Always capture output: `2>&1 | tee /tmp/second-opinion-review-${REVIEW_ID}.txt`
 
-For plan reviews: if Codex returns VERDICT: REVISE, iterate up to 5 rounds using `codex exec resume`. Address each issue with real improvements between rounds.
+For plan reviews AND diff/code-fix re-reviews, iterate up to 5 rounds each. For plan reviews, use `codex exec resume`; address each issue with real improvements between rounds. The inter-round verification gate below applies before EVERY re-dispatch on BOTH paths. See reference.md for the iterative-revision protocol (both loops) and the verification gate.
+
+### Inter-round verification gate — MANDATORY
+
+You are the quality gate. After you apply fixes in response to Codex findings — for a plan revision OR a diff/code fix — confirm verification is GREEN via the Bash tool before EVERY re-dispatch to Codex, on every round. Establish a baseline FIRST: run verification BEFORE applying this round's fixes so you can tell a NEW failure from a pre-existing one. If a NEW failure appears (not in the baseline), it is a regression you introduced — fix it locally and re-run before re-dispatching; do NOT spend a Codex round on a regression you can catch locally. If verification stays red ONLY due to pre-existing baseline failures (no new failures from your fixes), do NOT loop indefinitely — STATE which failures are pre-existing vs new and get USER APPROVAL before re-dispatching. If the project has NO runnable test/lint/typecheck command, STATE that and proceed (do NOT silently skip, do NOT block). See reference.md → "#### Verification gate (used by both revision loops)" for command discovery and the full 7-step protocol.
+
+Known rationalizations — these are bypasses, not exemptions:
+- "I'll verify at the end" — NO. The gate runs before EACH re-dispatch, not once at the end.
+- "The fix was small / a one-liner" — NO. Size does not exempt the gate; it runs every round regardless of fix size.
+- "The next Codex round will catch it anyway" — NO. Spending a Codex round on a locally-catchable regression is exactly the waste this gate prevents. Fix it locally first.
 
 ### Post-dispatch: Validate findings are in-repo
 
@@ -171,6 +180,7 @@ After every Codex review that produces findings (any mode), before cleanup:
 - Always use session-scoped temp file paths (UUID prefix) to prevent conflicts
 - Capture output with `2>&1 | tee /tmp/second-opinion-*.txt` — there is no `-o` flag
 - Reuse Codex session ID for multi-round reviews via `codex exec resume SESSION_ID`
+- **Verification gate every round:** after applying fixes in response to Codex findings, confirm verification (test/lint/typecheck, via the Bash tool) is GREEN before EACH re-dispatch to Codex — every round, regardless of fix size. Baseline first, then distinguish a NEW failure (fix locally) from a pre-existing one (state it, get user approval — do NOT loop). No runnable command → state and proceed. Applies to ANY re-dispatch after applying fixes (plan-revision, diff/code-fix, or re-challenge). See Mode 1 and reference.md.
 - If a Codex revision contradicts user requirements, skip that revision and note it
 - Clean up temp files after every invocation
 - Never present Codex's output as Claude's own analysis — always attribute clearly
