@@ -225,7 +225,7 @@ class TestCheckMcpHealth:
     def test_all_issues_mention_binary_names(self, hhc):
         """Every issue string references a known MCP binary name."""
         result = hhc.check_mcp_health()
-        known_names = {"codesight-mcp", "qmd"}
+        known_names = {"codesight-mcp"}
         for issue in result:
             assert any(name in issue for name in known_names), (
                 f"Issue does not reference a known binary: {issue}"
@@ -595,6 +595,48 @@ class TestCheckMetrics:
             )
         finally:
             hhc.METRICS_DIR = original
+
+
+class TestPrThroughputCache:
+    def test_fresh_cache_skips_gh(self, tmp_path):
+        """A cache file < 1h old must be returned without calling gh."""
+        import time
+
+        # Create a gh stub that writes a sentinel file when invoked
+        sentinel = tmp_path / "gh_was_called"
+        gh_stub = tmp_path / "gh"
+        gh_stub.write_text(
+            f"#!/bin/bash\ntouch '{sentinel}'\necho '[]'\nexit 0\n"
+        )
+        gh_stub.chmod(0o755)
+
+        # Prepend stub dir to PATH so it shadows real gh
+        original_path = os.environ.get("PATH", "")
+        os.environ["PATH"] = f"{tmp_path}:{original_path}"
+        try:
+            # Set up a fresh cache file (< 1h old) with a known payload
+            cache_dir = tmp_path / "metrics"
+            cache_dir.mkdir()
+            cache_file = cache_dir / ".pr-throughput-cache.json"
+            expected_value = "PR throughput: 2 open, 3 merged (last 7d)"
+            cache_file.write_text(
+                json.dumps({"value": expected_value, "ts": time.time()})
+            )
+
+            # Load the module and point its cache path at our temp dir
+            hhc = load_module()
+            hhc.METRICS_DIR = cache_dir
+
+            result = hhc.get_pr_throughput()
+
+            # The cached value must be returned
+            assert result == expected_value, f"Expected cached value, got: {result!r}"
+            # gh must NOT have been called
+            assert not sentinel.exists(), (
+                "gh stub was invoked — get_pr_throughput() did not use the cache"
+            )
+        finally:
+            os.environ["PATH"] = original_path
 
 
 class TestIntegration:

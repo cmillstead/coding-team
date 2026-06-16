@@ -4,17 +4,19 @@
 
 After all tasks are executed and verified:
 
-1. Evaluate risk signals against the completed diff. Run these commands:
+0. **Determine the EFFECTIVE tier.** Use the EFFECTIVE tier established at the start of the end-of-execution gate sequence (the single recompute before QA — = max(planned tier, actual-diff tier), semantic checklist from `phases/task-weight.md`, promote-only). If for any reason it was not computed (e.g. entering this phase standalone), compute it now the same way before gating: SIZE = `git diff $(git merge-base HEAD main) --name-only | wc -l` + changed-line count; RISK = re-apply the SEMANTIC risk-signal checklist in `phases/task-weight.md` to what the diff DOES (not a grep).
+
+1. Evaluate risk signals against the completed diff for the offer framing below. Run these commands:
    a. Count changed files: `git diff $(git merge-base HEAD main) --name-only | wc -l`
-   b. If count is 5+, gate fires.
+   b. If count is 5+, note for framing.
    c. Check for security-sensitive files: `git diff $(git merge-base HEAD main) --name-only | grep -iE "auth|payment|encrypt|session|token|cors|csp"`
-   d. If any output, gate fires.
+   d. If any output, note for framing.
    e. Check for CC instruction files: `git diff $(git merge-base HEAD main) --name-only | grep -iE "phases/|agents/|skills/|prompts/|CLAUDE.md|SKILL.md"`
-   f. If any output, gate fires.
+   f. If any output, note for framing.
 
 2. Run: `command -v codex >/dev/null 2>&1` to check if Codex CLI is available.
 
-3. **If Codex is available**, ALWAYS offer second opinion — risk signals determine the framing, not whether to ask. Print this VERBATIM (substitute actual values), then STOP — do not print anything after this block. Your next message depends on the user's answer:
+3. **If Codex is available AND the EFFECTIVE tier is Small, Medium, or Large**: run the post-exec Codex `review` (REQUIRED). If the EFFECTIVE tier is Trivial: SKIP the review — proceed directly to step 4. Print this VERBATIM (substitute actual values), then STOP — do not print anything after this block. Your next message depends on the user's answer:
 
 > ---
 >
@@ -24,6 +26,8 @@ After all tasks are executed and verified:
 > [If no risk signals: "Clean diff — N files changed."]
 >
 > Run Codex on the full diff? Options: **review** / **challenge** (adversarial — recommended for security-sensitive changes) / **both** / **skip**
+>
+> (Codex `challenge` is always offered, never required — see `phases/task-weight.md` canonical Codex principle.)
 >
 > ---
 

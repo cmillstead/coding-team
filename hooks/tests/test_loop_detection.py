@@ -1,5 +1,40 @@
 """Tests for loop-detection.py hook."""
 
+import hashlib
+import os
+from pathlib import Path
+
+
+def _state_file_for_session(session_id: str) -> Path:
+    """Compute the state file path for a given session ID (mirrors _lib/state.py logic)."""
+    session_hash = hashlib.sha256(session_id.encode()).hexdigest()[:12]
+    return Path(f"/tmp/claude-loop-detection-{session_hash}.json")
+
+
+class TestConditionalSaveState:
+    def test_success_with_no_matching_failures_does_not_write_state(
+        self, run_hook, make_event, tmp_state_dir
+    ):
+        """A passing command with an empty/unrelated failure list must not rewrite state."""
+        session_id = tmp_state_dir
+        state_path = _state_file_for_session(session_id)
+
+        # Ensure state file does not exist before the call
+        state_path.unlink(missing_ok=True)
+
+        event = make_event(
+            "Bash",
+            command="echo ok",
+            tool_result={"exit_code": 0, "stdout": "ok", "stderr": ""},
+        )
+        run_hook("loop-detection.py", event)
+
+        # State file must still be absent — no-op save must not create it
+        assert not state_path.exists(), (
+            f"State file {state_path} was written on a successful command "
+            "with no matching failures, but should have been skipped."
+        )
+
 
 class TestNonBashTool:
     def test_non_bash_tool_produces_no_output(self, run_hook, make_event):

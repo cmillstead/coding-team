@@ -10,7 +10,11 @@ Known rationalization: "We already reviewed everything in the audit loop" — au
 
 After all tasks are executed and verified:
 
-1. **Run full test suite** — independent verification required even if Phase 5 passed, because context may have been cleared between phases and additional commits may have landed (fresh output required)
+**Effective-tier check:** All Phase-6 gates evaluate the **EFFECTIVE tier** — the single end-of-execution recompute established before the QA reviewer (= max(planned, actual-diff), promote-only, per `phases/task-weight.md`). Phase 6 CONSUMES that tier; it does NOT recompute independently. Exception: if Phase 6 is entered standalone with no effective tier available, compute it the same way — SIZE = diff counts, RISK = re-apply the `phases/task-weight.md` semantic risk-signal checklist to what the diff DOES (NOT a grep).
+
+1. **Run full test suite:**
+   - **Effective Trivial:** 1 run total — if Phase 5 ran the full suite seconds earlier and no commits have landed since, skip the re-run. The matrix specifies "1 run total" for Trivial, not a mandatory re-run at every phase boundary.
+   - **Effective Small/Medium/Large:** Run now — independent verification required because context may have been cleared between phases and additional commits may have landed (fresh output required).
 2. **Run linter** — verify clean output
 3. **Determine base branch:**
    ```bash
@@ -58,19 +62,21 @@ Which option?
 
 ## Pre-Push Verification
 
-Before running `git push`, verify locally:
-
-1. Run the project's full test command — all tests must pass
-2. Run the project's lint command — must be clean
-3. Run type checking if the project uses it — must pass
-
-If ANY fail: dispatch an implementer via Agent tool to fix before pushing. Do NOT push hoping CI will be different from local results.
+- **Effective Trivial:** Skip the pre-push re-run — the matrix specifies "1 run total" for Trivial, and the Phase 6 entry run (above) already satisfies it. Proceed directly to `git push`.
+- **Effective Small/Medium/Large:** Before running `git push`, verify locally:
+  1. Run the project's full test command — all tests must pass
+  2. Run the project's lint command — must be clean
+  3. Run type checking if the project uses it — must pass
+  If ANY fail: dispatch an implementer via Agent tool to fix before pushing. Do NOT push hoping CI will be different from local results.
 
 ## CI Fix Protocol
 
 When CI fails, read `phases/ci-fix-protocol.md` and follow its instructions. Key rules: read full logs, classify before acting, NEVER fix infra/billing issues with code changes, paste verbatim errors to implementers. Max 3 code-fix attempts.
 
 ## Learning Loop (Completion Summary)
+
+- **Effective Trivial:** SKIP the completion summary. The matrix specifies "SKIP at Trivial" — do not produce a summary file.
+- **Effective Small/Medium/Large:** Produce the summary below.
 
 After all tasks, produce a summary that includes audit findings across all rounds:
 
@@ -108,6 +114,12 @@ Fill values from this session's actual data. Use `null` for values you can't det
 **Why:** This data feeds `/harness-retro` for evidence-based pipeline optimization. See Meta-Harness (arXiv:2603.28052) — raw execution data enables causal reasoning about harness failures. Summaries don't.
 
 ## Wiki Article Generation
+
+**Tier gate (evaluate BEFORE prompting the user):**
+- **Effective Trivial:** SKIP wiki generation entirely. Proceed to Decision Log.
+- **Effective Small:** SKIP wiki generation UNLESS the completion summary contains at least one recurring pattern. If the summary is empty or has no patterns, skip and proceed to Decision Log. The user may still opt in by saying "write wiki article."
+- **Effective Medium/Large:** Offer wiki generation below.
+- **Empty summary:** SKIP wiki generation regardless of tier — the wiki populates from the summary; an empty summary produces a meaningless article. The user may opt in explicitly.
 
 **Skip if user chose "Discard this work."**
 
@@ -188,6 +200,9 @@ Read the topic's `_index.md` using the Read tool. Find the `## Articles` table. 
 Known rationalization: "This project isn't wiki-worthy" — the user decides via the skip option, not the agent.
 
 ## Decision Log
+
+- **Effective Trivial:** SKIP the decision-log prompt. The matrix specifies "SKIP at Trivial." Proceed to Session Complete.
+- **Effective Small/Medium/Large:** Offer the decision log below.
 
 After producing the completion summary, check whether any architectural or design decisions were made during this feature that should be recorded for future sessions.
 

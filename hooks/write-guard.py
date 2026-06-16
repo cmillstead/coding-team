@@ -20,7 +20,7 @@ from pathlib import Path
 
 from _lib import event as _event
 from _lib import output as _output
-from _lib.active_plan import find_active_plan, AmbiguousActivePlanError
+from _lib.active_plan import find_active_plan_cached, AmbiguousActivePlanError
 
 
 # ---------------------------------------------------------------------------
@@ -170,7 +170,7 @@ def check_phase5(file_path: str) -> str | None:
     """
     overridden = _instruction_edit_overridden()
     try:
-        active = find_active_plan()
+        active = find_active_plan_cached()
     except AmbiguousActivePlanError as exc:
         if overridden:
             return None

@@ -28,7 +28,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 
 from _lib.event import parse_event, get_tool_input
 from _lib import output
-from _lib.active_plan import find_active_plan, AmbiguousActivePlanError
+from _lib.active_plan import find_active_plan_cached, AmbiguousActivePlanError
 
 
 _COMPLETION_SECTION_RE = re.compile(
@@ -85,7 +85,7 @@ def main() -> None:
         return
 
     try:
-        plan_path = find_active_plan()
+        plan_path = find_active_plan_cached()
     except AmbiguousActivePlanError as exc:
         output.block(
             f"BLOCKED: cannot determine active plan state — {exc}. "

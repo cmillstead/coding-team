@@ -2,7 +2,15 @@
 
 **Step 1.5: Check for orphan PRs.**
 
-Before plan discovery, check for open PRs with failing CI from this repo:
+Before plan discovery, check for open PRs with failing CI from this repo.
+
+**Age fast-lane (mirrors the Step 2.5 `HOURS_SINCE > 24` gate — same gold-standard pattern).** Orphan-PR cleanup targets STALE abandoned PRs; a PR from an active, recent session is not orphaned. Compute hours since the last commit on the current branch the same way Step 2.5 does:
+
+```bash
+HOURS_SINCE=$(( ($(date +%s) - $(git log -1 --format="%ct" HEAD)) / 3600 ))
+```
+
+If `HOURS_SINCE` is 24 or less, SKIP the orphan-PR scan (the work is active, not abandoned) and note: 'Recent session (<24h) — skipping orphan-PR check.' Proceed to Step 2. Only when `HOURS_SINCE` is greater than 24 do you run the scan below:
 
 ```bash
 gh pr list --state open --author @me --json number,title,statusCheckRollup 2>/dev/null | jq -r '.[] | select(.statusCheckRollup != null) | select([.statusCheckRollup[].conclusion // empty] | any(. == "FAILURE")) | "#\(.number): \(.title)"'

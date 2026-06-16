@@ -115,7 +115,31 @@ Read the codebase for context. Give a specific, actionable answer." \
 
 For follow-ups: `codex exec resume ${CODEX_SESSION_ID} "FOLLOW-UP QUESTION"`
 
-## Cross-Model Analysis Template
+## Mode 2: Challenge (adversarial)
+
+Codex actively tries to break your code via `codex exec` with an adversarial prompt. Tests for: crash inputs, state corruption sequences, race conditions, validation bypasses, untested edge cases. Use the adversarial prompt template under "Challenge: adversarial review" above.
+
+Present results grouped by severity. P1 findings are blockers. P2 must be addressed before proceeding.
+
+### Cleanup
+```bash
+rm -f /tmp/second-opinion-challenge-${REVIEW_ID}.txt
+```
+
+## Mode 3: Consult (open-ended)
+
+Ask Codex an open-ended question about the codebase via `codex exec`. Use the prompt template under "Consult: open-ended question" above. For follow-ups, use `codex exec resume ${CODEX_SESSION_ID}` to maintain conversation context.
+
+### Cleanup
+```bash
+rm -f /tmp/second-opinion-consult-${REVIEW_ID}.txt
+```
+
+## Cross-Model Analysis
+
+When both Claude and Codex have reviewed the same code, produce a cross-model analysis showing consensus findings, Codex-only findings, Claude-only findings, and disagreements.
+
+### Cross-Model Analysis Template
 
 When both Claude and Codex have reviewed the same code:
 
@@ -149,3 +173,23 @@ For tasks touching auth/payment/data-deletion, offer Codex adversarial challenge
 ### When to offer vs skip
 Offer when: plan touches 5+ files or new security surface, diff touches auth/payment/data-deletion/encryption, user requests it, or borderline audit findings.
 Skip when: mechanical changes, Codex CLI not installed, or user declined in this session. Do NOT offer on every task — it adds 30-60s per invocation.
+
+## Post-Review: Learning Capture
+
+After every Codex review that produces findings (any mode), before cleanup:
+
+1. Read `skills/second-opinion/codex-learnings.md`
+2. For each finding Codex raised: does it match an existing pattern (any existing P## / C## entry)?
+   - **Yes**: no action — pre-flight should have caught it. If it didn't, check why pre-flight missed it and tighten the pattern description.
+   - **No**: is this a one-off or a recurring class of mistake?
+     - **One-off** (project-specific logic error): skip
+     - **Recurring** (would apply to other plans/code): append to the appropriate table in `codex-learnings.md` with the next un-occupied ID (continue the existing P##/C## sequence — do NOT reuse a live ID). New entries are born tagged: add the `@tags:` token (category + `provable`/`reasoning-shape` + scope) in the same edit (see the capture footer in `codex-learnings.md`).
+3. Report: `Learning capture: added C15 (<name>)` or `Learning capture: no new patterns`
+
+## Model Selection
+
+Default: Codex CLI default model (no `-m` flag). User can override with `-m MODEL`:
+- `/second-opinion review o4-mini` — cheaper, faster
+- `/second-opinion challenge o3` — maximum reasoning for adversarial mode
+
+If default returns low-quality results, suggest retrying with a stronger model.
