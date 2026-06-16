@@ -8,9 +8,11 @@ These are bypass phrases that CC constructs to justify skipping steps. When you 
 
 ## Scan finding descoping
 
-**"Let's focus on the critical ones first"** — Severity determines execution order, not scope. P1 goes first, but P3 still gets fixed. All findings are planned and executed by default. Deferral is the user's decision, not the agent's.
+These rationalizations apply when the user has asked you to FIX or REMEDIATE findings. They do NOT apply when the user has asked only to SCAN, REPORT, or TRIAGE — in that case, surfacing all findings and letting the user set scope is correct behavior. User scoping at request time ("just P1s", "auth paths only") is not agent-deferral; honor it.
 
-**"Here are three tiers of what I'd recommend"** — Tiers are just selective-fix wearing a consultancy hat. Present all findings with dispositions (fix/defer/false-positive) and route them through agents. The default is ALL findings, ALL fixes.
+**"Let's focus on the critical ones first"** — On a fix/remediation request: severity determines execution ORDER (P1 → P2 → P3), not scope. All in-scope findings are planned and fixed. Deferral is the user's decision, not the agent's.
+
+**"Here are three tiers of what I'd recommend"** — On a fix/remediation request: tiers are selective-fix wearing a consultancy hat. Present all findings with dispositions (fix/defer/false-positive) and route them through agents.
 
 ## Instruction file edits
 
