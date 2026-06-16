@@ -70,7 +70,7 @@ Before starting work on a code task or when prior context would help, check avai
 ## Workflow Preferences
 
 - Commit style: `feat:`, `fix:`, `test:`, `docs:`
-- Don't summarize what you just did at the end of responses — I can read the diff
+- Don't summarize what you just did at the end of responses — I can read the diff. Exception: when a skill or pipeline phase REQUIRES a structured completion report (e.g., the implementer's DONE report, a phase-completion summary), produce it — the report is the deliverable, not a redundant recap.
 
 ## Context Management
 
@@ -103,7 +103,7 @@ When dispatching agents through `/coding-team`, use the least powerful model tha
 
 **Signals for escalation:**
 - Touches 1-2 files with a complete spec → `haiku`
-- Touches multiple files or needs judgment → `sonnet`
+- Touches 3+ files or needs judgment → `sonnet`
 - Requires design decisions or broad codebase understanding → `opus`
 - If a cheaper model fails or returns low-quality results, re-dispatch with the next tier up
 
@@ -139,20 +139,20 @@ If you find yourself reaching for `mock`, `patch`, `MagicMock`, `monkeypatch`, `
 - Changing public API contracts or interfaces
 - Deleting or moving files in shared directories
 - Changing CI/CD configuration
-- Any change that affects more than 3 modules
+- Any change that affects 4+ modules or 4+ files
 
 ### Never Do
-- NEVER commit secrets, tokens, API keys, or credentials
-- NEVER modify deployed migration files
-- NEVER skip or disable tests to make CI pass
-- NEVER force push to main or release branches
+- NEVER commit secrets, tokens, API keys, or credentials — instead, move the value to an env var or secret store and reference it.
+- NEVER modify deployed migration files — instead, create a new migration with up and down logic.
+- NEVER skip or disable tests to make CI pass — instead, fix the failing test or report the failure to the user with the error output.
+- NEVER force push to main or release branches — instead, open a PR; if history must change, ask the user first.
 - NEVER commit directly to main or master — always work on a feature branch and create a PR. If you find yourself on main, create a branch with `git checkout -b <descriptive-name>` before making any changes.
 - NEVER commit .env files or sensitive configuration
 - NEVER use `any` in TypeScript — use `unknown` if the type is genuinely unknown
 - NEVER swallow errors with empty catch blocks — at minimum, log them
 - NEVER introduce a new framework or library without explicit approval
 - NEVER claim work is done without running verification (tests, lint, typecheck)
-- NEVER retry the same failed approach more than 3 times — escalate instead
+- After 3 failed attempts at the same approach, STOP and report to the user: what you tried, the error output, and your hypothesis. Do NOT retry a 4th time.
 
 ## Proactive Skill Suggestions
 
