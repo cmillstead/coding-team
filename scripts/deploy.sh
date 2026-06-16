@@ -62,9 +62,10 @@ for f in "$REPO_ROOT"/agents/ct-*.md; do
     deploy "$f" "$CLAUDE_DIR/agents/$(basename "$f")"
 done
 
-# Rules: *.md
+# Rules: *.md (skip README.md — it is deploy meta-doc, not a behavioral rule)
 for f in "$REPO_ROOT"/rules/*.md; do
     [[ -f "$f" ]] || continue
+    [[ "$(basename "$f")" == "README.md" ]] && continue
     deploy "$f" "$CLAUDE_DIR/rules/$(basename "$f")"
 done
 

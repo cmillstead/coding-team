@@ -146,6 +146,29 @@ class TestDeploySymlinks:
             "deploy.sh must not modify an existing .gitignore"
         )
 
+    def test_readme_not_deployed_to_rules(self, tmp_path: Path):
+        """deploy.sh must NOT create a symlink for rules/README.md.
+
+        README.md is deploy meta-documentation, not a behavioral rule.
+        It must never appear in the deployed CLAUDE_DIR/rules/ directory.
+        """
+        claude_dir = tmp_path / "claude_dir"
+        claude_dir.mkdir()
+
+        # Dry-run: README.md must not appear in dry-run output
+        result = run_deploy(claude_dir, dry_run=True)
+        assert result.returncode == 0, f"dry-run deploy.sh failed:\n{result.stderr}"
+        assert "rules/README.md" not in result.stdout, (
+            f"dry-run must not mention rules/README.md, got:\n{result.stdout}"
+        )
+
+        # Real run: README.md must not be created
+        result = run_deploy(claude_dir)
+        assert result.returncode == 0, f"deploy.sh failed:\n{result.stderr}"
+        assert not (claude_dir / "rules" / "README.md").exists(), (
+            "deploy.sh must not create ~/.claude/rules/README.md"
+        )
+
     def test_dry_run_creates_no_files(self, tmp_path: Path):
         """--dry-run must not create any symlinks or files in CLAUDE_DIR."""
         claude_dir = tmp_path / "claude_dir"
