@@ -106,10 +106,12 @@ Recurring patterns are the signal — if the same finding type appears across mu
 After producing the completion summary, append a structured metrics line to `~/.claude/harness-metrics.jsonl` via Bash:
 
 ```bash
-echo '{"date":"YYYY-MM-DD","project":"<repo-name>","task":"<feature-slug>","phases_used":["design","plan","execute","audit","complete"],"agents_dispatched":{"builder":N,"reviewer":N,"qa":N,"harden":N,"simplify":N,"prompt":N},"audit_rounds":N,"audit_exit":"clean|low-only|cap","findings_total":N,"findings_fixed":N,"findings_deferred":N,"rework_iterations":N,"test_pass_first_try":true|false,"ci_pass_first_push":true|false,"second_opinion":"ran|skipped|unavailable","elapsed_phases":{"design":"Nm","plan":"Nm","execute":"Nm","audit":"Nm"}}' >> ~/.claude/harness-metrics.jsonl
+echo '{"date":"YYYY-MM-DD","project":"<repo-name>","task":"<feature-slug>","phases_used":["design","plan","execute","audit","complete"],"agents_dispatched":{"builder":N,"reviewer":N,"qa":N,"harden":N,"simplify":N,"prompt":N},"audit_rounds":N,"audit_exit":"clean|low-only|cap","findings_total":N,"findings_fixed":N,"findings_deferred":N,"rework_iterations":N,"test_pass_first_try":true|false,"ci_pass_first_push":true|false,"second_opinion":"ran|skipped|unavailable","second_opinion_outcome":"completed-with-changes|completed-no-changes|declined|n/a","elapsed_phases":{"design":"Nm","plan":"Nm","execute":"Nm","audit":"Nm"}}' >> ~/.claude/harness-metrics.jsonl
 ```
 
 Fill values from this session's actual data. Use `null` for values you can't determine. Do NOT fabricate — `null` is better than a guess.
+
+When `second_opinion` is `"ran"`, ALSO set `second_opinion_outcome` to the terminal state: `completed-with-changes` (fixes applied), `completed-no-changes` (no fixes needed), or `declined` (user stopped it). When `second_opinion` is `"skipped"` or `"unavailable"`, set `second_opinion_outcome` to `"n/a"` — the catch-all. Always emit `second_opinion_outcome`; never leave it absent, because an absent value reads downstream as "unknown".
 
 **Why:** This data feeds `/harness-retro` for evidence-based pipeline optimization. See Meta-Harness (arXiv:2603.28052) — raw execution data enables causal reasoning about harness failures. Summaries don't.
 
