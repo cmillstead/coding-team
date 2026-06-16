@@ -15,7 +15,7 @@ Use `/brainstorming` for business ideas, strategy, and non-code exploration.
 
 When invoked at the start of a conversation (or when the user asks for help with a code task), determine the right entry point:
 
-**Step 0: Detect available coordination tools.**
+**Step 0: Detect available coordination tools; classify task weight per `phases/task-weight.md` (RISK SIGNALS override — instruction-file / auth / migration / API / dep changes are Medium minimum); carry tier through all phases.**
 
 ```
 AGENT_TEAMS_AVAILABLE = false
@@ -121,7 +121,7 @@ Each phase reads its detail file on entry. Do not read ahead — load only the a
 **Input:** Approved spec from Phase 3 + project context.
 **Output:** Reviewed plan at `docs/plans/YYYY-MM-DD-<feature>.md`.
 **Detail:** Read `phases/planning.md`
-**Exit gate:** Plan passes automated review.
+**Exit gate:** Plan passes automated review. Plan Codex `review`: Trivial/Small: skip — quantified per gate matrix in `phases/task-weight.md`, not optional. Medium/Large: RUN (required).
 
 ### Phase 5: Execution
 **Purpose:** Task-by-task implementation with audit loops.
@@ -129,7 +129,7 @@ Each phase reads its detail file on entry. Do not read ahead — load only the a
 **Output:** Implemented, tested, audited code on feature branch.
 **Detail:** Read `phases/execution.md`
 **Exit gate (all 4 blocking — do NOT proceed to Phase 6 until complete):**
-1. Full-suite test + lint (fresh output, not per-task). 2. `ct-qa-reviewer` via Agent tool (skip only if 1 task AND ≤3 files). 3. Doc-drift scan (`phases/doc-drift-scan.md`). 4. Second-opinion gate (`phases/post-execution-review.md`) — offer if codex available, NEVER skip.
+1. Full-suite test + lint (fresh output, not per-task). 2. `ct-qa-reviewer` via Agent tool: Trivial (1 file, ≤20 lines, no risk signals per `phases/task-weight.md`): skip. Small/Medium/Large: RUN. 3. Doc-drift scan (`phases/doc-drift-scan.md`). 4. Post-exec Codex `review` (`phases/post-execution-review.md`): Trivial: skip. Small/Medium/Large: RUN (required).
 Known rationalization: "All tasks passed individually" — these 4 steps catch cross-task failures, dark features, doc drift, and cross-model blind spots.
 
 ### Phase 6: Completion

@@ -5,7 +5,13 @@ Main Claude presents the synthesized design doc. Get explicit approval. Revise i
 ## After User Approval
 
 1. Write spec to `docs/plans/YYYY-MM-DD-<feature>-design.md` (always in the **main repo root**, not a worktree)
-2. Dispatch spec-document-reviewer via Agent tool (model: sonnet, subagent_type: Explore). See `~/.claude/agents/ct-spec-doc-reviewer.md`)
+2. **Spec-doc reviewer tier gate (PLANNED tier — this phase runs pre-diff, before any
+   implementation exists, so no effective-tier recompute is available yet):**
+   - Trivial/Small SKIP the spec-doc reviewer. Small inlines a design note instead of a
+     heavyweight spec; no separate reviewer dispatch is needed.
+   - Medium/Large RUN it: dispatch spec-document-reviewer via Agent tool (model: sonnet,
+     subagent_type: Explore). See `~/.claude/agents/ct-spec-doc-reviewer.md`. Gate matrix:
+     `phases/task-weight.md`.
 3. If Issues Found: fix, re-dispatch, repeat (max 3 iterations, then surface to user)
 4. If Approved: present spec to user for final review before proceeding
 

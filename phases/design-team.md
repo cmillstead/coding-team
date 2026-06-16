@@ -1,5 +1,9 @@
 # Phase 2: Design Team
 
+**Tier gate (see `phases/task-weight.md` gate matrix):**
+- **Trivial/Small task: SKIP Phase 2 entirely** — per the ladder, not per mood. Do NOT spawn a design team, Team Leader, or specialist workers. Instead, inline a one-paragraph design note directly in the plan (covering approach, key decision, risk if any) and proceed to Phase 4 (planning).
+- **Medium/Large task: RUN the full Phase 2 design team below.**
+
 **If AGENT_TEAMS_AVAILABLE = true:**
 
 1. Create team:
@@ -76,9 +80,11 @@ If no skills match a worker's role + the task's categories, omit the block for t
 
 ## Team Sizing Heuristics
 
+**Applies only when Phase 2 runs (Medium/Large tasks).** Trivial/Small tasks SKIP Phase 2 — the floor of 2 workers does NOT apply to them.
+
 | Complexity | Design Workers | Signals |
 |---|---|---|
-| Simple (1-2 files) | 2 | Isolated bug, small feature, single concern |
+| Simple (1-2 files) | 2 (minimum floor) | Isolated bug, small feature, single concern |
 | Moderate (3-10 files) | 3-4 | Multi-file changes, 2-3 concerns |
 | Complex (10-30 files) | 4-6 | Cross-cutting concerns, large features |
 | Very complex (30+ files) | 6-9 | Full-stack features, systemic changes |
@@ -123,7 +129,7 @@ coding-team reads `~/.claude/skills/skill-taxonomy.yml` to map skills to workers
 - DISCOVERY: **Yes** — analyzing unknown codebase, scope of findings unknown upfront
 - COMPLEXITY: **Yes** — design decisions, architectural trade-offs
 
-Design work almost always routes to agent teams when available. The Team Leader is a teammate, specialists are teammates, cross-review uses direct messaging.
+**Medium/Large tasks ALWAYS route to agent teams when available** (Trivial/Small SKIP Phase 2 — see tier gate at top). The Team Leader is a teammate, specialists are teammates, cross-review uses direct messaging.
 
 When AGENT_TEAMS_AVAILABLE = false: all design work uses subagents via the Agent tool.
 

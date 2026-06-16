@@ -1,5 +1,9 @@
 ## Memory Nudge
 
+**Tier gate:** If the effective tier is Trivial, SKIP all three analysis passes below. A Trivial task produces no audit rounds, no recurring patterns, and no systemic decisions to capture — running the three passes produces noise. The user may opt in by saying "run memory nudge" or "save session learnings."
+
+If the effective tier is Small/Medium/Large: run all three passes below.
+
 After the decision log (whether the user provided decisions or skipped), extract and persist learnings from this session. Three outputs: project-local facts, cross-project patterns, and a vault episode.
 
 ### Step 1: Extract codebase facts

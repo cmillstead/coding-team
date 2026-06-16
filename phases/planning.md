@@ -185,8 +185,13 @@ After writing the plan:
 
 1. Dispatch plan-document-reviewer agent (see `~/.claude/agents/ct-plan-doc-reviewer.md`)
 2. If Issues Found: fix, re-dispatch (max 3 iterations, then surface to user)
-3. **Cross-model tiebreaker (iteration 2+):** If the reviewer found issues on the second pass AND `command -v codex >/dev/null 2>&1` succeeds, offer: "Plan reviewer and planner disagree after 2 rounds. Run `/second-opinion review` as tiebreaker? (Y/n)". If yes, run it — Codex findings override when they align with the reviewer.
-4. If Approved: save plan and proceed
+3. **Mandatory second-opinion gate — tier-conditional (see `phases/task-weight.md` gate matrix):**
+   - **Trivial/Small plan: SKIP the plan Codex `review` gate** — per the ladder, not per mood. Do NOT run `command -v codex` or offer the second-opinion at this tier.
+   - **Medium/Large plan: REQUIRE the plan Codex `review` gate.** After the plan-doc-reviewer approves, check `command -v codex >/dev/null 2>&1`. If Codex is available, run `/second-opinion review` before saving. If Codex is not available, log "Codex unavailable — plan Codex gate skipped" and proceed.
+4. **Cross-model tiebreaker (iteration 2+) — tier-conditional:**
+   - **Trivial/Small plan: SKIP the tiebreaker** — per the ladder. A Small plan hitting 2 reviewer rounds does NOT trigger serial external Codex calls.
+   - **Medium/Large plan:** If the reviewer found issues on the second pass AND `command -v codex >/dev/null 2>&1` succeeds, offer: "Plan reviewer and planner disagree after 2 rounds. Run `/second-opinion review` as tiebreaker? (Y/n)". If yes, run it — Codex findings override when they align with the reviewer.
+5. If Approved: save plan and proceed
 
 Save plan to: `docs/plans/YYYY-MM-DD-<feature>.md` (always in the **main repo root**, not a worktree)
 

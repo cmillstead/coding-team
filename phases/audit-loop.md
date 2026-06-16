@@ -62,4 +62,4 @@ Exit when ANY are true:
 1. **Clean audit** — all auditors report zero findings
 2. **Low-only round** — all remaining findings are low severity, fix inline
 3. **Loop cap reached** — 3 audit rounds completed. Fix remaining critical/high inline, log unresolved medium/low in completion summary.
-   **Cross-model escalation:** If medium+ findings remain unresolved AND `command -v codex >/dev/null 2>&1` succeeds, offer: "Audit loop capped with N unresolved findings. Run `/second-opinion challenge` on the diff for a cross-model perspective? (Y/n)". If yes, run it and triage any new findings. If no or Codex unavailable, proceed.
+   **Cross-model escalation:** If medium+ findings remain unresolved AND `command -v codex >/dev/null 2>&1` succeeds, offer a Codex `challenge` on the diff. See `phases/task-weight.md` for the canonical Codex challenge principle — `challenge` is always OFFERED, never REQUIRED. If yes, run it and triage any new findings. If no or Codex unavailable, proceed.

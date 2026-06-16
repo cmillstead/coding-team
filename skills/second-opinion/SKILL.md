@@ -44,25 +44,57 @@ echo "Repo: $(basename $REPO_ROOT) at $REPO_ROOT"
 
 Confirm the repo name matches the project you're working on. If it doesn't, `cd` to the correct repo root before proceeding. All subsequent `codex` commands MUST run from `$REPO_ROOT`.
 
-### Step 1: Pattern check
+### Step 1: Pattern check — scope by applicability
 
-1. Read `skills/second-opinion/codex-learnings.md`
-2. Check the plan or diff against EVERY anti-pattern in the checklist (all P## and C## entries)
-3. Count the total items in the checklist file (highest P## + highest C##). Report ALL items in a coverage line — every ID must appear exactly once in one of three buckets:
-   `Pre-flight: ✓(N) C5 C8 C9 | FIXED(N) P1 P10 | N/A(N) C1 C2 C3 C4 C6 C7 ...`
-   `Verify: ✓(N) + FIXED(N) + N/A(N) = TOTAL. Highest P=P##, highest C=C##, so total = ## + ## = TOTAL.`
-   - **✓** = checked, no issue found (show detail table row)
-   - **FIXED** = violation found and fixed before dispatch (show detail table row)
-   - **N/A(reason)** = not applicable — must include a one-word reason per item (e.g., `N/A(no-paths) C1 C2`, `N/A(no-SQL) C11 C12`). Bare N/A without a reason is not valid — it's a skip, not a classification.
-   The per-bucket counts must be derived by counting the IDs listed in that bucket, not asserted. Show the arithmetic: highest P + highest C = total, then count each bucket's IDs to verify. If the sum doesn't match, you miscounted — recount the IDs in each bucket.
-   Known rationalization: reporting a round number that "feels right" instead of actually counting the IDs in each bucket. The N/A bucket is where miscounts hide — count it explicitly.
-4. Show a detail table ONLY for ✓ and FIXED items (not N/A — the coverage line proves you considered them)
-5. For each FIXED item: fix it in the plan/diff before proceeding
-6. Report: `Pre-flight fixed: P1 (phantom field X), P10 (wrong column name Y)` or `Pre-flight: clean`
+You are the quality gate. Read `skills/second-opinion/codex-learnings.md` IN FULL (Read tool) — it
+carries the tag vocabulary, grep battery, audit-line format, and banned rationalizations this step
+depends on. Signal tokens you emit MUST come from the closed category enum there — off-list ⇒ unread.
 
-Only dispatch to Codex AFTER the pre-flight is clean. This catches recurring issues before round 1 — Codex should find novel problems, not the same 20 patterns we already know about.
+Run this engine ONCE per change:
 
-Known rationalization: "I'll check the patterns during the review" — NO. Pre-flight runs BEFORE dispatch, not during. The whole point is to fix issues before Codex wastes a round on them.
+1. **Read** `codex-learnings.md` (tags + battery + audit format + rationalizations).
+2. **Derive signals once.** Set `mode` = `diff` (a diff) or `plan` (plan prose). For each `provable`
+   category, run its grep battery over the diff hunks (DIFF) or plan prose (PLAN) with the Bash tool.
+   A signal FIRES if ANY pattern matches; record it with evidence. Batteries are broad on purpose —
+   an over-match costs a cheap `✓`; an under-match risks a silent skip.
+3. **Classify every live entry into exactly TWO buckets** (enumerate the live file — do NOT assume a
+   fixed count). An entry is **dismissed** for EXACTLY ONE of two reasons; everything else is
+   **applicable**:
+   - **dismissed(scope-mismatch)** — the entry's `scope:` EXCLUDES the current `mode` (`scope:diff`
+     in a `plan` review, or `scope:plan` in a `diff` review). Record `N/A(scope-mismatch:<entry-scope>
+     vs mode:<plan|diff>)`. `scope:both` is NEVER scope-dismissed. Scope is checked FIRST.
+   - **dismissed(no-signal)** — in scope (scope matches mode or `both`) AND a `provable` category
+     whose battery CONFIRMED its signal absent. Record `N/A(no-signal:<cat>, evidence:<grep>)`.
+   - **applicable (deep-checked)** — EVERYTHING ELSE: in-scope fired signal, `reasoning-shape`,
+     `floor`, untagged/newly-appended, or UNKNOWN/ambiguous derivation.
+4. **Floor-default (KEYSTONE):** for an IN-SCOPE entry, deep-check UNLESS it has a valid tag AND its
+   non-applicability is grep-provable AND the grep confirmed absence. Untagged/`reasoning-shape`/
+   UNKNOWN ⇒ floor — the safe direction is the default. Scope-mismatch precedes this: a `floor` entry
+   in matching scope is ALWAYS applicable, but a `scope:plan` floor (P1–P4) is correctly
+   scope-dismissed in a pure `diff` review (a diff names no plan-prose symbols).
+5. **Deep-check each applicable entry** via its "Check before dispatch" steps. Pull in any LIVE
+   "Pairs with …" cross-referenced entry (skip a ref to a non-live ID) (G-xref). For
+   `reasoning-shape`, reading-to-rule-out IS the deep-check — record `✓`, never a dismissal.
+6. **Fix every FIXED item** in the plan/diff before dispatch.
+7. **Emit the audit line** in the `## Audit-line format` shape from codex-learnings.md. Every live
+   entry appears exactly once across `applicable` + `dismissed`; `N + M` MUST equal the live count
+   (computed, not hardcoded). If it doesn't, an entry was dropped — recount and re-emit.
+
+**Escalate to a FULL check (deep-check the entire live set)** when ANY holds (G-empty/G-escalate):
+the applicable set is empty but the change has ≥1 non-comment code line; the diff mixes languages; or
+signal derivation is ambiguous. A markdown-heavy diff NEVER dismisses its code hunks — derive from
+the code hunks independently (G-mixed).
+
+**Plan-only reviews** run on PROSE (no diff): the `plan`+`both` set applies, P1–P4 always floor, and
+`reasoning-shape` plan entries (P30/P32/P33) are ALWAYS applicable (floor) — reading the prose to
+rule one out is its deep-check (recorded `✓`), never a dismissal. The efficiency win is primarily on
+DIFF reviews.
+
+Known rationalization: "bulk-dismiss this whole category" — BANNED. Every entry is accounted for BY
+ID; dismiss an individual `provable` entry only with a confirmed-absent grep cited as evidence. See
+the full banned-rationalizations block in codex-learnings.md.
+
+Only dispatch to Codex AFTER the pre-flight is clean — Codex should find novel problems, not the recurring patterns codex-learnings.md already encodes.
 
 ---
 
@@ -72,7 +104,16 @@ Independent review of a plan or diff. Use `codex review --base main` for diffs, 
 
 Always capture output: `2>&1 | tee /tmp/second-opinion-review-${REVIEW_ID}.txt`
 
-For plan reviews: if Codex returns VERDICT: REVISE, iterate up to 5 rounds using `codex exec resume`. Address each issue with real improvements between rounds.
+For plan reviews AND diff/code-fix re-reviews, iterate up to 5 rounds each. For plan reviews, use `codex exec resume`; address each issue with real improvements between rounds. The inter-round verification gate below applies before EVERY re-dispatch on BOTH paths. See reference.md for the iterative-revision protocol (both loops) and the verification gate.
+
+### Inter-round verification gate — MANDATORY
+
+You are the quality gate. After you apply fixes in response to Codex findings — for a plan revision OR a diff/code fix — confirm verification is GREEN via the Bash tool before EVERY re-dispatch to Codex, on every round. Establish a baseline FIRST: run verification BEFORE applying this round's fixes so you can tell a NEW failure from a pre-existing one. If a NEW failure appears (not in the baseline), it is a regression you introduced — fix it locally and re-run before re-dispatching; do NOT spend a Codex round on a regression you can catch locally. If verification stays red ONLY due to pre-existing baseline failures (no new failures from your fixes), do NOT loop indefinitely — STATE which failures are pre-existing vs new and get USER APPROVAL before re-dispatching. If the project has NO runnable test/lint/typecheck command, STATE that and proceed (do NOT silently skip, do NOT block). See reference.md → "#### Verification gate (used by both revision loops)" for command discovery and the full 7-step protocol.
+
+Known rationalizations — these are bypasses, not exemptions:
+- "I'll verify at the end" — NO. The gate runs before EACH re-dispatch, not once at the end.
+- "The fix was small / a one-liner" — NO. Size does not exempt the gate; it runs every round regardless of fix size.
+- "The next Codex round will catch it anyway" — NO. Spending a Codex round on a locally-catchable regression is exactly the waste this gate prevents. Fix it locally first.
 
 ### Post-dispatch: Validate findings are in-repo
 
@@ -111,57 +152,31 @@ rm -f /tmp/second-opinion-review-${REVIEW_ID}.txt
 
 ## Mode 2: Challenge (adversarial)
 
-Codex actively tries to break your code via `codex exec` with an adversarial prompt. Tests for: crash inputs, state corruption sequences, race conditions, validation bypasses, untested edge cases.
-
-See reference.md for the full adversarial prompt template.
-
-Present results grouped by severity. P1 findings are blockers. P2 must be addressed before proceeding.
-
-### Cleanup
-```bash
-rm -f /tmp/second-opinion-challenge-${REVIEW_ID}.txt
-```
+Adversarial mode — see reference.md → Mode 2: Challenge.
 
 ---
 
 ## Mode 3: Consult (open-ended)
 
-Ask Codex an open-ended question about the codebase via `codex exec`. For follow-ups, use `codex exec resume ${CODEX_SESSION_ID}` to maintain conversation context.
-
-### Cleanup
-```bash
-rm -f /tmp/second-opinion-consult-${REVIEW_ID}.txt
-```
+Open-ended consultation — see reference.md → Mode 3: Consult.
 
 ---
 
 ## Model Selection
 
-Default: Codex CLI default model (no `-m` flag). User can override with `-m MODEL`:
-- `/second-opinion review o4-mini` — cheaper, faster
-- `/second-opinion challenge o3` — maximum reasoning for adversarial mode
-
-If default returns low-quality results, suggest retrying with a stronger model.
+See reference.md → Model Selection.
 
 ---
 
 ## Cross-Model Analysis
 
-When both Claude and Codex have reviewed the same code, produce a cross-model analysis showing consensus findings, Codex-only findings, Claude-only findings, and disagreements. See reference.md for the full template.
+See reference.md → Cross-Model Analysis.
 
 ---
 
 ## Post-Review: Learning Capture
 
-After every Codex review that produces findings (any mode), before cleanup:
-
-1. Read `skills/second-opinion/codex-learnings.md`
-2. For each finding Codex raised: does it match an existing pattern (any existing P## / C## entry)?
-   - **Yes**: no action — pre-flight should have caught it. If it didn't, check why pre-flight missed it and tighten the pattern description.
-   - **No**: is this a one-off or a recurring class of mistake?
-     - **One-off** (project-specific logic error): skip
-     - **Recurring** (would apply to other plans/code): append to the appropriate table in `codex-learnings.md` with the next ID (P16, C15, etc.)
-3. Report: `Learning capture: added C15 (<name>)` or `Learning capture: no new patterns`
+See reference.md → Post-Review: Learning Capture.
 
 ---
 
@@ -171,6 +186,7 @@ After every Codex review that produces findings (any mode), before cleanup:
 - Always use session-scoped temp file paths (UUID prefix) to prevent conflicts
 - Capture output with `2>&1 | tee /tmp/second-opinion-*.txt` — there is no `-o` flag
 - Reuse Codex session ID for multi-round reviews via `codex exec resume SESSION_ID`
+- **Verification gate every round:** after applying fixes in response to Codex findings, confirm verification (test/lint/typecheck, via the Bash tool) is GREEN before EACH re-dispatch to Codex — every round, regardless of fix size. Baseline first, then distinguish a NEW failure (fix locally) from a pre-existing one (state it, get user approval — do NOT loop). No runnable command → state and proceed. Applies to ANY re-dispatch after applying fixes (plan-revision, diff/code-fix, or re-challenge). See Mode 1 and reference.md.
 - If a Codex revision contradicts user requirements, skip that revision and note it
 - Clean up temp files after every invocation
 - Never present Codex's output as Claude's own analysis — always attribute clearly
