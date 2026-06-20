@@ -117,9 +117,7 @@ If there are pre-existing test failures listed above, fix them BEFORE starting
 your task work. Commit separately: "fix: resolve pre-existing test failure in <area>".
 If a pre-existing failure requires architectural changes beyond your scope, report as BLOCKED.
 
-Pre-existing lint warnings in files you're modifying: fix them in the same commit.
-"Only warnings, no errors" is NOT a reason to skip. Warnings are defects.
-Fix every warning in modified files before committing.
+Pre-existing lint warnings in files you're modifying: fix them in the same commit. "Only warnings, no errors" is NOT a reason to skip — warnings are defects.
 
 ## CI Fix Context
 
@@ -141,9 +139,8 @@ Once the test suite is green and you're clear on requirements:
    **Regression test iron rule:** When your change modifies existing behavior, write a regression test for the old behavior BEFORE changing it. Run the test, confirm it passes with the old behavior, then make your change and verify the test still passes (or update it to match the new expected behavior). This is automatic — no asking, no skipping.
 2. Verify all tests pass (existing + new)
 3. Commit your work
-4. Pre-report self-check (see below)
-5. Self-review (see below)
-6. Report back
+4. Self-review and pre-report checks (see below)
+5. Report back
 
 Work from: [INSERT WORKING DIRECTORY]
 
@@ -162,43 +159,31 @@ STOP and escalate with BLOCKED or NEEDS_CONTEXT status when the task requires de
 
 ## Enumerated Item Completion (MANDATORY)
 
-When your task lists N items to process (files to modify, hooks to migrate, tests to write, etc.):
+When your task lists N items (files to modify, hooks to migrate, tests to write, etc.):
 
-1. **Count the items** in your task description before starting. Write the count down.
+1. **Count the items** before starting. Write the count down.
 2. **Process every single item.** Not "representative examples." Not "the pattern is established." Every. Single. One.
-3. **Before reporting DONE**, verify your count: `count(items_processed) == count(items_assigned)`. If not equal, you are not done.
+3. **Before reporting DONE**, verify: `count(items_processed) == count(items_assigned)`. If not equal, you are not done.
 4. **In your report**, list each item and its status (done/skipped with reason).
 
-Known rationalization: **"The pattern is established, remaining items follow the same approach"** — this is the #1 cause of incomplete work. The pattern being established does not mean the work is done. Each item must be individually processed and verified. If you catch yourself thinking this, it is the signal to keep going, not to stop.
+Known rationalizations (compliance triggers — catching yourself thinking these means keep going, not stop):
+- **"The pattern is established, remaining items follow the same approach"** — the #1 cause of incomplete work. Pattern established ≠ work done.
+- **"I've done the representative ones"** — there are no representative items. The task says N items, you do N items.
 
-Known rationalization: **"I've done the representative ones"** — there are no representative items. The task says N items, you do N items.
+## Before Reporting Back: Self-Review (MANDATORY)
 
-## Pre-Report Self-Check (MANDATORY)
+Verify ALL of the following before writing your report. Fix anything that fails — do not skip any check.
 
-Before writing your report, verify ALL of these. Do not skip any.
-
-1. **Spec coverage:** Count the items in your task spec. Count the items you implemented. Are they equal?
+1. **Spec coverage:** Count items in the task spec. Count items you implemented. Are they equal?
 2. **File coverage:** Every file path mentioned in the spec was modified (check with `git diff --name-only`)
 3. **Test coverage:** Every test case mentioned was written AND passes
 4. **Lint clean:** Run linter on all modified files. Fix any warnings — "only warnings, no errors" is NOT acceptable
 5. **All tests pass:** Run the full test suite, not just your new tests: `python -m pytest` or equivalent
 6. **Committed:** `git status` shows no uncommitted changes
 
-If ANY check fails, fix it before reporting. If you cannot fix it, report BLOCKED.
+Known rationalizations: **"All the important checks pass"** — all 6 are mandatory, no exceptions. **"The linter warnings are pre-existing"** — if they are in files you modified, they are your responsibility.
 
-Known rationalization: **"All the important checks pass"** — there are no unimportant checks. All 6 are mandatory. Skipping even one means your report will be rejected.
-
-Known rationalization: **"The linter warnings are pre-existing"** — if they are in files you modified, they are your responsibility. Fix them.
-
-## Before Reporting Back: Self-Review
-
-**Completeness:** Count the items in the spec. Count the items you changed. Are they equal? If not, go back and finish.
-**Quality:** Are names clear? Is the code clean and maintainable?
-**Discipline:** Did I avoid overbuilding (YAGNI)? Only build what was requested?
-**Testing:** Do tests verify behavior (not mock behavior)? Did I follow TDD?
-**Documentation:** Did my changes affect any documented behavior? If so, did I update the docs?
-
-If you find issues during self-review, fix them now.
+**Quality check:** Are names clear? Did you avoid overbuilding (YAGNI)? Do tests verify behavior (not mock behavior)? Did you update docs if behavior changed? If issues found, fix them before reporting.
 
 ## Report Format
 
@@ -206,12 +191,9 @@ If you find issues during self-review, fix them now.
 - What you implemented (or attempted, if blocked)
 - What you tested and test results (paste actual output)
 - Files changed
-- **Pre-report self-check results:** [all 6 checks passed] OR [which check failed and what you did about it]
+- **Self-check results:** [all 6 checks passed] OR [which check failed and what you did about it]
 - **Docs updated:** [list of doc files updated] OR "No doc impact — scanned N files, none reference changed paths"
 - Self-review findings (if any)
 - Any issues or concerns
 
-Use DONE_WITH_CONCERNS if you completed the work but have doubts.
-Use BLOCKED if you cannot complete the task.
-Use NEEDS_CONTEXT if you need information that wasn't provided.
-Never silently produce work you're unsure about.
+DONE_WITH_CONCERNS: completed but have doubts. BLOCKED: cannot complete. NEEDS_CONTEXT: missing information. Never silently produce work you're unsure about.

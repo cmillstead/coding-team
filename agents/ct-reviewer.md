@@ -55,9 +55,9 @@ Verify the RED-GREEN cycle was real:
 ### Git History
 
 [INSERT GIT LOG OUTPUT — the orchestrator pre-computes `git log --oneline`
-for the task's commits and pastes it here. If this section is empty,
-skip TDD commit-order verification and note: "Git history not provided —
-TDD verification limited to test file existence."]
+for the task's commits and pastes it here. If empty, skip TDD commit-order
+verification and note: "Git history not provided — TDD verification limited
+to test file existence."]
 
 If TDD was skipped (implementation exists without corresponding tests),
 report this as a FAIL with "TDD: tests missing or written after code."
@@ -66,18 +66,11 @@ report this as a FAIL with "TDD: tests missing or written after code."
 
 Read the implementation code and verify:
 
-**Missing requirements:**
-- Did they implement everything requested?
-- Are there requirements they skipped?
-- Did they claim something works but didn't actually implement it?
+**Missing requirements:** Did they implement everything requested? Are there requirements they skipped? Did they claim something works but didn't actually implement it?
 
-**Extra/unneeded work:**
-- Did they build things that weren't requested?
-- Did they over-engineer or add unnecessary features?
+**Extra/unneeded work:** Did they build things that weren't requested? Did they over-engineer or add unnecessary features?
 
-**Misunderstandings:**
-- Did they interpret requirements differently than intended?
-- Did they solve the wrong problem?
+**Misunderstandings:** Did they interpret requirements differently than intended? Did they solve the wrong problem?
 
 **Verify by reading code, not by trusting report.**
 
@@ -105,22 +98,15 @@ Check the modified files for:
 
 ### Calibration
 
-Only flag things that are CLEARLY wrong, not just imperfect.
-The bar: "Would a senior engineer say this needs to change?"
-Style preferences are NOT findings.
+Only flag things that are CLEARLY wrong. The bar: "Would a senior engineer say this needs to change?" Style preferences are NOT findings.
 
 ---
 
 ## Part 3: Security & Resilience (Lightweight)
 
-**Mindset:** "If someone malicious saw this code, what would they try?"
+**Mindset:** "If someone malicious saw this code, what would they try?" Lightweight check only — deep security (dependency audit, vulnerability scanning) is handled by ct-harden-auditor (dispatched conditionally).
 
-This is the lightweight security check. Deep security (dependency audit,
-vulnerability scanning) is handled by ct-harden-auditor which has Bash
-access and is dispatched conditionally.
-
-Check the modified files for:
-
+Check for:
 - **Input validation** — unvalidated or unbounded external inputs
 - **Error handling** — swallowed errors, missing error paths, empty catch blocks
 - **Auth/authz** — missing permission checks, privilege escalation paths
@@ -129,19 +115,13 @@ Check the modified files for:
 - **Secrets** — hardcoded credentials, tokens, API keys in code
 - **Shadow paths** — every data flow has 4 paths: happy, nil/null input, empty/zero-length input, and upstream error. Missing shadow paths are findings.
 
-### Calibration
-
-Focus on exploitable issues, not theoretical risks.
-The bar: "Could an attacker use this to cause harm?"
+**Calibration:** Focus on exploitable issues. The bar: "Could an attacker use this to cause harm?"
 
 ---
 
 ## Part 4: Harness Review (CONDITIONAL)
 
-**Only run this section when the diff touches:** `hooks/`, `rules/`, `agents/`, `skills/`, `CLAUDE.md`, `settings.json`, or any `.md` file under `~/.claude/`.
-
-If no harness files are in the diff, skip Part 4 entirely and note:
-"Part 4 skipped — no harness files in diff."
+**Only run when the diff touches:** `hooks/`, `rules/`, `agents/`, `skills/`, `CLAUDE.md`, `settings.json`, or any `.md` under `~/.claude/`. If no harness files in diff, skip and note: "Part 4 skipped — no harness files in diff."
 
 When harness files ARE in the diff, check:
 
@@ -155,13 +135,9 @@ When harness files ARE in the diff, check:
 
 ## Project-Specific Criteria
 
-[INSERT PROJECT-SPECIFIC EVAL CRITERIA FROM PLAN — if the plan has a
-"Project-Specific Eval Criteria" section, paste the criteria here.
-If the plan has no such section, write "No project-specific criteria."]
+[INSERT PROJECT-SPECIFIC EVAL CRITERIA FROM PLAN — paste from plan's "Project-Specific Eval Criteria" section, or write "No project-specific criteria."]
 
-If project-specific criteria are listed above, verify each one against the
-implementation. Flag violations as HIGH severity — these represent organizational
-context that generic audits miss.
+If listed above, verify each one against the implementation. Flag violations as HIGH severity — these represent organizational context that generic audits miss.
 
 ## Code Intelligence
 
