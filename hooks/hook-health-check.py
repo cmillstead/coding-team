@@ -108,6 +108,9 @@ def get_external_hook_paths() -> list[Path]:
     seen = set()
     external_paths = []
 
+    # Interpreters whose second token is expected to be a script file path.
+    _SCRIPT_INTERPRETERS = {"python", "python3", "bash", "sh", "node"}
+
     for event_type in ("SessionStart", "PreToolUse", "PostToolUse"):
         for matcher_block in hooks_config.get(event_type, []):
             for hook_entry in matcher_block.get("hooks", []):
@@ -119,16 +122,33 @@ def get_external_hook_paths() -> list[Path]:
                 parts = command.split()
                 if len(parts) < 2:
                     continue
-                # The file path is typically the last argument
+
+                # F2 fix: only treat a token as a hook file path when the interpreter
+                # basename is a known script runner AND the candidate token looks like
+                # a path (contains "/" or ends in ".py"/".sh"). Commands like
+                # "rtk hook claude" do not meet either criterion and are skipped.
+                interpreter = Path(parts[0]).name
+                if interpreter not in _SCRIPT_INTERPRETERS:
+                    continue
                 file_str = parts[-1]
-                # Expand ~ to home directory
-                file_path = Path(file_str).expanduser().resolve()
-                # Skip paths inside HOOKS_DIR (already checked by main loop)
+                if "/" not in file_str and not (
+                    file_str.endswith(".py") or file_str.endswith(".sh")
+                ):
+                    continue
+
+                # F3 fix: use the expanduser()'d (but NOT resolve()'d) path for the
+                # HOOKS_DIR membership check. This keeps symlinks written as
+                # ~/.claude/hooks/... classified as INTERNAL even when their resolved
+                # targets live outside HOOKS_DIR (e.g. in skills/coding-team/hooks/).
+                expanded_path = Path(file_str).expanduser()
                 try:
-                    file_path.relative_to(HOOKS_DIR.resolve())
+                    expanded_path.relative_to(HOOKS_DIR)
                     continue  # Inside HOOKS_DIR, skip
                 except ValueError:
                     pass  # Outside HOOKS_DIR, include
+
+                # Resolve only after the membership check (for dedup and existence checks).
+                file_path = expanded_path.resolve()
                 if file_path not in seen:
                     seen.add(file_path)
                     external_paths.append(file_path)

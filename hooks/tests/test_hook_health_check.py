@@ -167,6 +167,124 @@ class TestGetExternalHookPaths:
         finally:
             hhc.SETTINGS_PATH = original
 
+    def test_rtk_hook_command_not_treated_as_file_path(self, hhc, tmp_path):
+        """F2: 'rtk hook claude' must NOT produce a 'claude' path or file-not-found.
+
+        The command 'rtk hook claude' has parts[-1]=='claude' which is not a hook
+        file path. The function must ignore commands where the interpreter is not a
+        known script runner (python/python3/bash/sh/node) AND the last token does not
+        look like a file path (no '/' and no .py/.sh extension).
+        """
+        settings = {
+            "hooks": {
+                "PreToolUse": [
+                    {
+                        "matcher": ".*",
+                        "hooks": [
+                            {"type": "command", "command": "rtk hook claude"}
+                        ]
+                    }
+                ]
+            }
+        }
+        settings_file = tmp_path / "settings.json"
+        settings_file.write_text(json.dumps(settings))
+        original = hhc.SETTINGS_PATH
+        hhc.SETTINGS_PATH = settings_file
+        try:
+            paths = hhc.get_external_hook_paths()
+            path_strs = [str(p) for p in paths]
+            # No path whose basename is "claude" should appear
+            assert not any(p.endswith("/claude") or p == "claude" for p in path_strs), (
+                f"'claude' was incorrectly treated as a hook file path: {path_strs}"
+            )
+            # The result must be empty — there are no real hook file paths here
+            assert paths == [], f"Expected empty list, got: {paths}"
+        finally:
+            hhc.SETTINGS_PATH = original
+
+    def test_symlinked_hook_in_hooks_dir_is_internal(self, hhc, tmp_path):
+        """F3: ~/.claude/hooks/hook-health-check.py (a symlink) must be classified INTERNAL.
+
+        The command 'python3 ~/.claude/hooks/hook-health-check.py' refers to a path
+        INSIDE HOOKS_DIR even though the file is a symlink to a target in skills/.
+        The check must use the expanduser()'d path (not resolve()'d) to classify it,
+        so the symlink is correctly seen as inside HOOKS_DIR and NOT returned as external.
+        """
+        # Create a real hooks dir and a symlink inside it pointing outside
+        hooks_dir_real = tmp_path / "hooks"
+        hooks_dir_real.mkdir()
+        target_dir = tmp_path / "skills" / "coding-team" / "hooks"
+        target_dir.mkdir(parents=True)
+        target_script = target_dir / "hook-health-check.py"
+        target_script.write_text("# real source\n")
+
+        # Symlink: hooks_dir_real/hook-health-check.py -> ../../skills/coding-team/hooks/hook-health-check.py
+        symlink_path = hooks_dir_real / "hook-health-check.py"
+        symlink_path.symlink_to(target_script)
+
+        # Build settings that reference the symlink path via ~ notation
+        # We simulate this by using the absolute path of the symlink (HOOKS_DIR equivalent)
+        settings = {
+            "hooks": {
+                "SessionStart": [
+                    {
+                        "hooks": [
+                            {"type": "command", "command": f"python3 {symlink_path}"}
+                        ]
+                    }
+                ]
+            }
+        }
+        settings_file = tmp_path / "settings.json"
+        settings_file.write_text(json.dumps(settings))
+
+        original_settings = hhc.SETTINGS_PATH
+        original_hooks_dir = hhc.HOOKS_DIR
+        hhc.SETTINGS_PATH = settings_file
+        hhc.HOOKS_DIR = hooks_dir_real
+        try:
+            paths = hhc.get_external_hook_paths()
+            # The symlinked hook is inside hooks_dir_real, so must NOT appear as external
+            assert paths == [], (
+                f"Symlinked hook inside HOOKS_DIR was incorrectly classified as external: {paths}"
+            )
+        finally:
+            hhc.SETTINGS_PATH = original_settings
+            hhc.HOOKS_DIR = original_hooks_dir
+
+    def test_genuinely_external_hook_still_returned(self, hhc, tmp_path):
+        """External hooks outside HOOKS_DIR are still returned after F2/F3 fixes.
+
+        A command like 'python3 ~/src/engram/.base/hooks/active-hook.py' points to
+        a real file outside HOOKS_DIR and must still be included.
+        """
+        settings = {
+            "hooks": {
+                "SessionStart": [
+                    {
+                        "hooks": [
+                            {"type": "command",
+                             "command": "python3 ~/src/engram/.base/hooks/active-hook.py"}
+                        ]
+                    }
+                ]
+            }
+        }
+        settings_file = tmp_path / "settings.json"
+        settings_file.write_text(json.dumps(settings))
+        original = hhc.SETTINGS_PATH
+        hhc.SETTINGS_PATH = settings_file
+        try:
+            paths = hhc.get_external_hook_paths()
+            path_strs = [str(p) for p in paths]
+            home = str(Path.home())
+            assert f"{home}/src/engram/.base/hooks/active-hook.py" in path_strs, (
+                f"Expected external hook to be present, got: {path_strs}"
+            )
+        finally:
+            hhc.SETTINGS_PATH = original
+
 
 class TestCheckExternalHook:
     def test_missing_file_returns_error(self, hhc, tmp_path):
