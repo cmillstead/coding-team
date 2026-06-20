@@ -47,7 +47,7 @@ def is_orchestrator_file(file_path: str) -> bool:
 # Classification is a POSITIVE allowlist of behavioral roles, NOT mere
 # membership under /skills/. The bare "/skills/" substring used to live in
 # this list and over-classified co-located reference/DATA files (e.g.
-# `codex-learnings.md`, `reference.md`, `references/*.md`) as behavioral
+# `codex-learnings.d/*.md`, `reference.md`, `references/*.md`) as behavioral
 # instruction files — appending a row to a learnings table cannot cascade
 # through any pipeline. We gate by role instead:
 #

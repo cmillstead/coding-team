@@ -46,13 +46,11 @@ Confirm the repo name matches the project you're working on. If it doesn't, `cd`
 
 ### Step 1: Pattern check — scope by applicability
 
-You are the quality gate. Read `skills/second-opinion/codex-learnings.md` IN FULL (Read tool) — it
-carries the tag vocabulary, grep battery, audit-line format, and banned rationalizations this step
-depends on. Signal tokens you emit MUST come from the closed category enum there — off-list ⇒ unread.
+You are the quality gate. Read the drop-folder (Read tool): first `skills/second-opinion/codex-learnings.d/_header.md` (tag vocabulary, grep battery, audit-line format, banned rationalizations), then every `skills/second-opinion/codex-learnings.d/*.md` EXCEPT `_header.md` (glob the directory — each file is one entry). Signal tokens you emit MUST come from the closed category enum in `_header.md` — off-list ⇒ unread. The **live count** for the audit-line `total:` = number of entry files read (exclude `_header.md`).
 
 Run this engine ONCE per change:
 
-1. **Read** `codex-learnings.md` (tags + battery + audit format + rationalizations).
+1. **Read** `codex-learnings.d/_header.md` (tags + battery + audit format + rationalizations), then read every entry file in `codex-learnings.d/` excluding `_header.md`.
 2. **Derive signals once.** Set `mode` = `diff` (a diff) or `plan` (plan prose). For each `provable`
    category, run its grep battery over the diff hunks (DIFF) or plan prose (PLAN) with the Bash tool.
    A signal FIRES if ANY pattern matches; record it with evidence. Batteries are broad on purpose —
@@ -76,7 +74,7 @@ Run this engine ONCE per change:
    "Pairs with …" cross-referenced entry (skip a ref to a non-live ID) (G-xref). For
    `reasoning-shape`, reading-to-rule-out IS the deep-check — record `✓`, never a dismissal.
 6. **Fix every FIXED item** in the plan/diff before dispatch.
-7. **Emit the audit line** in the `## Audit-line format` shape from codex-learnings.md. Every live
+7. **Emit the audit line** in the `## Audit-line format` shape from `_header.md`. Every live
    entry appears exactly once across `applicable` + `dismissed`; `N + M` MUST equal the live count
    (computed, not hardcoded). If it doesn't, an entry was dropped — recount and re-emit.
 
@@ -92,9 +90,9 @@ DIFF reviews.
 
 Known rationalization: "bulk-dismiss this whole category" — BANNED. Every entry is accounted for BY
 ID; dismiss an individual `provable` entry only with a confirmed-absent grep cited as evidence. See
-the full banned-rationalizations block in codex-learnings.md.
+the full banned-rationalizations block in `_header.md`.
 
-Only dispatch to Codex AFTER the pre-flight is clean — Codex should find novel problems, not the recurring patterns codex-learnings.md already encodes.
+Only dispatch to Codex AFTER the pre-flight is clean — Codex should find novel problems, not the recurring patterns in `codex-learnings.d/` already encode.
 
 ---
 

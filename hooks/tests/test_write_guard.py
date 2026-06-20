@@ -370,24 +370,25 @@ class TestPhase5ReferenceDataFilesAllowed:
         skill_dir.mkdir(parents=True)
         return skill_dir
 
-    def test_allows_codex_learnings_append_in_pipeline(self, repo: Path):
-        """The live-diagnosed case: appending to codex-learnings.md in-pipeline -> allow."""
+    def test_allows_codex_learnings_drop_folder_write_in_pipeline(self, repo: Path):
+        """D196 drop-folder layout: writing a new entry file in codex-learnings.d/ in-pipeline -> allow."""
         _write_plan(repo, "plan.md")
         skill_dir = self._make_instr_tree(repo)
-        learnings = skill_dir / "codex-learnings.md"
-        learnings.write_text("# Codex learnings\n| # | pattern |\n")
+        drop_dir = skill_dir / "codex-learnings.d"
+        drop_dir.mkdir(parents=True, exist_ok=True)
+        new_entry = drop_dir / "20260619-120000-test-entry.md"
 
         event = {
-            "tool_name": "Edit",
+            "tool_name": "Write",
             "tool_input": {
-                "file_path": str(learnings),
-                "new_string": "| P99 | new row |\n",
+                "file_path": str(new_entry),
+                "content": "# C99\n\n| ID | Pattern | Check before dispatch |\n|----|---------|----------------------|\n| C99 | `@tags: path-input; provable; scope:diff` test entry | grep test |\n",
             },
         }
         parsed, stdout, _stderr, _rc = _run(event, cwd=repo)
         if parsed is not None:
             assert parsed.get("decision") != "block", (
-                f"reference/data log must not be gated, got {stdout!r}"
+                f"codex-learnings.d/ entry write must not be gated, got {stdout!r}"
             )
 
     def test_allows_reference_md_in_pipeline(self, repo: Path):

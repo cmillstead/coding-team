@@ -178,12 +178,12 @@ Skip when: mechanical changes, Codex CLI not installed, or user declined in this
 
 After every Codex review that produces findings (any mode), before cleanup:
 
-1. Read `skills/second-opinion/codex-learnings.md`
+1. Read `skills/second-opinion/codex-learnings.d/_header.md` and every entry file in `codex-learnings.d/` (glob, exclude `_header.md`) to know the live IDs.
 2. For each finding Codex raised: does it match an existing pattern (any existing P## / C## entry)?
-   - **Yes**: no action — pre-flight should have caught it. If it didn't, check why pre-flight missed it and tighten the pattern description.
+   - **Yes**: no action — pre-flight should have caught it. If it didn't, check why pre-flight missed it and tighten the existing entry file's description.
    - **No**: is this a one-off or a recurring class of mistake?
      - **One-off** (project-specific logic error): skip
-     - **Recurring** (would apply to other plans/code): append to the appropriate table in `codex-learnings.md` with the next un-occupied ID (continue the existing P##/C## sequence — do NOT reuse a live ID). New entries are born tagged: add the `@tags:` token (category + `provable`/`reasoning-shape` + scope) in the same edit (see the capture footer in `codex-learnings.md`).
+     - **Recurring** (would apply to other plans/code): write a NEW FILE in `codex-learnings.d/` — NEVER edit a shared file. Filename: `<YYYYMMDD-HHMMSS>-<rand4>-<slug>.md` where the timestamp is the current UTC datetime and `<rand4>` is 4 random hex characters (e.g. `20260619-143022-a3f1-path-equality-mismatch.md`). The `<rand4>` component makes same-second concurrent writes collision-safe: `python3 -c "import secrets; print(secrets.token_hex(2))"`. Never reuse or hand-pick a sequential ID — the filename stem IS the entry's canonical ID. The file contains: original P##/C## family label as the heading, the `@tags:` token (category + `provable`/`reasoning-shape` + scope), the pattern description, and the "Check before dispatch" body — born tagged in the same file creation (see the capture footer in `_header.md`). If no existing category fits, add the new category to the enum and battery in `_header.md` in the same session.
 3. Report: `Learning capture: added C15 (<name>)` or `Learning capture: no new patterns`
 
 ## Model Selection
