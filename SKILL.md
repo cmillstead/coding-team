@@ -18,14 +18,12 @@ When invoked at the start of a conversation (or when the user asks for help with
 **Step 0: Detect available coordination tools; classify task weight per `phases/task-weight.md` (RISK SIGNALS override — instruction-file / auth / migration / API / dep changes are Medium minimum); carry tier through all phases.**
 
 ```
-AGENT_TEAMS_AVAILABLE = false
+AGENT_TEAMS_AVAILABLE = true  (default; only set false if ToolSearch confirms unavailable)
 
-Check if Teammate tool is available in this session.
-Check if SendMessage tool is available in this session.
-Check if TaskCreate (team-aware variant) is available.
-
-If ALL three are present:
-  AGENT_TEAMS_AVAILABLE = true
+Spawn mechanism: Agent tool with `name` parameter (+ run_in_background). No "Teammate" tool exists.
+Team tools (SendMessage, TaskCreate, TaskList, TaskUpdate) are DEFERRED — not in loaded tool list.
+Verify via ToolSearch (select:SendMessage,TaskCreate,TaskList,TaskUpdate); absent from loaded list ≠ unavailable.
+Known false-negative: concluding unavailable because no "Teammate" tool or team tools not loaded — both wrong.
 ```
 
 `AGENT_TEAMS_AVAILABLE` gates **capability** — whether agent teams tools exist. Task characteristics gate **preference** — whether to use them. At every multi-agent dispatch point, evaluate:
