@@ -451,7 +451,7 @@ def _handle_post_tool_use(ev: dict) -> None:
     if state.is_stale(st):
         st = {"verifications": [], "last_updated": time.time()}
     st["verifications"].append({
-        "command": command[:100],
+        "command": command,
         "time": time.time(),
         "exit_code": exit_code,
     })
@@ -488,12 +488,12 @@ def main():
         # Only add if not already tracked by PostToolUse (check last entry)
         recent = st.get("verifications", [])
         already_tracked = (
-            recent and recent[-1]["command"] == command[:100]
+            recent and recent[-1].get("command") == command
             and time.time() - recent[-1]["time"] < 5
         )
         if not already_tracked:
             st["verifications"].append({
-                "command": command[:100],
+                "command": command,
                 "time": time.time(),
                 "exit_code": None,  # Unknown until PostToolUse
             })

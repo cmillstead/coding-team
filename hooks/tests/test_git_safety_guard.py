@@ -721,3 +721,57 @@ class TestHasProjectInfrastructurePackageJson:
     def test_empty_dir_is_not_infra(self, tmp_path):
         """(g) Empty dir with no markers → False (docs-only behavior preserved)."""
         assert self._infra(tmp_path) is False
+
+
+class TestLongCommandVerificationTracking:
+    """The full command (not command[:100]) must be stored so (a) the commit gate's
+    test/lint regex matches a verify token even past char 100, and (b) the PreToolUse
+    dedup distinguishes commands that differ only in their tail."""
+
+    def _state_path(self, session_id: str) -> Path:
+        session_hash = hashlib.sha256(session_id.encode()).hexdigest()[:12]
+        return Path(f"/tmp/claude-verification-{session_hash}.json")
+
+    def test_full_command_stored_untruncated(self, run_hook, make_event, tmp_state_dir):
+        cmd = "cd /repo && echo " + ("x" * 110) + " && cargo test --workspace"
+        assert "cargo test" not in cmd[:100]
+        run_hook("git-safety-guard.py",
+                 make_event("Bash", command=cmd, tool_result={"exit_code": 0}))
+        st = json.loads(self._state_path(tmp_state_dir).read_text())
+        stored = st["verifications"][-1]["command"]
+        assert stored == cmd
+        assert "cargo test" in stored
+
+    def test_dedup_distinguishes_commands_differing_only_in_tail(self, run_hook, make_event, tmp_state_dir):
+        pad = "x" * 90
+        cmd_a = f"cd /repo && echo {pad} && cargo test --workspace --all-features"
+        cmd_b = f"cd /repo && echo {pad} && cargo test --workspace --lib"
+        assert cmd_a[:100] == cmd_b[:100]
+        run_hook("git-safety-guard.py", make_event("Bash", command=cmd_a))
+        run_hook("git-safety-guard.py", make_event("Bash", command=cmd_b))
+        st = json.loads(self._state_path(tmp_state_dir).read_text())
+        stored = [v["command"] for v in st["verifications"]]
+        assert cmd_a in stored and cmd_b in stored
+
+    def test_commit_gate_sees_test_and_lint_tokens_past_char_100(self, run_hook, make_event, tmp_state_dir, tmp_path):
+        outer = tmp_path / "outer"
+        outer.mkdir()
+        _git(["init", "-b", "feat/x", str(outer)], cwd=outer.parent)
+        (outer / "Makefile").touch()
+        _git(["add", "Makefile"], cwd=outer)
+        _git(["commit", "-m", "chore: init"], cwd=outer)
+        (outer / "mod.py").write_text("x = 1\n")
+        _git(["add", "mod.py"], cwd=outer)
+        long_cmd = ("cd " + str(outer) + " && echo " + ("y" * 110)
+                    + " && cargo test --workspace && cargo clippy --workspace")
+        assert "cargo test" not in long_cmd[:100] and "clippy" not in long_cmd[:100]
+        old = os.getcwd()
+        os.chdir(str(outer))
+        try:
+            run_hook("git-safety-guard.py",
+                     make_event("Bash", command=long_cmd, tool_result={"exit_code": 0}))
+            result = run_hook("git-safety-guard.py",
+                              make_event("Bash", command=f'cd {outer} && git commit -m "feat: add mod"'))
+            assert result.stdout.strip() == "", f"gate false-failed: {result.stdout!r}"
+        finally:
+            os.chdir(old)
