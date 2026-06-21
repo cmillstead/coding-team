@@ -404,6 +404,113 @@ def is_docs_only_commit(command: str, target_root: str) -> bool:
     )
 
 
+# Repo-relative paths/prefixes whose staging makes the codex digest stale-able.
+_CODEX_ENTRIES_PREFIX = "skills/second-opinion/codex-learnings.d/"
+_CODEX_DIGEST_PATH = "skills/second-opinion/codex-learnings-digest.md"
+_CODEX_DIGEST_SCRIPT = "skills/second-opinion/scripts/build-digest.py"
+
+
+def _staged_touches_codex_digest_inputs(staged_files: list[str]) -> bool:
+    """Return True iff any staged path is a codex entry .md or the digest itself.
+
+    Match is tolerant of an optional leading path segment via the `(^|/)`
+    style used by the other helpers: a staged entry under
+    ``skills/second-opinion/codex-learnings.d/`` ending in ``.md``, or the
+    digest path ``skills/second-opinion/codex-learnings-digest.md``.
+    """
+    for f in staged_files:
+        norm = f.strip()
+        if not norm:
+            continue
+        if norm == _CODEX_DIGEST_PATH or norm.endswith("/" + _CODEX_DIGEST_PATH):
+            return True
+        idx = norm.find(_CODEX_ENTRIES_PREFIX)
+        if (idx == 0 or (idx > 0 and norm[idx - 1] == "/")) and norm.endswith(".md"):
+            return True
+    return False
+
+
+def check_codex_digest_sync(command: str, target_root: str) -> str | None:
+    """Return a block message iff the committed codex digest is known-stale.
+
+    Runs ``build-digest.py --check`` INLINE so a commit that touches a codex
+    learnings entry (or the digest) cannot land with a stale digest. Because
+    entries and the digest are all ``.md`` files, this gate MUST run before the
+    docs-only early return in the verification checklist (which would otherwise
+    skip the check entirely for an entries-only commit).
+
+    Behavior:
+      - Returns None (do not block) unless ALL of:
+          * the command is a ``git commit`` (pushes/merges are out of scope), AND
+          * the staged file set includes a codex entry ``.md`` or the digest.
+      - Returns None (fail OPEN) if the generator script is absent — this repo
+        is not the codex repo.
+      - Fail-CLOSED (returns a block message) ONLY when ``--check`` exits with
+        returncode 1 (the script ran cleanly and reported drift).
+      - On ANY OTHER outcome (subprocess error, timeout, OSError,
+        FileNotFoundError, or an unexpected returncode such as a crash) returns
+        None — an infra hiccup must never block a commit.
+
+    Args:
+        command:     The full bash command string (e.g. "cd /repo && git commit -m ...").
+        target_root: The repo root to inspect for staged files and to run from.
+    """
+    # Only the commit case is in scope; pushes/merges are a no-op here.
+    if not re.search(r'\bgit\s+commit\b', command):
+        return None
+
+    try:
+        result = subprocess.run(
+            ["git", "-C", target_root, "diff", "--cached", "--name-only"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if result.returncode != 0:
+            return None  # cannot read staged set → fail open
+        staged_files = [line.strip() for line in result.stdout.splitlines() if line.strip()]
+    except (subprocess.SubprocessError, OSError, ValueError):
+        return None  # fail open
+
+    if not staged_files or not _staged_touches_codex_digest_inputs(staged_files):
+        return None  # gate does not apply
+
+    script_path = Path(target_root) / _CODEX_DIGEST_SCRIPT
+    if not script_path.exists():
+        return None  # not the codex repo / script absent → fail open
+
+    try:
+        check = subprocess.run(
+            ["python3", str(script_path), "--check"],
+            cwd=target_root,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except (subprocess.SubprocessError, OSError, ValueError):
+        return None  # infra hiccup → fail open
+
+    # Fail-closed ONLY on a clean run that reported drift (returncode 1).
+    # Any other returncode (0 = in sync, or a crash code) → fail open.
+    if check.returncode != 1:
+        return None
+
+    diff = (check.stderr or "").strip()
+    if len(diff) > 2000:
+        diff = diff[:2000] + "\n... (diff truncated)"
+
+    msg = (
+        "CODEX DIGEST STALE\n\n"
+        "The committed skills/second-opinion/codex-learnings-digest.md is stale "
+        "relative to the codex-learnings.d entry files being committed.\n\n"
+        "Fix: run build-digest.py to regenerate the digest, then re-commit.\n\n"
+        "Known rationalization: 'the entry change is trivial' — a stale digest "
+        "silently feeds agents the OLD design defaults.\n"
+    )
+    if diff:
+        msg += f"\n--check reported:\n{diff}\n"
+    return msg
+
 
 # ---------------------------------------------------------------------------
 # Main
@@ -544,6 +651,16 @@ def main():
                 "Create a feature branch first. Direct commits to "
                 "main/master are not allowed. Run: git checkout -b <feature-name>"
             )
+            return
+
+    # --- 2.5 Codex digest-sync gate (inline --check) ---
+    # Runs BEFORE the docs-only exemption: entries/digest are .md and would
+    # otherwise be skipped by is_docs_only_commit's early return.
+    if is_commit_or_push(command) and not is_delete_only_push(command):
+        target_root = resolve_commit_target_root(command)
+        digest_block = check_codex_digest_sync(command, target_root)
+        if digest_block:
+            output.block(digest_block)
             return
 
     # --- 3. Verification checklist (commit/push) ---

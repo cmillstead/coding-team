@@ -753,6 +753,159 @@ class TestLongCommandVerificationTracking:
         stored = [v["command"] for v in st["verifications"]]
         assert cmd_a in stored and cmd_b in stored
 
+
+# ---------------------------------------------------------------------------
+# Tests for check_codex_digest_sync (inline build-digest.py --check gate)
+# ---------------------------------------------------------------------------
+
+def _load_hook_module():
+    """Import git-safety-guard.py as a module (hyphenated filename)."""
+    import importlib.util
+    hook_path = Path(__file__).parent.parent / "git-safety-guard.py"
+    spec = importlib.util.spec_from_file_location("git_safety_guard", str(hook_path))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+# Real-shaped entry: a single '**Design default:**' line is required by build-digest.py.
+_ENTRY_P1 = (
+    "# P1\n\n"
+    "| ID | Pattern | Check |\n"
+    "|----|---------|-------|\n"
+    "| P1 | Phantom symbol | Grep for every named symbol. |\n\n"
+    "**Design default:** Verify every symbol the plan names exists before writing the plan.\n"
+)
+
+_ENTRY_C1 = (
+    "# C1\n\n"
+    "| ID | Pattern | Check |\n"
+    "|----|---------|-------|\n"
+    "| C1 | Single-gate path trust | Classify path-shaped fields into tiers. |\n\n"
+    "**Design default:** Classify a path-shaped field as identifier / fs-path / repo-relative.\n"
+)
+
+
+def _build_codex_repo(root: Path) -> Path:
+    """Create a git repo containing the REAL build-digest.py + real-shaped entries.
+
+    Copies the actual generator script so check_codex_digest_sync runs the real
+    code (no mocks). Returns the repo root.
+    """
+    so = root / "skills" / "second-opinion"
+    entries = so / "codex-learnings.d"
+    scripts = so / "scripts"
+    entries.mkdir(parents=True)
+    scripts.mkdir(parents=True)
+
+    # Copy the REAL generator script.
+    real_script = Path(__file__).parent.parent.parent / "skills" / "second-opinion" / "scripts" / "build-digest.py"
+    (scripts / "build-digest.py").write_text(real_script.read_text(encoding="utf-8"), encoding="utf-8")
+
+    # Write real-shaped entries.
+    (entries / "p01-phantom-symbol.md").write_text(_ENTRY_P1, encoding="utf-8")
+    (entries / "c01-single-gate-path-trust.md").write_text(_ENTRY_C1, encoding="utf-8")
+
+    # Give the repo verification infrastructure (irrelevant to the digest gate
+    # but keeps the fixture realistic).
+    (root / "Makefile").touch()
+
+    _git(["init", "-b", "feat/test", str(root)], cwd=root.parent)
+    _git(["add", "."], cwd=root)
+    _git(["commit", "-m", "chore: initial codex tree"], cwd=root)
+    return root
+
+
+def _regenerate_digest(root: Path) -> None:
+    """Run the real build-digest.py (no --check) to write an in-sync digest."""
+    script = root / "skills" / "second-opinion" / "scripts" / "build-digest.py"
+    subprocess.run(["python3", str(script)], check=True, capture_output=True, text=True)
+
+
+class TestCodexDigestSyncGate:
+    """check_codex_digest_sync runs the REAL build-digest.py --check inline."""
+
+    def test_fires_when_entry_edited_and_digest_stale(self, tmp_path):
+        """(a) LOAD-BEARING: edited entry + stale digest → returns a block message."""
+        mod = _load_hook_module()
+        repo = _build_codex_repo(tmp_path / "repo")
+
+        # Generate an in-sync digest, commit it, then EDIT an entry's Design
+        # default WITHOUT regenerating the digest → digest is now stale.
+        _regenerate_digest(repo)
+        _git(["add", "skills/second-opinion/codex-learnings-digest.md"], cwd=repo)
+        _git(["commit", "-m", "chore: add digest"], cwd=repo)
+
+        entry = repo / "skills" / "second-opinion" / "codex-learnings.d" / "p01-phantom-symbol.md"
+        entry.write_text(_ENTRY_P1.replace(
+            "**Design default:** Verify every symbol the plan names exists before writing the plan.\n",
+            "**Design default:** A COMPLETELY DIFFERENT default that the stale digest does not reflect.\n",
+        ), encoding="utf-8")
+        _git(["add", "skills/second-opinion/codex-learnings.d/p01-phantom-symbol.md"], cwd=repo)
+
+        command = f'cd {repo} && git commit -m "fix: tweak p01 default"'
+        block = mod.check_codex_digest_sync(command, str(repo))
+
+        # The gate FIRES: returns a non-None block message naming the fix.
+        assert block is not None, "Gate must FIRE (return a block message) for a stale digest"
+        assert "CODEX DIGEST STALE" in block
+        assert "run build-digest.py to regenerate the digest, then re-commit" in block
+        assert "the entry change is trivial" in block
+
+    def test_returns_none_when_digest_in_sync(self, tmp_path):
+        """(b) entry committed with the digest correctly regenerated → None (allowed)."""
+        mod = _load_hook_module()
+        repo = _build_codex_repo(tmp_path / "repo")
+
+        # Edit an entry AND regenerate the digest so they are in sync, stage both.
+        entry = repo / "skills" / "second-opinion" / "codex-learnings.d" / "p01-phantom-symbol.md"
+        entry.write_text(_ENTRY_P1.replace(
+            "before writing the plan.",
+            "before writing the plan, every time.",
+        ), encoding="utf-8")
+        _regenerate_digest(repo)
+        _git(["add", "skills/second-opinion/codex-learnings.d/p01-phantom-symbol.md"], cwd=repo)
+        _git(["add", "skills/second-opinion/codex-learnings-digest.md"], cwd=repo)
+
+        command = f'cd {repo} && git commit -m "fix: tweak p01 and regen"'
+        assert mod.check_codex_digest_sync(command, str(repo)) is None
+
+    def test_returns_none_for_unrelated_commit(self, tmp_path):
+        """(c) commit touching only non-codex files → None and --check NOT run."""
+        mod = _load_hook_module()
+        repo = _build_codex_repo(tmp_path / "repo")
+
+        # Stage an unrelated file outside the codex digest-input set.
+        (repo / "unrelated.py").write_text("x = 1\n")
+        _git(["add", "unrelated.py"], cwd=repo)
+
+        command = f'cd {repo} && git commit -m "feat: unrelated change"'
+        assert mod.check_codex_digest_sync(command, str(repo)) is None
+
+    def test_returns_none_when_script_missing(self, tmp_path):
+        """(d) fail-open: codex entries staged but generator script absent → None."""
+        mod = _load_hook_module()
+        repo = _build_codex_repo(tmp_path / "repo")
+
+        # Remove the generator script, then stage a codex entry edit.
+        script = repo / "skills" / "second-opinion" / "scripts" / "build-digest.py"
+        script.unlink()
+        _git(["add", "skills/second-opinion/scripts/build-digest.py"], cwd=repo)
+
+        entry = repo / "skills" / "second-opinion" / "codex-learnings.d" / "c01-single-gate-path-trust.md"
+        entry.write_text(_ENTRY_C1.replace("repo-relative.", "repo-relative; always."), encoding="utf-8")
+        _git(["add", "skills/second-opinion/codex-learnings.d/c01-single-gate-path-trust.md"], cwd=repo)
+
+        command = f'cd {repo} && git commit -m "fix: edit c01"'
+        assert mod.check_codex_digest_sync(command, str(repo)) is None
+
+    def test_returns_none_for_push_command(self, tmp_path):
+        """A push (not a commit) is out of scope → None even if codex paths involved."""
+        mod = _load_hook_module()
+        repo = _build_codex_repo(tmp_path / "repo")
+        command = f'cd {repo} && git push origin feat/test'
+        assert mod.check_codex_digest_sync(command, str(repo)) is None
+
     def test_commit_gate_sees_test_and_lint_tokens_past_char_100(self, run_hook, make_event, tmp_state_dir, tmp_path):
         outer = tmp_path / "outer"
         outer.mkdir()
