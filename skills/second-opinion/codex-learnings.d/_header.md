@@ -147,6 +147,9 @@ These are bypasses, not exemptions:
   `scope:`) is written in the SAME file creation. If no existing category fits, ADD the new category
   to BOTH the enum in `## Tag schema & vocabulary` AND (if it is `provable`) a battery row in
   `## Grep battery` — update `_header.md` in the same session.
+- Every new entry is BORN WITH A `**Design default:**` LINE: a single imperative, author-facing
+  sentence placed after the markdown table (preceded by one blank line) is written in the SAME file
+  creation. No entry lands detector-only — the generative twin is mandatory at birth.
 - Until an entry is tagged, it FLOORS (always deep-checked) by the keystone rule in SKILL.md — so a
   newly-written, not-yet-tagged entry is never silently skipped. The growth race cannot produce a
   silent skip.
