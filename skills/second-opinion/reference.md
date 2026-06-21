@@ -176,7 +176,7 @@ Skip when: mechanical changes, Codex CLI not installed, or user declined in this
 
 ## Post-Review: Learning Capture
 
-After every Codex review that produces findings (any mode), before cleanup:
+After every Codex review (any mode), before cleanup. **Steps 1–3 (pattern capture) run only when the review produced findings; step 4 (run telemetry) runs after every Mode 1 review regardless of findings (on a zero-findings pass, skip steps 1–3 and emit step 4 directly with `findings: []`):**
 
 1. Read `skills/second-opinion/codex-learnings.d/_header.md` and every entry file in `codex-learnings.d/` (glob, exclude `_header.md`) to know the live IDs.
 2. For each finding Codex raised: does it match an existing pattern (any existing P## / C## entry)?
@@ -185,6 +185,31 @@ After every Codex review that produces findings (any mode), before cleanup:
      - **One-off** (project-specific logic error): skip
      - **Recurring** (would apply to other plans/code): write a NEW FILE in `codex-learnings.d/` — NEVER edit a shared file. Filename: `<YYYYMMDD-HHMMSS>-<rand4>-<slug>.md` where the timestamp is the current UTC datetime and `<rand4>` is 4 random hex characters (e.g. `20260619-143022-a3f1-path-equality-mismatch.md`). The `<rand4>` component makes same-second concurrent writes collision-safe: `python3 -c "import secrets; print(secrets.token_hex(2))"`. Never reuse or hand-pick a sequential ID — the filename stem IS the entry's canonical ID. The file contains: original P##/C## family label as the heading, the `@tags:` token (category + `provable`/`reasoning-shape` + scope), the pattern description, and the "Check before dispatch" body — born tagged in the same file creation (see the capture footer in `_header.md`). If no existing category fits, add the new category to the enum and battery in `_header.md` in the same session.
 3. Report: `Learning capture: added C15 (<name>)` or `Learning capture: no new patterns`
+
+4. **Emit run telemetry (every Mode 1 review).** This step runs after **every** Mode 1 review — a
+   plan review or diff/code review that presented a `PASS|FAIL|APPROVED|REVISE` verdict — **including
+   a clean PASS/APPROVED with zero findings** (emit `findings: []` in that case). **Skip the emit
+   entirely for Mode 2 (challenge) and Mode 3 (consult)** — they produce neither a `plan|diff` mode
+   nor a presented verdict, so there is no valid record to write.
+
+   For a Mode 1 run, build one record and append it via the Task-1 writer
+   (`~/.claude/bin/harness codex --log '<json>'`):
+   - `mode`: `plan` (plan/prose review) or `diff` (code/diff review) — the same mode pre-flight derived.
+   - `verdict`: the verdict you presented (`PASS|FAIL|APPROVED|REVISE`).
+   - `preflight`: the `applicable` / `dismissed` / `fixed` ID lists from the pre-flight classification
+     (Step 1), each as a JSON array of **bare entry IDs** — strip any audit-line annotation, e.g.
+     store `"c01"`, NOT `"c01 N/A(scope-mismatch:diff vs plan)"`. Example: `["c01","p33"]`.
+   - `findings`: one object per Codex finding (empty array `[]` when the review found none). Task 1
+     **requires only a string `class`** per finding and accepts (does not validate) extra fields, so
+     emit `{ "severity": "<P1..P4>", "class": "<id>|novel" }` where `class` is the existing entry ID
+     this finding matched (the yes/no from step 2) or `novel` if it matched none. Keep emitting
+     `severity` even though Task 1 does not require or validate it.
+   - `repo` (basename), `plan_id` (active plan basename or null), `rounds` (count) — best-effort.
+   Run it from `$REPO_ROOT`. **Telemetry is observability only — it MUST NOT block or change the
+   verdict.** If `harness codex` is not found (Task 1 not deployed), state that once and continue.
+   On a non-zero exit: if stderr shows malformed JSON, fix the JSON and re-emit once; if the writer
+   is absent or the emit still fails for any other reason (e.g. a write-path error), state it once
+   and proceed — never block or alter the review on a failed emit.
 
 ## Model Selection
 
