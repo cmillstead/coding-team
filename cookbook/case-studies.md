@@ -56,7 +56,7 @@ A guard is only as strong as its dependencies. If the guard depends on a deletab
 
 ### CS-5: Context Inheritance (Case 5)
 **Trigger:** Adding new shared reference files or new agents
-Shared reference files (style guides, principles, memory) must be audited as a matrix: agents x files. Every code-touching agent needs the style guide.
+Shared reference files (style guides, principles, memory) must be audited as a matrix: agents x files. Every code-touching agent needs the style guide. See `cookbook/context-inheritance-matrix.md` for the formal matrix.
 
 ### CS-14: Infrastructure Orphan (Case 14)
 **Trigger:** Writing task specs that involve symlinks, env vars, configs

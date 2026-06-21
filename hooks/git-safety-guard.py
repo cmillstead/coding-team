@@ -22,7 +22,10 @@ sys.path.insert(0, os.path.dirname(__file__))
 
 import glob
 import re
+import shlex
+import shutil
 import subprocess
+import tempfile
 import time
 from pathlib import Path
 
@@ -156,7 +159,6 @@ def is_delete_only_push(command: str) -> bool:
     push_args_str = push_match.group(1)
 
     # Tokenize safely: shlex handles quoting but may raise on unbalanced shell syntax.
-    import shlex
     try:
         tokens = shlex.split(push_args_str)
     except ValueError:
@@ -404,6 +406,285 @@ def is_docs_only_commit(command: str, target_root: str) -> bool:
     )
 
 
+# Repo-relative paths/prefixes whose staging makes the codex digest stale-able.
+_CODEX_ENTRIES_PREFIX = "skills/second-opinion/codex-learnings.d/"
+_CODEX_DIGEST_PATH = "skills/second-opinion/codex-learnings-digest.md"
+_CODEX_DIGEST_SCRIPT = "skills/second-opinion/scripts/build-digest.py"
+
+
+def _staged_touches_codex_digest_inputs(staged_files: list[str]) -> bool:
+    """Return True iff any staged path is a codex digest INPUT.
+
+    A digest input is any of:
+      * a codex entry ``.md`` under ``skills/second-opinion/codex-learnings.d/``,
+      * the digest itself ``skills/second-opinion/codex-learnings-digest.md``,
+      * the GENERATOR script ``skills/second-opinion/scripts/build-digest.py``
+        (its sort / extraction / format logic changes the rendering, so a
+        staged edit to it can silently leave the committed digest stale).
+
+    Match is tolerant of an optional leading path segment (e.g. a submodule
+    prefix) via the same segment-aligned style used by the other helpers.
+    """
+    for f in staged_files:
+        norm = f.strip()
+        if not norm:
+            continue
+        if norm == _CODEX_DIGEST_PATH or norm.endswith("/" + _CODEX_DIGEST_PATH):
+            return True
+        if norm == _CODEX_DIGEST_SCRIPT or norm.endswith("/" + _CODEX_DIGEST_SCRIPT):
+            return True
+        idx = norm.find(_CODEX_ENTRIES_PREFIX)
+        if (idx == 0 or (idx > 0 and norm[idx - 1] == "/")) and norm.endswith(".md"):
+            return True
+    return False
+
+
+# The three codex digest-input paths, repo-relative. Enumerated for ls-files
+# scoping when materializing the tracked working tree.
+_CODEX_TRACKED_PATHS = [
+    _CODEX_ENTRIES_PREFIX.rstrip("/"),
+    _CODEX_DIGEST_PATH,
+    _CODEX_DIGEST_SCRIPT,
+]
+
+
+def _materialize_codex_tree(target_root: str) -> str | None:
+    """Materialize the TRACKED WORKING-TREE content of the codex paths into a temp dir.
+
+    Mode-INDEPENDENT: this always copies the WORKING-TREE content of the tracked
+    codex files, regardless of whether the commit is plain or ``-a``. There is no
+    index branching and no command-string parsing — enumeration is via
+    ``git ls-files`` (tracked paths only, so untracked drafts are EXCLUDED), and
+    each tracked file is copied straight from the working tree.
+
+    A tracked file missing from the working tree (deleted) is skipped (correctly
+    absent). Untracked draft entries under the codex dir are never copied because
+    ``ls-files`` does not list them.
+
+    OWNERSHIP / CLEANUP: this function creates the temp dir and is responsible for
+    removing it on EVERY error path before returning None (no leak). On SUCCESS it
+    returns the temp dir path and the CALLER owns cleanup.
+
+    Returns the temp dir path on success, or None on ANY error (fail OPEN).
+    """
+    try:
+        listed = subprocess.run(
+            ["git", "-C", target_root, "ls-files", "--", *_CODEX_TRACKED_PATHS],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except (subprocess.SubprocessError, OSError, ValueError):
+        return None
+    if listed.returncode != 0:
+        return None
+
+    paths = [line.strip() for line in listed.stdout.splitlines() if line.strip()]
+    if not paths:
+        return None  # nothing tracked under codex paths → cannot materialize
+
+    # mkdtemp can raise OSError (e.g. $TMPDIR unwritable/full). Wrap it so an
+    # infra failure fails OPEN rather than propagating to the hook's top-level
+    # block-on-exception handler.
+    try:
+        temp_dir = tempfile.mkdtemp(prefix="codex-digest-gate-")
+    except OSError:
+        return None
+
+    # From here on the temp dir EXISTS; every error path must remove it before
+    # returning None so no temp dir leaks.
+    try:
+        for rel in paths:
+            src = Path(target_root) / rel
+            if not src.is_file():
+                continue  # tracked-deleted → correctly absent
+            dst = Path(temp_dir) / rel
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(src, dst)
+    except (OSError, ValueError):
+        shutil.rmtree(temp_dir, ignore_errors=True)
+        return None
+    return temp_dir
+
+
+def _run_digest_check(target_root: str):
+    """Run build-digest.py --check against the tracked WORKING-TREE content.
+
+    Returns the completed subprocess (caller inspects returncode / stderr), or
+    None on ANY failure (infra hiccup or materialization error → fail OPEN).
+
+    Materializes a temp tree mirroring the tracked codex working tree (untracked
+    files excluded) and runs the check against it.
+
+    DELIBERATE DESIGN CHOICE (Codex #2 declined): the ON-DISK generator
+    (``<root>/skills/second-opinion/scripts/build-digest.py``) is the TRUSTED
+    renderer. We do NOT execute a materialized/staged copy of the generator, even
+    though doing so would catch the marginal edge case of a generator change
+    combined with a further edit. Running unreviewed code inside a
+    commit-BLOCKING security hook is a trust-surface expansion the
+    harness-engineer review explicitly flagged; security outweighs that marginal
+    accuracy gain. The temp dir is always cleaned up.
+    """
+    temp_dir = _materialize_codex_tree(target_root)
+    if temp_dir is None:
+        return None
+    try:
+        # Always use the ON-DISK generator (trusted renderer), never the
+        # materialized copy — see docstring (Codex #2 declined: do not execute
+        # materialized code in a blocking security hook; security > marginal
+        # accuracy).
+        script = Path(target_root) / _CODEX_DIGEST_SCRIPT
+        entries_dir = Path(temp_dir) / _CODEX_ENTRIES_PREFIX.rstrip("/")
+        digest_path = Path(temp_dir) / _CODEX_DIGEST_PATH
+        try:
+            return subprocess.run(
+                ["python3", str(script), "--check",
+                 "--entries-dir", str(entries_dir),
+                 "--digest-path", str(digest_path)],
+                cwd=target_root,
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+        except (subprocess.SubprocessError, OSError, ValueError):
+            return None
+    finally:
+        shutil.rmtree(temp_dir, ignore_errors=True)
+
+
+def check_codex_digest_sync(command: str, target_root: str) -> str | None:
+    """Return a block message iff the committed codex digest is known-stale.
+
+    Runs ``build-digest.py --check`` INLINE so a commit that touches a codex
+    learnings entry (or the digest) cannot land with a stale digest. Because
+    entries and the digest are all ``.md`` files, this gate MUST run before the
+    docs-only early return in the verification checklist (which would otherwise
+    skip the check entirely for an entries-only commit).
+
+    GRAMMAR-FREE BY DESIGN — checks the TRACKED WORKING TREE, not the index.
+    The gate does NOT parse the ``git commit`` command string to detect ``-a`` /
+    ``--all`` or any other flag, and it does NOT materialize the index. It always
+    evaluates the WORKING-TREE content of the TRACKED codex files (untracked
+    files excluded via ``git ls-files``). This is a DELIBERATE design choice:
+    detecting commit modes by parsing the command string is the C10
+    command-grammar-completeness anti-pattern (``git -c k=v commit``,
+    ``-S<keyid>``, clustered short flags, …) — an unwinnable arms race that
+    cross-model review kept finding edge cases in. A grammar-free, mode-
+    independent working-tree check is simpler and robust.
+
+    TRADEOFF — conservative FALSE-BLOCK on partial staging. Because the check is
+    against the tracked working tree rather than the staged index, one unusual
+    case false-blocks: you stage an in-sync entry/digest SNAPSHOT but leave a
+    tracked entry modified-unstaged in the working tree. A plain ``git commit``
+    would commit only the in-sync staged snapshot, yet the gate sees the dirty
+    working tree and BLOCKS. This is annoying but recoverable (regenerate the
+    digest + restage, or commit ``-a``) and is the CORRECT failure direction for
+    a safety gate (false-block is safe; false-allow ships a stale digest). Do NOT
+    "fix" this by re-introducing git-command-grammar parsing — the simplicity and
+    robustness of a grammar-free check is the deliberate design choice, and the
+    parsing it would require is exactly the C10 anti-pattern this rewrite removed.
+
+    NOTE — ``git -c k=v commit`` style global-option invocations are not detected
+    by the shared ``is_commit_or_push`` guard that gates this function in
+    main(); that is a pre-existing limitation of that guard, tracked separately,
+    and is NOT addressed here.
+
+    Trigger / check:
+      - The to-be-committed candidate set is the UNION of staged
+        (``git diff --cached --name-only``) and tracked-unstaged-modified
+        (``git diff --name-only``) files. This covers both plain commits (staged)
+        and ``git commit -a`` (tracked-modified) WITHOUT parsing ``-a``.
+      - The check runs only if that set includes a codex entry ``.md``, the
+        digest, or the generator script.
+
+    Behavior:
+      - Returns None (do not block) unless the command is a ``git commit``
+        (pushes/merges are out of scope) AND a codex digest input is in the
+        candidate set.
+      - Returns None (fail OPEN) if the generator script is absent — this repo
+        is not the codex repo.
+      - Fail-CLOSED (returns a block message) ONLY when ``--check`` exits with
+        the DEDICATED digest-problem code 3 (the script ran cleanly and
+        reported drift / a missing digest / entry errors).
+      - On ANY OTHER outcome — returncode 0 (in sync), returncode 1 (a Python
+        crash / syntax error: the generator itself is broken), an unexpected
+        returncode, a subprocess error / timeout / OSError, OR any
+        materialization failure (mkdtemp / ls-files / copy) — returns None (fail
+        OPEN). A broken generator or infra hiccup must never block a commit; only
+        a cleanly-determined stale digest does.
+
+    Args:
+        command:     The full bash command string (e.g. "cd /repo && git commit -m ...").
+        target_root: The repo root to inspect for changed files and to run from.
+    """
+    # Only the commit case is in scope; pushes/merges are a no-op here.
+    if not re.search(r'\bgit\s+commit\b', command):
+        return None
+
+    # Candidate set: union of staged AND tracked-unstaged-modified files. This
+    # covers plain commits (staged) and `git commit -a` (tracked-modified)
+    # without parsing the command string for `-a`.
+    try:
+        staged = subprocess.run(
+            ["git", "-C", target_root, "diff", "--cached", "--name-only"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if staged.returncode != 0:
+            return None  # cannot read staged set → fail open
+
+        tracked_mod = subprocess.run(
+            ["git", "-C", target_root, "diff", "--name-only"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if tracked_mod.returncode != 0:
+            return None  # cannot read tracked-modified set → fail open
+
+        candidate_files = [
+            line.strip()
+            for line in (staged.stdout + tracked_mod.stdout).splitlines()
+            if line.strip()
+        ]
+    except (subprocess.SubprocessError, OSError, ValueError):
+        return None  # fail open
+
+    if not candidate_files or not _staged_touches_codex_digest_inputs(candidate_files):
+        return None  # gate does not apply
+
+    script_path = Path(target_root) / _CODEX_DIGEST_SCRIPT
+    if not script_path.exists():
+        return None  # not the codex repo / script absent → fail open
+
+    check = _run_digest_check(target_root)
+    if check is None:
+        return None  # any infra / materialization failure → fail OPEN
+
+    # Block ONLY on the dedicated digest-problem code 3 (a clean run that
+    # determined the digest is stale / missing / has entry errors). Fail OPEN
+    # on 0 (in sync), 1 (the generator crashed / syntax error), and all other
+    # returncodes — a broken generator must never block a commit.
+    if check.returncode != 3:
+        return None
+
+    diff = (check.stderr or "").strip()
+    if len(diff) > 2000:
+        diff = diff[:2000] + "\n... (diff truncated)"
+
+    msg = (
+        "CODEX DIGEST STALE\n\n"
+        "The committed skills/second-opinion/codex-learnings-digest.md is stale "
+        "relative to the codex-learnings.d entry files being committed.\n\n"
+        "Fix: run build-digest.py to regenerate the digest, then re-commit.\n\n"
+        "Known rationalization: 'the entry change is trivial' — a stale digest "
+        "silently feeds agents the OLD design defaults.\n"
+    )
+    if diff:
+        msg += f"\n--check reported:\n{diff}\n"
+    return msg
+
 
 # ---------------------------------------------------------------------------
 # Main
@@ -544,6 +825,16 @@ def main():
                 "Create a feature branch first. Direct commits to "
                 "main/master are not allowed. Run: git checkout -b <feature-name>"
             )
+            return
+
+    # --- 2.5 Codex digest-sync gate (inline --check) ---
+    # Runs BEFORE the docs-only exemption: entries/digest are .md and would
+    # otherwise be skipped by is_docs_only_commit's early return.
+    if is_commit_or_push(command) and not is_delete_only_push(command):
+        target_root = resolve_commit_target_root(command)
+        digest_block = check_codex_digest_sync(command, target_root)
+        if digest_block:
+            output.block(digest_block)
             return
 
     # --- 3. Verification checklist (commit/push) ---
