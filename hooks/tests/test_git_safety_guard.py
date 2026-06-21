@@ -906,6 +906,111 @@ class TestCodexDigestSyncGate:
         command = f'cd {repo} && git push origin feat/test'
         assert mod.check_codex_digest_sync(command, str(repo)) is None
 
+    def test_fails_open_when_generator_crashes(self, tmp_path):
+        """FIX 1: a REAL crashing generator (exit 1) → None (fail OPEN), never a block.
+
+        Python exits 1 on an uncaught exception too. The gate must distinguish a
+        genuine crash from a cleanly-determined stale digest (exit 3): a broken
+        generator while editing the script must NOT block the commit.
+        """
+        mod = _load_hook_module()
+        repo = _build_codex_repo(tmp_path / "repo")
+
+        # Replace the copied generator with one that genuinely exits 1 (real
+        # failing subprocess, not a mock), then stage an entry edit so the gate
+        # decides to run --check.
+        script = repo / "skills" / "second-opinion" / "scripts" / "build-digest.py"
+        script.write_text("import sys\nsys.exit(1)\n", encoding="utf-8")
+
+        entry = repo / "skills" / "second-opinion" / "codex-learnings.d" / "p01-phantom-symbol.md"
+        entry.write_text(_ENTRY_P1.replace(
+            "before writing the plan.",
+            "before writing the plan, always.",
+        ), encoding="utf-8")
+        _git(["add", "skills/second-opinion/codex-learnings.d/p01-phantom-symbol.md"], cwd=repo)
+
+        command = f'cd {repo} && git commit -m "fix: edit p01"'
+        # rc==1 (crash) must NOT block: fail open.
+        assert mod.check_codex_digest_sync(command, str(repo)) is None
+
+    def test_fires_when_only_generator_script_staged_and_digest_stale(self, tmp_path):
+        """FIX 2: staging ONLY the generator script with a stale digest → gate FIRES.
+
+        A change to build-digest.py (sort/extraction/format logic) can silently
+        change the rendering, so it is itself a digest input that must trigger
+        --check.
+        """
+        mod = _load_hook_module()
+        repo = _build_codex_repo(tmp_path / "repo")
+
+        # Commit an in-sync digest first.
+        _regenerate_digest(repo)
+        _git(["add", "skills/second-opinion/codex-learnings-digest.md"], cwd=repo)
+        _git(["commit", "-m", "chore: add digest"], cwd=repo)
+
+        # Edit the generator so the rendering would change (append a trailing
+        # marker line to every rendered digest) WITHOUT regenerating the digest,
+        # then stage ONLY the script. The committed digest is now stale.
+        script = repo / "skills" / "second-opinion" / "scripts" / "build-digest.py"
+        src = script.read_text(encoding="utf-8")
+        src = src.replace(
+            'text = "\\n".join(clean_lines) + "\\n"',
+            'text = "\\n".join(clean_lines) + "\\n<!-- v2 -->\\n"',
+            1,
+        )
+        script.write_text(src, encoding="utf-8")
+        _git(["add", "skills/second-opinion/scripts/build-digest.py"], cwd=repo)
+
+        command = f'cd {repo} && git commit -m "feat: change digest format"'
+        block = mod.check_codex_digest_sync(command, str(repo))
+
+        assert block is not None, "Gate must FIRE when only the generator script is staged and the digest is stale"
+        assert "CODEX DIGEST STALE" in block
+
+    def test_main_gate_beats_docs_only_exemption(self, run_hook, make_event, tmp_state_dir, tmp_path):
+        """FIX 4: main() end-to-end — an entries-only commit with a stale digest is BLOCKED.
+
+        Proves section-2.5 (the codex digest gate) preempts the section-3
+        docs-only ``.md`` early-return: an edited entry is a ``.md`` file, so the
+        docs-only exemption would otherwise skip all checks. Drives the hook's
+        main() via the same run_hook/make_event harness the other main()-level
+        tests use.
+        """
+        repo = _build_codex_repo(tmp_path / "repo")
+
+        # In-sync digest committed, then an entry edited WITHOUT regenerating →
+        # the committed digest is stale.
+        _regenerate_digest(repo)
+        _git(["add", "skills/second-opinion/codex-learnings-digest.md"], cwd=repo)
+        _git(["commit", "-m", "chore: add digest"], cwd=repo)
+
+        entry = repo / "skills" / "second-opinion" / "codex-learnings.d" / "p01-phantom-symbol.md"
+        entry.write_text(_ENTRY_P1.replace(
+            "**Design default:** Verify every symbol the plan names exists before writing the plan.\n",
+            "**Design default:** A DIFFERENT default the stale digest does not reflect.\n",
+        ), encoding="utf-8")
+        _git(["add", "skills/second-opinion/codex-learnings.d/p01-phantom-symbol.md"], cwd=repo)
+
+        # Sanity: ONLY the entry .md is staged (so docs-only would otherwise exempt).
+        staged = _git(["diff", "--cached", "--name-only"], cwd=repo).stdout.split()
+        assert staged == ["skills/second-opinion/codex-learnings.d/p01-phantom-symbol.md"], staged
+
+        old = os.getcwd()
+        os.chdir(str(repo))
+        try:
+            result = run_hook(
+                "git-safety-guard.py",
+                make_event("Bash", command=f'cd {repo} && git commit -m "docs: tweak p01"'),
+            )
+        finally:
+            os.chdir(old)
+
+        # main() must BLOCK with the stale-digest reason, NOT fall through the
+        # docs-only exemption.
+        assert "CODEX DIGEST STALE" in result.stdout, (
+            f"main() did not block on stale digest (docs-only exemption leaked?): {result.stdout!r}"
+        )
+
     def test_commit_gate_sees_test_and_lint_tokens_past_char_100(self, run_hook, make_event, tmp_state_dir, tmp_path):
         outer = tmp_path / "outer"
         outer.mkdir()

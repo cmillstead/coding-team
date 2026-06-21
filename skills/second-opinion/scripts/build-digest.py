@@ -17,6 +17,19 @@ CLI:
   build-digest.py           → write DIGEST_PATH
   build-digest.py --check   → compare in-memory render to DIGEST_PATH, diff on stderr
   build-digest.py --help    → brief usage
+
+Exit codes (deliberate scheme — the digest gate distinguishes them):
+  0  EXIT_OK            — success (write succeeded, or --check found in sync).
+  3  EXIT_DIGEST_PROBLEM — a cleanly-determined digest problem: drift
+                          (committed != rendered), a missing digest, or entry
+                          errors (gap / duplicate / bad stem).
+  1  (implicit)         — Python's DEFAULT uncaught-exception exit. NOT used
+                          deliberately here: a genuine crash (syntax error,
+                          unexpected exception) propagates to 1 so the gate can
+                          tell "the script broke" apart from "the digest is
+                          stale" and FAIL OPEN on the crash. We deliberately do
+                          NOT wrap main() in a broad try/except.
+  (2 is reserved by argparse/usage convention and is intentionally unused.)
 """
 
 import difflib
@@ -30,6 +43,16 @@ from pathlib import Path
 # ---------------------------------------------------------------------------
 ENTRIES_DIR = Path(__file__).resolve().parent.parent / "codex-learnings.d"
 DIGEST_PATH = Path(__file__).resolve().parent.parent / "codex-learnings-digest.md"
+
+# ---------------------------------------------------------------------------
+# Exit codes — see module docstring for the full scheme and rationale.
+# EXIT_OK (0)             : success / in sync.
+# EXIT_DIGEST_PROBLEM (3) : cleanly-determined digest problem (drift, missing,
+#                           or entry errors). DISTINCT from Python's implicit 1
+#                           on an uncaught crash, which the gate fails OPEN on.
+# ---------------------------------------------------------------------------
+EXIT_OK = 0
+EXIT_DIGEST_PROBLEM = 3
 
 # ---------------------------------------------------------------------------
 # Regex for extracting the Design default sentence.
@@ -159,39 +182,49 @@ def render_digest(entries_dir: Path) -> tuple[str, list[str]]:
 
 def write(entries_dir: Path, digest_path: Path) -> int:
     """
-    Render and write the digest.  Returns 0 on success, 1 on error.
-    On error, prints to stderr and does NOT write the file.
+    Render and write the digest.
+
+    Returns EXIT_OK (0) on success, EXIT_DIGEST_PROBLEM (3) on entry errors
+    (gap / duplicate / bad stem). On error, prints to stderr and does NOT write
+    the file.
     """
     text, errors = render_digest(entries_dir)
     if errors:
         for err in errors:
             print(err, file=sys.stderr)
-        return 1
+        return EXIT_DIGEST_PROBLEM
 
     digest_path.write_text(text, encoding="utf-8")
-    return 0
+    return EXIT_OK
 
 
 def check(entries_dir: Path, digest_path: Path) -> int:
     """
     Compare in-memory render to the committed digest_path.
-    Returns 0 if identical, 1 if different or file missing.
-    Prints a unified diff to stderr when they differ.
+
+    Returns EXIT_OK (0) if identical. Returns EXIT_DIGEST_PROBLEM (3) for a
+    cleanly-determined digest problem: entry errors (gap / duplicate / bad
+    stem), a missing digest, or drift (committed != rendered). Prints a unified
+    diff to stderr when they differ, and entry errors to stderr otherwise.
     NEVER writes the file.
+
+    A genuine crash (uncaught exception) is intentionally NOT mapped here — it
+    propagates to Python's implicit exit 1 so callers can distinguish a broken
+    script from a stale digest.
     """
     text, errors = render_digest(entries_dir)
     if errors:
         for err in errors:
             print(err, file=sys.stderr)
-        return 1
+        return EXIT_DIGEST_PROBLEM
 
     if not digest_path.exists():
         print(f"MISSING: {digest_path}", file=sys.stderr)
-        return 1
+        return EXIT_DIGEST_PROBLEM
 
     committed = digest_path.read_text(encoding="utf-8")
     if text == committed:
-        return 0
+        return EXIT_OK
 
     diff = difflib.unified_diff(
         committed.splitlines(keepends=True),
@@ -200,17 +233,18 @@ def check(entries_dir: Path, digest_path: Path) -> int:
         tofile="<generated>",
     )
     sys.stderr.writelines(diff)
-    return 1
+    return EXIT_DIGEST_PROBLEM
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Entry point. Returns exit code."""
+    """Entry point. Returns an exit code (see module docstring: 0 / 3, plus
+    Python's implicit 1 on any uncaught crash — deliberately NOT swallowed)."""
     if argv is None:
         argv = sys.argv[1:]
 
     if "--help" in argv or "-h" in argv:
         print(__doc__)
-        return 0
+        return EXIT_OK
 
     if "--check" in argv:
         return check(ENTRIES_DIR, DIGEST_PATH)

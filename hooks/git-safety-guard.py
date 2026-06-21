@@ -411,18 +411,25 @@ _CODEX_DIGEST_SCRIPT = "skills/second-opinion/scripts/build-digest.py"
 
 
 def _staged_touches_codex_digest_inputs(staged_files: list[str]) -> bool:
-    """Return True iff any staged path is a codex entry .md or the digest itself.
+    """Return True iff any staged path is a codex digest INPUT.
 
-    Match is tolerant of an optional leading path segment via the `(^|/)`
-    style used by the other helpers: a staged entry under
-    ``skills/second-opinion/codex-learnings.d/`` ending in ``.md``, or the
-    digest path ``skills/second-opinion/codex-learnings-digest.md``.
+    A digest input is any of:
+      * a codex entry ``.md`` under ``skills/second-opinion/codex-learnings.d/``,
+      * the digest itself ``skills/second-opinion/codex-learnings-digest.md``,
+      * the GENERATOR script ``skills/second-opinion/scripts/build-digest.py``
+        (its sort / extraction / format logic changes the rendering, so a
+        staged edit to it can silently leave the committed digest stale).
+
+    Match is tolerant of an optional leading path segment (e.g. a submodule
+    prefix) via the same segment-aligned style used by the other helpers.
     """
     for f in staged_files:
         norm = f.strip()
         if not norm:
             continue
         if norm == _CODEX_DIGEST_PATH or norm.endswith("/" + _CODEX_DIGEST_PATH):
+            return True
+        if norm == _CODEX_DIGEST_SCRIPT or norm.endswith("/" + _CODEX_DIGEST_SCRIPT):
             return True
         idx = norm.find(_CODEX_ENTRIES_PREFIX)
         if (idx == 0 or (idx > 0 and norm[idx - 1] == "/")) and norm.endswith(".md"):
@@ -446,10 +453,13 @@ def check_codex_digest_sync(command: str, target_root: str) -> str | None:
       - Returns None (fail OPEN) if the generator script is absent — this repo
         is not the codex repo.
       - Fail-CLOSED (returns a block message) ONLY when ``--check`` exits with
-        returncode 1 (the script ran cleanly and reported drift).
-      - On ANY OTHER outcome (subprocess error, timeout, OSError,
-        FileNotFoundError, or an unexpected returncode such as a crash) returns
-        None — an infra hiccup must never block a commit.
+        the DEDICATED digest-problem code 3 (the script ran cleanly and
+        reported drift / a missing digest / entry errors).
+      - On ANY OTHER outcome — returncode 0 (in sync), returncode 1 (a Python
+        crash / syntax error: the generator itself is broken), an unexpected
+        returncode, or a subprocess error / timeout / OSError — returns None
+        (fail OPEN). A broken generator or infra hiccup must never block a
+        commit; only a cleanly-determined stale digest does.
 
     Args:
         command:     The full bash command string (e.g. "cd /repo && git commit -m ...").
@@ -490,9 +500,11 @@ def check_codex_digest_sync(command: str, target_root: str) -> str | None:
     except (subprocess.SubprocessError, OSError, ValueError):
         return None  # infra hiccup → fail open
 
-    # Fail-closed ONLY on a clean run that reported drift (returncode 1).
-    # Any other returncode (0 = in sync, or a crash code) → fail open.
-    if check.returncode != 1:
+    # Block ONLY on the dedicated digest-problem code 3 (a clean run that
+    # determined the digest is stale / missing / has entry errors). Fail OPEN
+    # on 0 (in sync), 1 (the generator crashed / syntax error), and all other
+    # returncodes — a broken generator must never block a commit.
+    if check.returncode != 3:
         return None
 
     diff = (check.stderr or "").strip()

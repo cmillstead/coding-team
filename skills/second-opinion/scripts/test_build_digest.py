@@ -41,6 +41,8 @@ render_digest = _mod.render_digest
 write = _mod.write
 check = _mod.check
 main = _mod.main
+EXIT_OK = _mod.EXIT_OK
+EXIT_DIGEST_PROBLEM = _mod.EXIT_DIGEST_PROBLEM
 
 
 # ---------------------------------------------------------------------------
@@ -62,8 +64,8 @@ def test_entry_with_design_default_appears_in_digest(tmp_path):
 # ---------------------------------------------------------------------------
 # Test 2 — GAP: entry with NO Design default causes non-zero exit, no file written
 # ---------------------------------------------------------------------------
-def test_gap_entry_causes_non_zero_exit_and_no_digest_written(tmp_path):
-    """An entry missing its Design default line causes a non-zero exit and prevents the digest."""
+def test_gap_entry_causes_digest_problem_exit_and_no_digest_written(tmp_path):
+    """An entry missing its Design default line returns EXIT_DIGEST_PROBLEM (3) and prevents the digest."""
     # Arrange
     _write_entry(tmp_path, "p01", design_default=None)  # no Design default
     digest_path = tmp_path / "digest.md"
@@ -71,8 +73,8 @@ def test_gap_entry_causes_non_zero_exit_and_no_digest_written(tmp_path):
     # Act
     result = write(tmp_path, digest_path)
 
-    # Assert — non-zero exit and digest NOT written
-    assert result != 0
+    # Assert — dedicated digest-problem code (3), not Python's crash code (1), and digest NOT written
+    assert result == EXIT_DIGEST_PROBLEM
     assert not digest_path.exists()
 
 
@@ -93,8 +95,8 @@ def test_gap_entry_is_reported_in_errors(tmp_path):
 # ---------------------------------------------------------------------------
 # Test 3 — DUPLICATE: entry with TWO Design default lines causes non-zero exit
 # ---------------------------------------------------------------------------
-def test_duplicate_design_defaults_causes_non_zero_exit(tmp_path):
-    """An entry with two Design default lines is rejected (never silently takes the first)."""
+def test_duplicate_design_defaults_causes_digest_problem_exit(tmp_path):
+    """An entry with two Design default lines is rejected with EXIT_DIGEST_PROBLEM (never takes the first)."""
     # Arrange
     content = (
         "# P01\n\n"
@@ -110,8 +112,8 @@ def test_duplicate_design_defaults_causes_non_zero_exit(tmp_path):
     # Act
     result = write(tmp_path, digest_path)
 
-    # Assert — non-zero exit and digest NOT written
-    assert result != 0
+    # Assert — dedicated digest-problem code (3) and digest NOT written
+    assert result == EXIT_DIGEST_PROBLEM
     assert not digest_path.exists()
 
 
@@ -134,6 +136,52 @@ def test_duplicate_design_defaults_reported_in_errors(tmp_path):
     # Assert
     assert len(errors) == 1
     assert "DUPLICATE" in errors[0]
+
+
+# ---------------------------------------------------------------------------
+# Test 3b — BAD STEM: filename stem not <p|c><digits> surfaces an error,
+# returns EXIT_DIGEST_PROBLEM, and writes no digest.
+# ---------------------------------------------------------------------------
+def test_bad_stem_is_reported_in_errors(tmp_path):
+    """An entry whose stem is not <p|c><digits> (e.g. 'x99-foo') surfaces an error."""
+    # Arrange — a real entry body, but a filename stem the parser rejects.
+    content = (
+        "# X99\n\n"
+        "| ID | Pattern | Check |\n"
+        "|----|---------|------|\n"
+        "| X99 | A | B |\n\n"
+        "**Design default:** This entry has a valid body but a bad stem.\n"
+    )
+    (tmp_path / "x99-foo.md").write_text(content, encoding="utf-8")
+
+    # Act
+    text, errors = render_digest(tmp_path)
+
+    # Assert — the bad stem is surfaced and the render is suppressed.
+    assert text == ""
+    assert len(errors) == 1
+    assert "x99-foo" in errors[0]
+
+
+def test_bad_stem_causes_digest_problem_exit_and_no_digest_written(tmp_path):
+    """A bad-stem entry returns EXIT_DIGEST_PROBLEM (3) via write() and writes no digest."""
+    # Arrange
+    content = (
+        "# X99\n\n"
+        "| ID | Pattern | Check |\n"
+        "|----|---------|------|\n"
+        "| X99 | A | B |\n\n"
+        "**Design default:** Bad stem, valid body.\n"
+    )
+    (tmp_path / "x99-foo.md").write_text(content, encoding="utf-8")
+    digest_path = tmp_path / "digest.md"
+
+    # Act
+    result = write(tmp_path, digest_path)
+
+    # Assert — dedicated digest-problem code (3), and digest NOT written.
+    assert result == EXIT_DIGEST_PROBLEM
+    assert not digest_path.exists()
 
 
 # ---------------------------------------------------------------------------
@@ -238,13 +286,13 @@ def test_check_exits_zero_when_digest_matches(tmp_path):
     digest_path = tmp_path / "digest.md"
     # First write the digest so it exists
     rc = write(entries_dir, digest_path)
-    assert rc == 0
+    assert rc == EXIT_OK
 
     # Act
     result = check(entries_dir, digest_path)
 
-    # Assert
-    assert result == 0
+    # Assert — in sync stays EXIT_OK (0)
+    assert result == EXIT_OK
 
 
 def test_check_exits_nonzero_when_digest_diverges(tmp_path, capsys):
@@ -270,13 +318,13 @@ def test_check_exits_nonzero_when_digest_diverges(tmp_path, capsys):
     result = check(entries_dir, digest_path)
     captured = capsys.readouterr()
 
-    # Assert
-    assert result != 0
+    # Assert — drift returns the dedicated digest-problem code (3), not 1
+    assert result == EXIT_DIGEST_PROBLEM
     assert len(captured.err) > 0, "Expected a diff on stderr"
 
 
-def test_check_exits_nonzero_when_digest_missing(tmp_path):
-    """--check exits non-zero when the digest file does not exist."""
+def test_check_exits_digest_problem_when_digest_missing(tmp_path):
+    """--check returns EXIT_DIGEST_PROBLEM (3) when the digest file does not exist."""
     # Arrange — entries in a subdirectory
     entries_dir = tmp_path / "entries"
     entries_dir.mkdir()
@@ -286,8 +334,8 @@ def test_check_exits_nonzero_when_digest_missing(tmp_path):
     # Act
     result = check(entries_dir, digest_path)
 
-    # Assert
-    assert result != 0
+    # Assert — dedicated digest-problem code (3)
+    assert result == EXIT_DIGEST_PROBLEM
 
 
 # ---------------------------------------------------------------------------
