@@ -98,6 +98,7 @@ Before dispatching the planning worker, pass these additional context files alon
 2. **Code style:** Read `~/.claude/code-style.md` using the Read tool. The planning worker follows these rules when writing code snippets in tasks.
 3. **Team memory:** Read `docs/team-memory.md` using the Read tool (if it exists). The planning worker checks Known Landmines before finalizing the plan.
 4. **Episode context:** If episodes were retrieved during Phase 2, pass the extracted patterns to the planning worker.
+5. **Codex design defaults:** Read `~/.claude/skills/coding-team/skills/second-opinion/codex-learnings-digest.md` using the Read tool. The planning worker checks each task's spec against these design defaults before emitting the plan — they encode recurring authoring mistakes to avoid at the source.
 
 If any file doesn't exist, skip and note in status. Do NOT fabricate context.
 

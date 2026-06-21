@@ -92,6 +92,12 @@ When PROMPT_CRAFT_ADVISORY is listed, apply these 6 rules to every line you writ
 
 If code-style rules are included above, follow them for all code you write.
 
+## Codex Design Defaults
+
+[INSERT contents of ~/.claude/skills/coding-team/skills/second-opinion/codex-learnings-digest.md here — the orchestrator reads this file and pastes it into the implementer prompt for plan/code-authoring tasks.]
+
+If design defaults are included above, follow them while authoring code — they are the generative twin of the codex pre-flight checklist; authoring to them means the recurring mistake is never made.
+
 ## Code Exploration
 
 Read `agents/implementer-reference.md` for codesight-mcp tool usage. If any codesight-mcp tool fails: do NOT retry. Mark unavailable, fall back to Grep/Read.
