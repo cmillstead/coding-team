@@ -422,6 +422,7 @@ hooks/                            # Claude Code hooks (9 active, deployed to ~/.
     __init__.py
     event.py                      #     event parsing
     git.py                        #     git operations
+    graduated_checks.py           #     registry of graduated Codex-learning checks
     output.py                     #     output formatting
     state.py                      #     session state management
     suppression.py                #     suppression logic
