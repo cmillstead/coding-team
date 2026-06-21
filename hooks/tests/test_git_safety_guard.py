@@ -1176,6 +1176,26 @@ class TestCodexDigestSyncGate:
         # -m takes a value; an 'a' INSIDE the message value must not count.
         assert mod._commit_uses_all_flag('git commit -ma "x"') is False
 
+    def test_all_flag_detected_across_git_global_options(self, tmp_path):
+        """Codex #1: global options between `git` and `commit` must not hide -a/--all.
+
+        The subcommand is ANCHORED on `commit`, skipping git GLOBAL options
+        (value-taking ones consume their value token), so a clustered -am or a
+        --all after intervening globals is still detected, and a plain -m after
+        globals is still NOT a false positive.
+        """
+        mod = _load_hook_module()
+        # Value-taking global in attached form, then clustered -am → True.
+        assert mod._commit_uses_all_flag('git -c user.name=bot commit -am "x"') is True
+        # Boolean global, then --all → True.
+        assert mod._commit_uses_all_flag('git --no-pager commit --all') is True
+        # Value-taking global in separate-token form, then -m (no -a) → False.
+        assert mod._commit_uses_all_flag('git -C /repo commit -m "x"') is False
+        # --git-dir=... attached value, then -a → True.
+        assert mod._commit_uses_all_flag('git --git-dir=.git commit -a') is True
+        # --work-tree separate value, then plain -m → False.
+        assert mod._commit_uses_all_flag('git --work-tree /repo commit -m "x"') is False
+
     def test_main_gate_beats_docs_only_exemption(self, run_hook, make_event, tmp_state_dir, tmp_path):
         """FIX 4: main() end-to-end — an entries-only commit with a stale digest is BLOCKED.
 

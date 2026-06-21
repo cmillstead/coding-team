@@ -151,6 +151,43 @@ def test_duplicate_design_defaults_reported_in_errors(tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# Test 3a — DUPLICATE CANONICAL ID: two DIFFERENT files both headed `# C10`
+# (timestamp filenames) is ambiguous → deterministic error, exit 3, no write.
+# ---------------------------------------------------------------------------
+def test_duplicate_canonical_id_reported_in_errors(tmp_path):
+    """Two distinct files claiming the same `# C10` heading surface a DUPLICATE ID error."""
+    # Arrange — distinct filenames, identical canonical heading.
+    _write_entry(tmp_path, "c10", "First sentence.", filename="20260620-100000-aaaa-first.md")
+    _write_entry(tmp_path, "c10", "Second sentence.", filename="20260620-110000-bbbb-second.md")
+
+    # Act
+    text, errors = render_digest(tmp_path)
+
+    # Assert — render suppressed; the duplicate ID and both filenames are named.
+    assert text == ""
+    dup_errors = [e for e in errors if "DUPLICATE ID" in e]
+    assert len(dup_errors) == 1, errors
+    assert "C10" in dup_errors[0]
+    assert "20260620-100000-aaaa-first.md" in dup_errors[0]
+    assert "20260620-110000-bbbb-second.md" in dup_errors[0]
+
+
+def test_duplicate_canonical_id_causes_digest_problem_exit_and_no_digest_written(tmp_path):
+    """Duplicate `# C10` across two files returns EXIT_DIGEST_PROBLEM (3) and writes no digest."""
+    # Arrange
+    _write_entry(tmp_path, "c10", "First sentence.", filename="20260620-100000-aaaa-first.md")
+    _write_entry(tmp_path, "c10", "Second sentence.", filename="20260620-110000-bbbb-second.md")
+    digest_path = tmp_path / "digest.md"
+
+    # Act
+    result = write(tmp_path, digest_path)
+
+    # Assert
+    assert result == EXIT_DIGEST_PROBLEM
+    assert not digest_path.exists()
+
+
+# ---------------------------------------------------------------------------
 # Test 3b — MALFORMED/MISSING HEADING: an entry whose H1 isn't <p|c><digits>
 # surfaces an error, returns EXIT_DIGEST_PROBLEM, and writes no digest. The
 # canonical ID comes from the heading, so a missing/bad heading is the error

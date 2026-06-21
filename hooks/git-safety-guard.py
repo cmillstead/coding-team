@@ -414,12 +414,25 @@ def _commit_uses_all_flag(command: str) -> bool:
     empty and the staged-set trigger would miss them. This detects the flag so
     the gate can additionally consult the tracked-but-unstaged working-tree set.
 
+    Two-phase walk, ANCHORED on the ``commit`` subcommand so git GLOBAL options
+    between ``git`` and ``commit`` (e.g. ``git -c user.name=bot commit -am``,
+    ``git --no-pager commit --all``, ``git -C /repo commit -m``) are handled
+    correctly rather than mistaken for the subcommand:
+
+      Phase 1 — from the ``git`` token, skip global options until the first
+        non-option token (the subcommand). Value-taking globals in separate-token
+        form (``-c``, ``-C``, ``--git-dir``, ``--work-tree``, ``--namespace``,
+        ``--super-prefix``, ``--exec-path``, ``--config-env``) consume their value
+        token too; attached forms (``--opt=value``) and boolean globals consume
+        one token. If the subcommand is not ``commit``, return False.
+      Phase 2 — scan the ``commit`` arguments for the all-flag.
+
     Robust against the ``--amend`` false-match: clustered SHORT flags (a single
     leading ``-``) are scanned char-by-char for ``a``; LONG flags (``--``) match
     only the exact ``--all`` token, so ``--amend`` / ``--allow-empty`` never trip
     it. Tokens after a bare ``--`` (pathspec separator) are ignored.
     """
-    if not re.search(r'\bgit\s+commit\b', command):
+    if not re.search(r'\bgit\b.*\bcommit\b', command):
         return False
 
     try:
@@ -427,21 +440,56 @@ def _commit_uses_all_flag(command: str) -> bool:
     except ValueError:
         tokens = command.split()
 
-    # Locate the 'commit' subcommand; only inspect tokens after it.
-    commit_idx = None
+    # Phase 1 — skip git GLOBAL options to reach the subcommand.
+    #
+    # `git [global-options] <subcommand> [subcommand-args]`. Global options can
+    # sit BETWEEN `git` and `commit` (e.g. `git -c user.name=bot commit -am`,
+    # `git --no-pager commit --all`), so we cannot stop at the first non-flag
+    # token blindly — we must skip any value-taking global option AND its value
+    # token before the first non-option token (the subcommand).
+    #
+    # Value-taking global options consume the NEXT token as their value when
+    # given in separate-token form (`-c key=val`, `--git-dir .git`). When given
+    # as `--opt=value` (or `-cfoo`) the value is attached, so no extra token is
+    # consumed. Boolean global options (`--no-pager`, `--bare`, ...) take no
+    # value and are simply skipped.
+    _GLOBAL_VALUE_OPTS = {
+        "-c", "-C", "--git-dir", "--work-tree", "--namespace",
+        "--super-prefix", "--exec-path", "--config-env",
+    }
+
+    # Locate the 'git' token (allow a path ending in '/git').
+    git_idx = None
     for i, token in enumerate(tokens):
-        if (token == "git" or token.endswith("/git")) and i + 1 < len(tokens):
-            # find first non-flag after git
-            for j in range(i + 1, len(tokens)):
-                if not tokens[j].startswith("-"):
-                    if tokens[j] == "commit":
-                        commit_idx = j
-                    break
+        if token == "git" or token.endswith("/git"):
+            git_idx = i
             break
-    if commit_idx is None:
+    if git_idx is None:
         return False
 
-    for token in tokens[commit_idx + 1:]:
+    i = git_idx + 1
+    subcommand_idx = None
+    while i < len(tokens):
+        token = tokens[i]
+        if not token.startswith("-"):
+            subcommand_idx = i
+            break
+        # A global option in attached form (`--opt=value`, `-cKEY=VAL`) carries
+        # its own value — consume only this one token.
+        if "=" in token:
+            i += 1
+            continue
+        if token in _GLOBAL_VALUE_OPTS:
+            i += 2  # skip the option AND its separate value token
+            continue
+        # Boolean global option (or an unknown bare flag) — consume one token.
+        i += 1
+
+    if subcommand_idx is None or tokens[subcommand_idx] != "commit":
+        return False
+
+    # Phase 2 — scan the `commit` subcommand's arguments for the all-flag.
+    for token in tokens[subcommand_idx + 1:]:
         if token == "--":
             break  # pathspec separator — remaining tokens are paths
         if token == "--all":
@@ -456,7 +504,7 @@ def _commit_uses_all_flag(command: str) -> bool:
             for ch in cluster:
                 if ch == "a":
                     return True
-                if ch in ("m", "F", "c", "C"):
+                if ch in ("m", "F", "c", "C", "e"):
                     break  # this flag takes a value = remainder of the cluster
     return False
 
@@ -589,17 +637,25 @@ def _run_digest_check(command: str, target_root: str, commit_all: bool):
     None on ANY failure (infra hiccup or materialization error → fail OPEN).
 
     Both modes materialize a temp tree that mirrors exactly what the commit will
-    contain (untracked files excluded) and run the check against it. The
-    ON-DISK generator (``<root>/skills/second-opinion/scripts/build-digest.py``)
-    is the trusted renderer — the staged/materialized script copy is NEVER
-    executed (harness advisory). The temp dir is always cleaned up.
+    contain (untracked files excluded) and run the check against it.
+
+    DELIBERATE DESIGN CHOICE (Codex #2 declined): the ON-DISK generator
+    (``<root>/skills/second-opinion/scripts/build-digest.py``) is the TRUSTED
+    renderer. We do NOT execute the STAGED copy of the generator, even though
+    doing so would catch the marginal edge case of a staged generator change
+    combined with a further unstaged edit. Running staged (unreviewed) code
+    inside a commit-BLOCKING security hook is a trust-surface expansion the
+    harness-engineer review explicitly flagged; security outweighs that marginal
+    accuracy gain. The temp dir is always cleaned up.
     """
     temp_dir = _materialize_codex_tree(target_root, commit_all)
     if temp_dir is None:
         return None
     try:
         # Always use the ON-DISK generator (trusted renderer), never the
-        # materialized/staged copy.
+        # materialized/staged copy — see _run_digest_check docstring (Codex #2
+        # declined: do not execute staged code in a blocking security hook;
+        # security > marginal accuracy).
         script = Path(target_root) / _CODEX_DIGEST_SCRIPT
         entries_dir = Path(temp_dir) / _CODEX_ENTRIES_PREFIX.rstrip("/")
         digest_path = Path(temp_dir) / _CODEX_DIGEST_PATH

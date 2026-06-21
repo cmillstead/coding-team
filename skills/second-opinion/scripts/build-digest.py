@@ -120,6 +120,10 @@ def _collect_entries(entries_dir: Path) -> tuple[list[tuple[str, int, str]], lis
     """
     entries: list[tuple[str, int, str]] = []
     errors: list[str] = []
+    # Track which file(s) declared each canonical (group, num) ID. With
+    # timestamp filenames two distinct files can both be headed ``# C10``; that
+    # is ambiguous (two contradictory ``**C10:**`` bullets) and is a hard error.
+    seen_ids: dict[tuple[str, int], list[str]] = {}
 
     md_files = sorted(entries_dir.glob("*.md"))
     for path in md_files:
@@ -135,6 +139,8 @@ def _collect_entries(entries_dir: Path) -> tuple[list[tuple[str, int, str]], lis
             )
             continue
 
+        seen_ids.setdefault((group, num), []).append(path.name)
+
         matches = _DESIGN_DEFAULT_RE.findall(text)
 
         display = _display_id(group, num)
@@ -147,6 +153,15 @@ def _collect_entries(entries_dir: Path) -> tuple[list[tuple[str, int, str]], lis
         else:
             sentence = matches[0].rstrip()
             entries.append((group, num, sentence))
+
+    # A canonical ID claimed by more than one file is a deterministic error:
+    # the digest cannot pick which entry's sentence to render. Reported with the
+    # offending filenames so the author can resolve the collision.
+    for (group, num), files in seen_ids.items():
+        if len(files) >= 2:
+            display = _display_id(group, num)
+            joined = " and ".join(sorted(files))
+            errors.append(f"DUPLICATE ID {display} — appears in {joined}")
 
     return entries, errors
 
