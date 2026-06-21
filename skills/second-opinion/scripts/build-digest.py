@@ -5,6 +5,15 @@ Reads every *.md in codex-learnings.d/ (excluding _header.md), extracts the
 single ``**Design default:**`` sentence from each, and renders a sorted digest
 to codex-learnings-digest.md.
 
+Canonical ID source (the entry HEADING, NOT the filename):
+  Each entry's P/C group + number is derived from its FIRST H1 heading line
+  (``# <P|C><digits>``, e.g. ``# C1`` or ``# P33``), NOT from the filename.
+  New entries are dropped into the folder with a TIMESTAMP filename
+  (``<YYYYMMDD-HHMMSS>-<rand4>-<slug>.md``) for concurrency safety, so the
+  filename has no P/C prefix to parse. The filename is used ONLY to glob
+  ``*.md`` and to exclude ``_header.md``; the ``# <P|C><n>`` heading is the
+  canonical ID used for grouping/ordering.
+
 Sort order (NUMERIC-AWARE — deliberate choice documented here):
   Entries are grouped by prefix letter (P first, then C).  Within each group
   the sort key is the INTEGER value of the numeric suffix, NOT the raw string.
@@ -27,7 +36,7 @@ Exit codes (deliberate scheme — the digest gate distinguishes them):
   0  EXIT_OK            — success (write succeeded, or --check found in sync).
   3  EXIT_DIGEST_PROBLEM — a cleanly-determined digest problem: drift
                           (committed != rendered), a missing digest, or entry
-                          errors (gap / duplicate / bad stem).
+                          errors (gap / duplicate / malformed-or-missing heading).
   1  (implicit)         — Python's DEFAULT uncaught-exception exit. NOT used
                           deliberately here: a genuine crash (syntax error,
                           unexpected exception) propagates to 1 so the gate can
@@ -53,7 +62,8 @@ DIGEST_PATH = Path(__file__).resolve().parent.parent / "codex-learnings-digest.m
 # Exit codes — see module docstring for the full scheme and rationale.
 # EXIT_OK (0)             : success / in sync.
 # EXIT_DIGEST_PROBLEM (3) : cleanly-determined digest problem (drift, missing,
-#                           or entry errors). DISTINCT from Python's implicit 1
+#                           or entry errors: gap / duplicate / malformed-or-
+#                           missing heading). DISTINCT from Python's implicit 1
 #                           on an uncaught crash, which the gate fails OPEN on.
 # ---------------------------------------------------------------------------
 EXIT_OK = 0
@@ -68,18 +78,26 @@ _DESIGN_DEFAULT_RE = re.compile(
 )
 
 # ---------------------------------------------------------------------------
-# Regex for parsing the entry ID from a filename stem.
+# Regex for parsing the canonical entry ID from the first H1 heading line.
+# Every entry begins with ``# <P|C><digits>`` (e.g. ``# C1``, ``# P33``); that
+# heading — NOT the (timestamp) filename — is the canonical ID. Case-insensitive,
+# tolerant of surrounding whitespace on the heading line.
 # ---------------------------------------------------------------------------
-_STEM_RE = re.compile(r'^([pcPC])(\d+)')
+_HEADING_RE = re.compile(r'^[ \t]*#[ \t]+([PpCc])(\d+)[ \t]*$')
 
 
-def _parse_stem(stem: str) -> tuple[str, int]:
-    """Return (group_letter_upper, numeric_id) or raise ValueError."""
-    m = _STEM_RE.match(stem)
-    if not m:
-        raise ValueError(f"filename stem '{stem}' does not match <p|c><digits>... pattern")
-    group = 'P' if m.group(1).upper() == 'P' else 'C'
-    return group, int(m.group(2))
+def _parse_heading(text: str) -> tuple[str, int]:
+    """Return (group_letter_upper, numeric_id) from the entry's first H1 heading.
+
+    Scans for the FIRST line matching ``# <P|C><digits>`` (case-insensitive,
+    surrounding whitespace allowed). Raises ValueError if no such heading exists.
+    """
+    for line in text.splitlines():
+        m = _HEADING_RE.match(line)
+        if m:
+            group = 'P' if m.group(1).upper() == 'P' else 'C'
+            return group, int(m.group(2))
+    raise ValueError("no valid '# <P|C><digits>' heading found")
 
 
 def _display_id(group: str, num: int) -> str:
@@ -94,7 +112,11 @@ def _collect_entries(entries_dir: Path) -> tuple[list[tuple[str, int, str]], lis
     Returns:
       (entries, errors)
       entries — list of (group, num, sentence) tuples, unsorted
-      errors  — list of human-readable error strings (gaps, duplicates, bad stems)
+      errors  — list of human-readable error strings (gaps, duplicates,
+                malformed/missing headings)
+
+    The filename is used ONLY to glob *.md and to exclude _header.md; the
+    canonical P/C id comes from each entry's first ``# <P|C><digits>`` heading.
     """
     entries: list[tuple[str, int, str]] = []
     errors: list[str] = []
@@ -104,14 +126,15 @@ def _collect_entries(entries_dir: Path) -> tuple[list[tuple[str, int, str]], lis
         if path.name == "_header.md":
             continue
 
-        stem = path.stem
+        text = path.read_text(encoding="utf-8")
         try:
-            group, num = _parse_stem(stem)
-        except ValueError as exc:
-            errors.append(str(exc))
+            group, num = _parse_heading(text)
+        except ValueError:
+            errors.append(
+                f"{path.name}: MALFORMED — no valid '# <P|C><digits>' heading found"
+            )
             continue
 
-        text = path.read_text(encoding="utf-8")
         matches = _DESIGN_DEFAULT_RE.findall(text)
 
         display = _display_id(group, num)

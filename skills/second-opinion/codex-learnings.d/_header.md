@@ -142,7 +142,9 @@ These are bypasses, not exemptions:
 - **Every new entry is a NEW FILE** in this directory (D196 drop-folder layout): filename
   `<YYYYMMDD-HHMMSS>-<rand4>-<slug>.md` (UTC datetime + 4 random hex chars for concurrency safety).
   Generate the random suffix: `python3 -c "import secrets; print(secrets.token_hex(2))"`. NEVER
-  reuse a prior filename or hand-pick a sequential number — the filename stem is the entry's canonical ID.
+  reuse a prior filename or hand-pick a sequential number. The timestamp filename is the unique
+  drop-folder NAME (concurrency-safe); the entry's **`# <P|C><n>` H1 heading** (e.g. `# C20`) is the
+  canonical ID that build-digest.py uses for grouping/ordering — the filename has no P/C prefix.
 - Every new entry is BORN TAGGED: the `@tags:` token (category + `provable`/`reasoning-shape` +
   `scope:`) is written in the SAME file creation. If no existing category fits, ADD the new category
   to BOTH the enum in `## Tag schema & vocabulary` AND (if it is `provable`) a battery row in

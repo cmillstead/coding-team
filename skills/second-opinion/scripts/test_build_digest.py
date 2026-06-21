@@ -11,20 +11,32 @@ from pathlib import Path
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _write_entry(entries_dir: Path, stem: str, design_default: str | None = None) -> Path:
-    """Write a minimal entry file to entries_dir."""
+def _write_entry(
+    entries_dir: Path,
+    entry_id: str,
+    design_default: str | None = None,
+    filename: str | None = None,
+) -> Path:
+    """Write a minimal entry file to entries_dir.
+
+    The canonical ID comes from the ``# <ID>`` H1 heading, NOT the filename.
+    ``entry_id`` (e.g. ``p01``, ``c10``) becomes the heading ``# P01`` / ``# C10``.
+    ``filename`` overrides the on-disk name (defaults to ``<entry_id>-some-slug.md``)
+    so tests can exercise timestamp-named files whose ID lives only in the heading.
+    """
     lines = [
-        f"# {stem.upper()}",
+        f"# {entry_id.upper()}",
         "",
         "| ID | Pattern | Check before dispatch |",
         "|----|---------|----------------------|",
-        f"| {stem} | Some pattern | Some check |",
+        f"| {entry_id} | Some pattern | Some check |",
         "",
     ]
     if design_default is not None:
         lines.append(f"**Design default:** {design_default}")
     content = "\n".join(lines) + "\n"
-    path = entries_dir / f"{stem}-some-slug.md"
+    name = filename if filename is not None else f"{entry_id}-some-slug.md"
+    path = entries_dir / name
     path.write_text(content, encoding="utf-8")
     return path
 
@@ -139,41 +151,42 @@ def test_duplicate_design_defaults_reported_in_errors(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# Test 3b — BAD STEM: filename stem not <p|c><digits> surfaces an error,
-# returns EXIT_DIGEST_PROBLEM, and writes no digest.
+# Test 3b — MALFORMED/MISSING HEADING: an entry whose H1 isn't <p|c><digits>
+# surfaces an error, returns EXIT_DIGEST_PROBLEM, and writes no digest. The
+# canonical ID comes from the heading, so a missing/bad heading is the error
+# (the FILENAME is irrelevant — see the timestamp-named test below).
 # ---------------------------------------------------------------------------
-def test_bad_stem_is_reported_in_errors(tmp_path):
-    """An entry whose stem is not <p|c><digits> (e.g. 'x99-foo') surfaces an error."""
-    # Arrange — a real entry body, but a filename stem the parser rejects.
+def test_bad_heading_is_reported_in_errors(tmp_path):
+    """An entry whose H1 heading is not '# <P|C><digits>' surfaces a MALFORMED error."""
+    # Arrange — a real entry body and a perfectly fine filename, but the H1
+    # heading is not a canonical P/C id.
     content = (
-        "# X99\n\n"
+        "# Not An Id Heading\n\n"
         "| ID | Pattern | Check |\n"
         "|----|---------|------|\n"
-        "| X99 | A | B |\n\n"
-        "**Design default:** This entry has a valid body but a bad stem.\n"
+        "| X | A | B |\n\n"
+        "**Design default:** Valid body, but the H1 heading is not a P/C id.\n"
     )
-    (tmp_path / "x99-foo.md").write_text(content, encoding="utf-8")
+    (tmp_path / "c01-good-filename.md").write_text(content, encoding="utf-8")
 
     # Act
     text, errors = render_digest(tmp_path)
 
-    # Assert — the bad stem is surfaced and the render is suppressed.
+    # Assert — the malformed heading is surfaced and the render is suppressed.
     assert text == ""
     assert len(errors) == 1
-    assert "x99-foo" in errors[0]
+    assert "MALFORMED" in errors[0]
+    assert "c01-good-filename.md" in errors[0]
 
 
-def test_bad_stem_causes_digest_problem_exit_and_no_digest_written(tmp_path):
-    """A bad-stem entry returns EXIT_DIGEST_PROBLEM (3) via write() and writes no digest."""
-    # Arrange
+def test_missing_heading_causes_digest_problem_exit_and_no_digest_written(tmp_path):
+    """An entry with NO valid P/C heading returns EXIT_DIGEST_PROBLEM (3) and writes no digest."""
+    # Arrange — no H1 heading at all (just a body + Design default).
     content = (
-        "# X99\n\n"
-        "| ID | Pattern | Check |\n"
-        "|----|---------|------|\n"
-        "| X99 | A | B |\n\n"
-        "**Design default:** Bad stem, valid body.\n"
+        "Some prose with no heading.\n\n"
+        "**Design default:** No heading means no canonical id.\n"
     )
-    (tmp_path / "x99-foo.md").write_text(content, encoding="utf-8")
+    (tmp_path / "20260620-120000-ffff-no-heading.md").write_text(content, encoding="utf-8")
     digest_path = tmp_path / "digest.md"
 
     # Act
@@ -182,6 +195,32 @@ def test_bad_stem_causes_digest_problem_exit_and_no_digest_written(tmp_path):
     # Assert — dedicated digest-problem code (3), and digest NOT written.
     assert result == EXIT_DIGEST_PROBLEM
     assert not digest_path.exists()
+
+
+# ---------------------------------------------------------------------------
+# Test 3c — TIMESTAMP-NAMED FILE: a drop-folder entry whose filename carries NO
+# P/C prefix is included and ordered by its HEADING id, not its filename.
+# ---------------------------------------------------------------------------
+def test_timestamp_named_file_ordered_by_heading_id(tmp_path):
+    """A timestamp-named file with heading '# C20' is included and ordered by C20."""
+    # Arrange — a normal C2 entry plus a timestamp-named C20 entry (no p/c stem).
+    _write_entry(tmp_path, "c2", "Sentence for C2.")
+    _write_entry(
+        tmp_path,
+        "c20",
+        "Sentence for C20.",
+        filename="20260620-120000-ab12-foo.md",
+    )
+
+    # Act
+    text, errors = render_digest(tmp_path)
+
+    # Assert — both included, C20 derived from heading, ordered numerically after C2.
+    assert errors == []
+    assert "**C20:** Sentence for C20." in text
+    pos_c2 = text.index("**C2:**")
+    pos_c20 = text.index("**C20:**")
+    assert pos_c2 < pos_c20, "C20 (from heading) must order numerically after C2"
 
 
 # ---------------------------------------------------------------------------
@@ -207,10 +246,14 @@ def test_rendering_twice_is_byte_identical(tmp_path):
 # Test 5 — Ordering (numeric-aware): c2 appears BEFORE c10 (not lexicographic)
 # ---------------------------------------------------------------------------
 def test_numeric_aware_ordering_c2_before_c10(tmp_path):
-    """c2 must sort before c10 numerically (2 < 10), not lexicographically ("10" < "2")."""
-    # Arrange — write c10 first so filesystem order is "wrong" for lexicographic sort
-    _write_entry(tmp_path, "c10", "Sentence for C10.")
-    _write_entry(tmp_path, "c2", "Sentence for C2.")
+    """c2 must sort before c10 numerically (2 < 10), not lexicographically ("10" < "2").
+
+    Both entries use timestamp filenames whose lexical order is the REVERSE of the
+    correct heading-id order, proving the sort key is the HEADING id, not the name.
+    """
+    # Arrange — filename order (00... before 99...) is the opposite of id order.
+    _write_entry(tmp_path, "c10", "Sentence for C10.", filename="00000000-000000-aaaa-ten.md")
+    _write_entry(tmp_path, "c2", "Sentence for C2.", filename="99999999-999999-bbbb-two.md")
 
     # Act
     text, errors = render_digest(tmp_path)
@@ -275,7 +318,7 @@ def test_output_normalization(tmp_path):
 #
 # NOTE: The digest file MUST live outside the entries_dir; if it were placed
 # inside, render_digest would attempt to parse "digest.md" as an entry and
-# fail (the stem "digest" does not match the <p|c><digits> pattern).
+# fail (its H1 heading is not a '# <P|C><digits>' canonical id).
 # ---------------------------------------------------------------------------
 def test_check_exits_zero_when_digest_matches(tmp_path):
     """--check exits 0 when the committed digest matches the rendered output."""

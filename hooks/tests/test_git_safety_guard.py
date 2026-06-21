@@ -1006,8 +1006,15 @@ class TestCodexDigestSyncGate:
         mod = _load_hook_module()
         repo = _build_codex_repo(tmp_path / "repo")
 
-        # Edit a tracked entry, regenerate the digest so the WORKING TREE is in
-        # sync, stage NOTHING (a -a commit captures the working tree).
+        # Commit an in-sync digest so BOTH the entry and the digest are TRACKED
+        # (a -a commit only captures tracked modifications; the digest must be
+        # tracked to be part of the to-be-committed tree).
+        _regenerate_digest(repo)
+        _git(["add", "skills/second-opinion/codex-learnings-digest.md"], cwd=repo)
+        _git(["commit", "-m", "chore: add digest"], cwd=repo)
+
+        # Edit the tracked entry, regenerate the digest so the WORKING TREE is in
+        # sync, stage NOTHING (a -a commit captures tracked modifications).
         entry = repo / "skills" / "second-opinion" / "codex-learnings.d" / "p01-phantom-symbol.md"
         entry.write_text(_ENTRY_P1.replace(
             "before writing the plan.",
@@ -1080,6 +1087,80 @@ class TestCodexDigestSyncGate:
         block = mod.check_codex_digest_sync(command, str(repo))
 
         assert block is not None, "Plain commit must FIRE when the staged digest is stale vs the staged entry"
+        assert "CODEX DIGEST STALE" in block
+
+    def test_commit_all_excludes_untracked_draft_entry(self, tmp_path):
+        """FIX 2: `-a` commit (tracked entry in sync) with an UNTRACKED draft → None.
+
+        `git commit -a` commits tracked modifications but NOT untracked files.
+        An untracked draft entry under codex-learnings.d must therefore be
+        EXCLUDED from the materialized tree and never cause a false block. A
+        working-tree-direct check would wrongly include the draft and could
+        block; the materialized (ls-files) check excludes it.
+        """
+        mod = _load_hook_module()
+        repo = _build_codex_repo(tmp_path / "repo")
+
+        # Working tree is in sync: regenerate the digest for the tracked entries.
+        _regenerate_digest(repo)
+        _git(["add", "skills/second-opinion/codex-learnings-digest.md"], cwd=repo)
+        _git(["commit", "-m", "chore: add digest"], cwd=repo)
+
+        # Edit a TRACKED entry and regenerate so the tracked set stays in sync;
+        # stage nothing (a -a commit captures tracked modifications).
+        entry = repo / "skills" / "second-opinion" / "codex-learnings.d" / "p01-phantom-symbol.md"
+        entry.write_text(_ENTRY_P1.replace(
+            "before writing the plan.",
+            "before writing the plan, reliably.",
+        ), encoding="utf-8")
+        _regenerate_digest(repo)
+
+        # Drop an UNTRACKED draft entry whose Design default is NOT in the digest.
+        draft = repo / "skills" / "second-opinion" / "codex-learnings.d" / "20260620-120000-ab12-draft.md"
+        draft.write_text(
+            "# C2\n\n"
+            "| ID | Pattern | Check |\n"
+            "|----|---------|------|\n"
+            "| C2 | Draft | Draft check |\n\n"
+            "**Design default:** An UNTRACKED draft default not yet in the digest.\n",
+            encoding="utf-8",
+        )
+        # Sanity: the draft is untracked.
+        status = _git(["status", "--porcelain", "--", str(draft)], cwd=repo).stdout
+        assert status.startswith("??"), status
+
+        command = f'cd {repo} && git commit -am "fix: tweak p01"'
+        # The untracked draft is NOT part of the -a commit → no false block.
+        assert mod.check_codex_digest_sync(command, str(repo)) is None
+
+    def test_commit_all_fires_when_working_tree_edit_stales_digest(self, tmp_path):
+        """FIX 2: `-a` commit of a tracked entry whose working-tree edit stales the digest → FIRES.
+
+        A `-a` commit captures tracked working-tree modifications. Editing a
+        tracked entry WITHOUT regenerating the digest makes the to-be-committed
+        digest stale; the materialized working-tree check must FIRE.
+        """
+        mod = _load_hook_module()
+        repo = _build_codex_repo(tmp_path / "repo")
+
+        # In-sync digest committed.
+        _regenerate_digest(repo)
+        _git(["add", "skills/second-opinion/codex-learnings-digest.md"], cwd=repo)
+        _git(["commit", "-m", "chore: add digest"], cwd=repo)
+
+        # Edit a tracked entry in the working tree WITHOUT regenerating the digest
+        # and stage NOTHING (a -a commit captures the tracked modification).
+        entry = repo / "skills" / "second-opinion" / "codex-learnings.d" / "p01-phantom-symbol.md"
+        entry.write_text(_ENTRY_P1.replace(
+            "**Design default:** Verify every symbol the plan names exists before writing the plan.\n",
+            "**Design default:** A working-tree edit the stale digest does not reflect.\n",
+        ), encoding="utf-8")
+        assert _git(["diff", "--cached", "--name-only"], cwd=repo).stdout.strip() == ""
+
+        command = f'cd {repo} && git commit -am "fix: tweak p01"'
+        block = mod.check_codex_digest_sync(command, str(repo))
+
+        assert block is not None, "-a commit must FIRE when a tracked working-tree edit stales the digest"
         assert "CODEX DIGEST STALE" in block
 
     def test_amend_not_misdetected_as_all_flag(self, tmp_path):

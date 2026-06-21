@@ -503,17 +503,28 @@ _CODEX_TRACKED_PATHS = [
 ]
 
 
-def _materialize_staged_codex_tree(target_root: str) -> str | None:
-    """Materialize the INDEX (staged) content of the codex paths into a temp dir.
+def _materialize_codex_tree(target_root: str, commit_all: bool) -> str | None:
+    """Materialize the TO-BE-COMMITTED content of the codex paths into a temp dir.
 
-    Uses ``git checkout-index --prefix=<T>/`` over the tracked codex files
-    (enumerated via ``git ls-files``), which writes the INDEX blobs — exactly the
-    to-be-committed content for a PLAIN commit. Staged-new files are in the index
-    and included; staged-deletions are absent from the index and correctly not
-    materialized.
+    The temp dir reflects exactly what each commit mode will commit, and UNTRACKED
+    files are EXCLUDED in BOTH modes (enumeration is via ``git ls-files``, which
+    lists tracked paths only):
 
-    Returns the temp dir path on success, or None on ANY error (the caller cleans
-    up the dir on its own and fails OPEN). The CALLER owns cleanup of the dir.
+    - ``commit_all`` False (plain commit): the committed content is the INDEX →
+      ``git checkout-index --prefix=<T>/`` writes the INDEX blobs for the tracked
+      codex paths. Staged-new files are in the index and included; staged
+      deletions are absent and correctly not materialized.
+    - ``commit_all`` True (``-a/--all``): the committed content for tracked files
+      is the WORKING TREE → each tracked codex file is copied from the working
+      tree into the temp dir. A tracked file missing from the working tree
+      (tracked-deleted by ``-a``) is skipped (correctly absent from the commit).
+      Untracked draft entries are NOT copied — ``ls-files`` already excludes them.
+
+    OWNERSHIP / CLEANUP: this function creates the temp dir and is responsible for
+    removing it on EVERY error path before returning None (no leak). On SUCCESS it
+    returns the temp dir path and the CALLER owns cleanup.
+
+    Returns the temp dir path on success, or None on ANY error (fail OPEN).
     """
     try:
         listed = subprocess.run(
@@ -531,19 +542,42 @@ def _materialize_staged_codex_tree(target_root: str) -> str | None:
     if not paths:
         return None  # nothing tracked under codex paths → cannot materialize
 
-    temp_dir = tempfile.mkdtemp(prefix="codex-digest-gate-")
+    # FIX 3: mkdtemp can raise OSError (e.g. $TMPDIR unwritable/full). Wrap it so
+    # an infra failure fails OPEN rather than propagating to the hook's top-level
+    # block-on-exception handler.
     try:
-        # The trailing slash on --prefix makes git treat it as a directory.
-        result = subprocess.run(
-            ["git", "-C", target_root, "checkout-index", "-f",
-             f"--prefix={temp_dir}/", "--", *paths],
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-    except (subprocess.SubprocessError, OSError, ValueError):
+        temp_dir = tempfile.mkdtemp(prefix="codex-digest-gate-")
+    except OSError:
         return None
-    if result.returncode != 0:
+
+    # FIX 4: from here on the temp dir EXISTS; every error path must remove it
+    # before returning None so no temp dir leaks.
+    try:
+        if commit_all:
+            # -a/--all: copy each tracked file's WORKING-TREE content. A tracked
+            # file missing from the working tree (deleted by -a) is skipped.
+            for rel in paths:
+                src = Path(target_root) / rel
+                if not src.is_file():
+                    continue  # tracked-deleted → correctly absent from the commit
+                dst = Path(temp_dir) / rel
+                dst.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(src, dst)
+        else:
+            # Plain commit: materialize the INDEX blobs.
+            # The trailing slash on --prefix makes git treat it as a directory.
+            result = subprocess.run(
+                ["git", "-C", target_root, "checkout-index", "-f",
+                 f"--prefix={temp_dir}/", "--", *paths],
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            if result.returncode != 0:
+                shutil.rmtree(temp_dir, ignore_errors=True)
+                return None
+    except (subprocess.SubprocessError, OSError, ValueError):
+        shutil.rmtree(temp_dir, ignore_errors=True)
         return None
     return temp_dir
 
@@ -554,38 +588,19 @@ def _run_digest_check(command: str, target_root: str, commit_all: bool):
     Returns the completed subprocess (caller inspects returncode / stderr), or
     None on ANY failure (infra hiccup or materialization error → fail OPEN).
 
-    - ``commit_all`` True: the working tree IS the committed content for tracked
-      files → run the real script with its __file__-relative defaults.
-    - ``commit_all`` False (plain commit): materialize the staged index into a
-      temp dir and point --check at the materialized entries dir + digest,
-      invoking the MATERIALIZED script copy so the render logic checked is the
-      to-be-committed version too (falling back to the real script if the
-      materialized copy is absent). The temp dir is always cleaned up.
+    Both modes materialize a temp tree that mirrors exactly what the commit will
+    contain (untracked files excluded) and run the check against it. The
+    ON-DISK generator (``<root>/skills/second-opinion/scripts/build-digest.py``)
+    is the trusted renderer — the staged/materialized script copy is NEVER
+    executed (harness advisory). The temp dir is always cleaned up.
     """
-    # -a/--all: working tree is the committed content for tracked files.
-    if commit_all:
-        script_path = Path(target_root) / _CODEX_DIGEST_SCRIPT
-        try:
-            return subprocess.run(
-                ["python3", str(script_path), "--check"],
-                cwd=target_root,
-                capture_output=True,
-                text=True,
-                timeout=10,
-            )
-        except (subprocess.SubprocessError, OSError, ValueError):
-            return None
-
-    # Plain commit: evaluate the INDEX content via a materialized temp tree.
-    temp_dir = _materialize_staged_codex_tree(target_root)
+    temp_dir = _materialize_codex_tree(target_root, commit_all)
     if temp_dir is None:
         return None
     try:
-        materialized_script = Path(temp_dir) / _CODEX_DIGEST_SCRIPT
-        real_script = Path(target_root) / _CODEX_DIGEST_SCRIPT
-        # Prefer the materialized (to-be-committed) generator; fall back to the
-        # real one if it was not staged/tracked there.
-        script = materialized_script if materialized_script.exists() else real_script
+        # Always use the ON-DISK generator (trusted renderer), never the
+        # materialized/staged copy.
+        script = Path(target_root) / _CODEX_DIGEST_SCRIPT
         entries_dir = Path(temp_dir) / _CODEX_ENTRIES_PREFIX.rstrip("/")
         digest_path = Path(temp_dir) / _CODEX_DIGEST_PATH
         try:
@@ -613,17 +628,23 @@ def check_codex_digest_sync(command: str, target_root: str) -> str | None:
     docs-only early return in the verification checklist (which would otherwise
     skip the check entirely for an entries-only commit).
 
-    The check evaluates the TO-BE-COMMITTED content, not the working tree:
+    The check evaluates the TO-BE-COMMITTED content, not the raw working tree,
+    and UNTRACKED files are EXCLUDED in BOTH modes (an untracked draft entry is
+    not part of either commit, so it must never cause a block):
       - ``git commit -a / -am / --all``: the committed content for tracked files
-        IS the working tree, so ``--check`` runs against the working tree (the
-        generator's __file__-relative defaults). The trigger set also includes
-        tracked-but-unstaged modifications (``git diff --name-only``), because a
-        ``-a`` commit captures those even when ``git diff --cached`` is empty.
+        IS the working tree, so each tracked codex file's WORKING-TREE content is
+        copied into a temp dir and ``--check`` runs against THAT. Untracked
+        drafts are excluded (``ls-files`` lists tracked paths only). The trigger
+        set also includes tracked-but-unstaged modifications
+        (``git diff --name-only``), because a ``-a`` commit captures those even
+        when ``git diff --cached`` is empty.
       - PLAIN ``git commit``: the committed content is the INDEX, so the staged
         codex blobs are materialized into a temp dir via ``git checkout-index``
         and ``--check`` runs against THAT (pointed there with --entries-dir /
         --digest-path), so the comparison reflects exactly what will be committed
         — an in-sync staged pair is allowed even if later unstaged edits exist.
+      In both modes the ON-DISK generator is the trusted renderer; the
+      materialized/staged script copy is never executed.
 
     Behavior:
       - Returns None (do not block) unless ALL of:
