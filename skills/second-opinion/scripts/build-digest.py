@@ -18,6 +18,11 @@ CLI:
   build-digest.py --check   → compare in-memory render to DIGEST_PATH, diff on stderr
   build-digest.py --help    → brief usage
 
+  --entries-dir DIR and --digest-path FILE override the __file__-relative
+  defaults for both write and --check (a thin pass-through to render/check).
+  This lets a caller (e.g. the digest-sync commit gate) point the check at a
+  materialized index tree instead of the working tree.
+
 Exit codes (deliberate scheme — the digest gate distinguishes them):
   0  EXIT_OK            — success (write succeeded, or --check found in sync).
   3  EXIT_DIGEST_PROBLEM — a cleanly-determined digest problem: drift
@@ -236,6 +241,28 @@ def check(entries_dir: Path, digest_path: Path) -> int:
     return EXIT_DIGEST_PROBLEM
 
 
+def _extract_option(argv: list[str], name: str) -> str | None:
+    """Return the value of ``--name VALUE`` or ``--name=VALUE`` in argv, or None.
+
+    Last occurrence wins. Does NOT mutate argv. A trailing ``--name`` with no
+    following value yields None (treated as absent → default path is used).
+    """
+    value: str | None = None
+    prefix = name + "="
+    i = 0
+    while i < len(argv):
+        token = argv[i]
+        if token == name:
+            if i + 1 < len(argv):
+                value = argv[i + 1]
+            i += 2
+            continue
+        if token.startswith(prefix):
+            value = token[len(prefix):]
+        i += 1
+    return value
+
+
 def main(argv: list[str] | None = None) -> int:
     """Entry point. Returns an exit code (see module docstring: 0 / 3, plus
     Python's implicit 1 on any uncaught crash — deliberately NOT swallowed)."""
@@ -246,10 +273,15 @@ def main(argv: list[str] | None = None) -> int:
         print(__doc__)
         return EXIT_OK
 
-    if "--check" in argv:
-        return check(ENTRIES_DIR, DIGEST_PATH)
+    entries_override = _extract_option(argv, "--entries-dir")
+    digest_override = _extract_option(argv, "--digest-path")
+    entries_dir = Path(entries_override) if entries_override else ENTRIES_DIR
+    digest_path = Path(digest_override) if digest_override else DIGEST_PATH
 
-    return write(ENTRIES_DIR, DIGEST_PATH)
+    if "--check" in argv:
+        return check(entries_dir, digest_path)
+
+    return write(entries_dir, digest_path)
 
 
 if __name__ == "__main__":

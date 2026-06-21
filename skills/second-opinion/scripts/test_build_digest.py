@@ -397,3 +397,55 @@ def test_c_only_fixture_renders_no_p_section(tmp_path):
     assert errors == []
     assert "## C — Code defaults" in text
     assert "## P — Plan defaults" not in text
+
+
+# ---------------------------------------------------------------------------
+# Test 10 — main() --entries-dir / --digest-path overrides target the given paths
+# ---------------------------------------------------------------------------
+def test_cli_overrides_check_specified_paths_in_sync(tmp_path):
+    """main(['--check', '--entries-dir', D, '--digest-path', F]) returns 0 when D/F are in sync."""
+    # Arrange — an entries subdir + a digest written from it (in sync)
+    entries_dir = tmp_path / "entries"
+    entries_dir.mkdir()
+    _write_entry(entries_dir, "p01", "Override path in-sync sentence.")
+    digest_path = tmp_path / "digest.md"
+    assert write(entries_dir, digest_path) == EXIT_OK
+
+    # Act — check via the CLI overrides (NOT the __file__-relative defaults)
+    rc = main(["--check", "--entries-dir", str(entries_dir), "--digest-path", str(digest_path)])
+
+    # Assert
+    assert rc == EXIT_OK
+
+
+def test_cli_overrides_check_specified_paths_on_drift(tmp_path):
+    """main(['--check', ...overrides]) returns 3 when the override entries drift from the override digest."""
+    # Arrange — write an in-sync digest, then mutate the entry so it drifts
+    entries_dir = tmp_path / "entries"
+    entries_dir.mkdir()
+    _write_entry(entries_dir, "p01", "Original override sentence.")
+    digest_path = tmp_path / "digest.md"
+    write(entries_dir, digest_path)
+    _write_entry(entries_dir, "p01", "MUTATED override sentence causing drift.")
+
+    # Act
+    rc = main(["--check", "--entries-dir", str(entries_dir), "--digest-path", str(digest_path)])
+
+    # Assert
+    assert rc == EXIT_DIGEST_PROBLEM
+
+
+def test_cli_overrides_equals_form(tmp_path):
+    """The --entries-dir=DIR / --digest-path=FILE equals form is honored too."""
+    # Arrange
+    entries_dir = tmp_path / "entries"
+    entries_dir.mkdir()
+    _write_entry(entries_dir, "c01", "Equals-form override sentence.")
+    digest_path = tmp_path / "digest.md"
+    assert write(entries_dir, digest_path) == EXIT_OK
+
+    # Act
+    rc = main(["--check", f"--entries-dir={entries_dir}", f"--digest-path={digest_path}"])
+
+    # Assert
+    assert rc == EXIT_OK
