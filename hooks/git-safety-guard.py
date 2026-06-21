@@ -406,109 +406,6 @@ def is_docs_only_commit(command: str, target_root: str) -> bool:
     )
 
 
-def _commit_uses_all_flag(command: str) -> bool:
-    """Return True iff a ``git commit`` carries -a / --all (commit all tracked).
-
-    ``git commit -a`` (and clustered short forms like ``-am``, ``-sa``) commits
-    tracked modifications that are NOT in the index, so ``git diff --cached`` is
-    empty and the staged-set trigger would miss them. This detects the flag so
-    the gate can additionally consult the tracked-but-unstaged working-tree set.
-
-    Two-phase walk, ANCHORED on the ``commit`` subcommand so git GLOBAL options
-    between ``git`` and ``commit`` (e.g. ``git -c user.name=bot commit -am``,
-    ``git --no-pager commit --all``, ``git -C /repo commit -m``) are handled
-    correctly rather than mistaken for the subcommand:
-
-      Phase 1 — from the ``git`` token, skip global options until the first
-        non-option token (the subcommand). Value-taking globals in separate-token
-        form (``-c``, ``-C``, ``--git-dir``, ``--work-tree``, ``--namespace``,
-        ``--super-prefix``, ``--exec-path``, ``--config-env``) consume their value
-        token too; attached forms (``--opt=value``) and boolean globals consume
-        one token. If the subcommand is not ``commit``, return False.
-      Phase 2 — scan the ``commit`` arguments for the all-flag.
-
-    Robust against the ``--amend`` false-match: clustered SHORT flags (a single
-    leading ``-``) are scanned char-by-char for ``a``; LONG flags (``--``) match
-    only the exact ``--all`` token, so ``--amend`` / ``--allow-empty`` never trip
-    it. Tokens after a bare ``--`` (pathspec separator) are ignored.
-    """
-    if not re.search(r'\bgit\b.*\bcommit\b', command):
-        return False
-
-    try:
-        tokens = shlex.split(command)
-    except ValueError:
-        tokens = command.split()
-
-    # Phase 1 — skip git GLOBAL options to reach the subcommand.
-    #
-    # `git [global-options] <subcommand> [subcommand-args]`. Global options can
-    # sit BETWEEN `git` and `commit` (e.g. `git -c user.name=bot commit -am`,
-    # `git --no-pager commit --all`), so we cannot stop at the first non-flag
-    # token blindly — we must skip any value-taking global option AND its value
-    # token before the first non-option token (the subcommand).
-    #
-    # Value-taking global options consume the NEXT token as their value when
-    # given in separate-token form (`-c key=val`, `--git-dir .git`). When given
-    # as `--opt=value` (or `-cfoo`) the value is attached, so no extra token is
-    # consumed. Boolean global options (`--no-pager`, `--bare`, ...) take no
-    # value and are simply skipped.
-    _GLOBAL_VALUE_OPTS = {
-        "-c", "-C", "--git-dir", "--work-tree", "--namespace",
-        "--super-prefix", "--exec-path", "--config-env",
-    }
-
-    # Locate the 'git' token (allow a path ending in '/git').
-    git_idx = None
-    for i, token in enumerate(tokens):
-        if token == "git" or token.endswith("/git"):
-            git_idx = i
-            break
-    if git_idx is None:
-        return False
-
-    i = git_idx + 1
-    subcommand_idx = None
-    while i < len(tokens):
-        token = tokens[i]
-        if not token.startswith("-"):
-            subcommand_idx = i
-            break
-        # A global option in attached form (`--opt=value`, `-cKEY=VAL`) carries
-        # its own value — consume only this one token.
-        if "=" in token:
-            i += 1
-            continue
-        if token in _GLOBAL_VALUE_OPTS:
-            i += 2  # skip the option AND its separate value token
-            continue
-        # Boolean global option (or an unknown bare flag) — consume one token.
-        i += 1
-
-    if subcommand_idx is None or tokens[subcommand_idx] != "commit":
-        return False
-
-    # Phase 2 — scan the `commit` subcommand's arguments for the all-flag.
-    for token in tokens[subcommand_idx + 1:]:
-        if token == "--":
-            break  # pathspec separator — remaining tokens are paths
-        if token == "--all":
-            return True
-        if token.startswith("--"):
-            continue  # any other long flag (--amend, --allow-empty, ...) is not -a
-        if token.startswith("-") and len(token) > 1:
-            # Clustered short flags: e.g. -am, -sa. A value-taking short flag
-            # such as -m consumes the REST of the cluster as its value, so stop
-            # scanning the cluster at the first value-taking flag.
-            cluster = token[1:]
-            for ch in cluster:
-                if ch == "a":
-                    return True
-                if ch in ("m", "F", "c", "C", "e"):
-                    break  # this flag takes a value = remainder of the cluster
-    return False
-
-
 # Repo-relative paths/prefixes whose staging makes the codex digest stale-able.
 _CODEX_ENTRIES_PREFIX = "skills/second-opinion/codex-learnings.d/"
 _CODEX_DIGEST_PATH = "skills/second-opinion/codex-learnings-digest.md"
@@ -542,8 +439,8 @@ def _staged_touches_codex_digest_inputs(staged_files: list[str]) -> bool:
     return False
 
 
-# The three codex digest-input paths, repo-relative. Enumerated for both the
-# index-materialization (checkout-index) step and ls-files scoping.
+# The three codex digest-input paths, repo-relative. Enumerated for ls-files
+# scoping when materializing the tracked working tree.
 _CODEX_TRACKED_PATHS = [
     _CODEX_ENTRIES_PREFIX.rstrip("/"),
     _CODEX_DIGEST_PATH,
@@ -551,22 +448,18 @@ _CODEX_TRACKED_PATHS = [
 ]
 
 
-def _materialize_codex_tree(target_root: str, commit_all: bool) -> str | None:
-    """Materialize the TO-BE-COMMITTED content of the codex paths into a temp dir.
+def _materialize_codex_tree(target_root: str) -> str | None:
+    """Materialize the TRACKED WORKING-TREE content of the codex paths into a temp dir.
 
-    The temp dir reflects exactly what each commit mode will commit, and UNTRACKED
-    files are EXCLUDED in BOTH modes (enumeration is via ``git ls-files``, which
-    lists tracked paths only):
+    Mode-INDEPENDENT: this always copies the WORKING-TREE content of the tracked
+    codex files, regardless of whether the commit is plain or ``-a``. There is no
+    index branching and no command-string parsing — enumeration is via
+    ``git ls-files`` (tracked paths only, so untracked drafts are EXCLUDED), and
+    each tracked file is copied straight from the working tree.
 
-    - ``commit_all`` False (plain commit): the committed content is the INDEX →
-      ``git checkout-index --prefix=<T>/`` writes the INDEX blobs for the tracked
-      codex paths. Staged-new files are in the index and included; staged
-      deletions are absent and correctly not materialized.
-    - ``commit_all`` True (``-a/--all``): the committed content for tracked files
-      is the WORKING TREE → each tracked codex file is copied from the working
-      tree into the temp dir. A tracked file missing from the working tree
-      (tracked-deleted by ``-a``) is skipped (correctly absent from the commit).
-      Untracked draft entries are NOT copied — ``ls-files`` already excludes them.
+    A tracked file missing from the working tree (deleted) is skipped (correctly
+    absent). Untracked draft entries under the codex dir are never copied because
+    ``ls-files`` does not list them.
 
     OWNERSHIP / CLEANUP: this function creates the temp dir and is responsible for
     removing it on EVERY error path before returning None (no leak). On SUCCESS it
@@ -590,72 +483,56 @@ def _materialize_codex_tree(target_root: str, commit_all: bool) -> str | None:
     if not paths:
         return None  # nothing tracked under codex paths → cannot materialize
 
-    # FIX 3: mkdtemp can raise OSError (e.g. $TMPDIR unwritable/full). Wrap it so
-    # an infra failure fails OPEN rather than propagating to the hook's top-level
+    # mkdtemp can raise OSError (e.g. $TMPDIR unwritable/full). Wrap it so an
+    # infra failure fails OPEN rather than propagating to the hook's top-level
     # block-on-exception handler.
     try:
         temp_dir = tempfile.mkdtemp(prefix="codex-digest-gate-")
     except OSError:
         return None
 
-    # FIX 4: from here on the temp dir EXISTS; every error path must remove it
-    # before returning None so no temp dir leaks.
+    # From here on the temp dir EXISTS; every error path must remove it before
+    # returning None so no temp dir leaks.
     try:
-        if commit_all:
-            # -a/--all: copy each tracked file's WORKING-TREE content. A tracked
-            # file missing from the working tree (deleted by -a) is skipped.
-            for rel in paths:
-                src = Path(target_root) / rel
-                if not src.is_file():
-                    continue  # tracked-deleted → correctly absent from the commit
-                dst = Path(temp_dir) / rel
-                dst.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copyfile(src, dst)
-        else:
-            # Plain commit: materialize the INDEX blobs.
-            # The trailing slash on --prefix makes git treat it as a directory.
-            result = subprocess.run(
-                ["git", "-C", target_root, "checkout-index", "-f",
-                 f"--prefix={temp_dir}/", "--", *paths],
-                capture_output=True,
-                text=True,
-                timeout=10,
-            )
-            if result.returncode != 0:
-                shutil.rmtree(temp_dir, ignore_errors=True)
-                return None
-    except (subprocess.SubprocessError, OSError, ValueError):
+        for rel in paths:
+            src = Path(target_root) / rel
+            if not src.is_file():
+                continue  # tracked-deleted → correctly absent
+            dst = Path(temp_dir) / rel
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(src, dst)
+    except (OSError, ValueError):
         shutil.rmtree(temp_dir, ignore_errors=True)
         return None
     return temp_dir
 
 
-def _run_digest_check(command: str, target_root: str, commit_all: bool):
-    """Run build-digest.py --check against the TO-BE-COMMITTED content.
+def _run_digest_check(target_root: str):
+    """Run build-digest.py --check against the tracked WORKING-TREE content.
 
     Returns the completed subprocess (caller inspects returncode / stderr), or
     None on ANY failure (infra hiccup or materialization error → fail OPEN).
 
-    Both modes materialize a temp tree that mirrors exactly what the commit will
-    contain (untracked files excluded) and run the check against it.
+    Materializes a temp tree mirroring the tracked codex working tree (untracked
+    files excluded) and runs the check against it.
 
     DELIBERATE DESIGN CHOICE (Codex #2 declined): the ON-DISK generator
     (``<root>/skills/second-opinion/scripts/build-digest.py``) is the TRUSTED
-    renderer. We do NOT execute the STAGED copy of the generator, even though
-    doing so would catch the marginal edge case of a staged generator change
-    combined with a further unstaged edit. Running staged (unreviewed) code
-    inside a commit-BLOCKING security hook is a trust-surface expansion the
+    renderer. We do NOT execute a materialized/staged copy of the generator, even
+    though doing so would catch the marginal edge case of a generator change
+    combined with a further edit. Running unreviewed code inside a
+    commit-BLOCKING security hook is a trust-surface expansion the
     harness-engineer review explicitly flagged; security outweighs that marginal
     accuracy gain. The temp dir is always cleaned up.
     """
-    temp_dir = _materialize_codex_tree(target_root, commit_all)
+    temp_dir = _materialize_codex_tree(target_root)
     if temp_dir is None:
         return None
     try:
         # Always use the ON-DISK generator (trusted renderer), never the
-        # materialized/staged copy — see _run_digest_check docstring (Codex #2
-        # declined: do not execute staged code in a blocking security hook;
-        # security > marginal accuracy).
+        # materialized copy — see docstring (Codex #2 declined: do not execute
+        # materialized code in a blocking security hook; security > marginal
+        # accuracy).
         script = Path(target_root) / _CODEX_DIGEST_SCRIPT
         entries_dir = Path(temp_dir) / _CODEX_ENTRIES_PREFIX.rstrip("/")
         digest_path = Path(temp_dir) / _CODEX_DIGEST_PATH
@@ -684,29 +561,46 @@ def check_codex_digest_sync(command: str, target_root: str) -> str | None:
     docs-only early return in the verification checklist (which would otherwise
     skip the check entirely for an entries-only commit).
 
-    The check evaluates the TO-BE-COMMITTED content, not the raw working tree,
-    and UNTRACKED files are EXCLUDED in BOTH modes (an untracked draft entry is
-    not part of either commit, so it must never cause a block):
-      - ``git commit -a / -am / --all``: the committed content for tracked files
-        IS the working tree, so each tracked codex file's WORKING-TREE content is
-        copied into a temp dir and ``--check`` runs against THAT. Untracked
-        drafts are excluded (``ls-files`` lists tracked paths only). The trigger
-        set also includes tracked-but-unstaged modifications
-        (``git diff --name-only``), because a ``-a`` commit captures those even
-        when ``git diff --cached`` is empty.
-      - PLAIN ``git commit``: the committed content is the INDEX, so the staged
-        codex blobs are materialized into a temp dir via ``git checkout-index``
-        and ``--check`` runs against THAT (pointed there with --entries-dir /
-        --digest-path), so the comparison reflects exactly what will be committed
-        — an in-sync staged pair is allowed even if later unstaged edits exist.
-      In both modes the ON-DISK generator is the trusted renderer; the
-      materialized/staged script copy is never executed.
+    GRAMMAR-FREE BY DESIGN — checks the TRACKED WORKING TREE, not the index.
+    The gate does NOT parse the ``git commit`` command string to detect ``-a`` /
+    ``--all`` or any other flag, and it does NOT materialize the index. It always
+    evaluates the WORKING-TREE content of the TRACKED codex files (untracked
+    files excluded via ``git ls-files``). This is a DELIBERATE design choice:
+    detecting commit modes by parsing the command string is the C10
+    command-grammar-completeness anti-pattern (``git -c k=v commit``,
+    ``-S<keyid>``, clustered short flags, …) — an unwinnable arms race that
+    cross-model review kept finding edge cases in. A grammar-free, mode-
+    independent working-tree check is simpler and robust.
+
+    TRADEOFF — conservative FALSE-BLOCK on partial staging. Because the check is
+    against the tracked working tree rather than the staged index, one unusual
+    case false-blocks: you stage an in-sync entry/digest SNAPSHOT but leave a
+    tracked entry modified-unstaged in the working tree. A plain ``git commit``
+    would commit only the in-sync staged snapshot, yet the gate sees the dirty
+    working tree and BLOCKS. This is annoying but recoverable (regenerate the
+    digest + restage, or commit ``-a``) and is the CORRECT failure direction for
+    a safety gate (false-block is safe; false-allow ships a stale digest). Do NOT
+    "fix" this by re-introducing git-command-grammar parsing — the simplicity and
+    robustness of a grammar-free check is the deliberate design choice, and the
+    parsing it would require is exactly the C10 anti-pattern this rewrite removed.
+
+    NOTE — ``git -c k=v commit`` style global-option invocations are not detected
+    by the shared ``is_commit_or_push`` guard that gates this function in
+    main(); that is a pre-existing limitation of that guard, tracked separately,
+    and is NOT addressed here.
+
+    Trigger / check:
+      - The to-be-committed candidate set is the UNION of staged
+        (``git diff --cached --name-only``) and tracked-unstaged-modified
+        (``git diff --name-only``) files. This covers both plain commits (staged)
+        and ``git commit -a`` (tracked-modified) WITHOUT parsing ``-a``.
+      - The check runs only if that set includes a codex entry ``.md``, the
+        digest, or the generator script.
 
     Behavior:
-      - Returns None (do not block) unless ALL of:
-          * the command is a ``git commit`` (pushes/merges are out of scope), AND
-          * the to-be-committed set (staged set, plus tracked-modified set when
-            ``-a``) includes a codex entry ``.md``, the digest, or the generator.
+      - Returns None (do not block) unless the command is a ``git commit``
+        (pushes/merges are out of scope) AND a codex digest input is in the
+        candidate set.
       - Returns None (fail OPEN) if the generator script is absent — this repo
         is not the codex repo.
       - Fail-CLOSED (returns a block message) ONLY when ``--check`` exits with
@@ -715,23 +609,21 @@ def check_codex_digest_sync(command: str, target_root: str) -> str | None:
       - On ANY OTHER outcome — returncode 0 (in sync), returncode 1 (a Python
         crash / syntax error: the generator itself is broken), an unexpected
         returncode, a subprocess error / timeout / OSError, OR any
-        materialization failure (mkdtemp / checkout-index / ls-files) — returns
-        None (fail OPEN). A broken generator or infra hiccup must never block a
-        commit; only a cleanly-determined stale digest does.
+        materialization failure (mkdtemp / ls-files / copy) — returns None (fail
+        OPEN). A broken generator or infra hiccup must never block a commit; only
+        a cleanly-determined stale digest does.
 
     Args:
         command:     The full bash command string (e.g. "cd /repo && git commit -m ...").
-        target_root: The repo root to inspect for staged files and to run from.
+        target_root: The repo root to inspect for changed files and to run from.
     """
     # Only the commit case is in scope; pushes/merges are a no-op here.
     if not re.search(r'\bgit\s+commit\b', command):
         return None
 
-    commit_all = _commit_uses_all_flag(command)
-
-    # Determine the to-be-committed file set. For a plain commit that is the
-    # index (git diff --cached); for a -a/--all commit it ALSO includes tracked
-    # modifications not yet in the index (git diff, no --cached).
+    # Candidate set: union of staged AND tracked-unstaged-modified files. This
+    # covers plain commits (staged) and `git commit -a` (tracked-modified)
+    # without parsing the command string for `-a`.
     try:
         staged = subprocess.run(
             ["git", "-C", target_root, "diff", "--cached", "--name-only"],
@@ -741,31 +633,32 @@ def check_codex_digest_sync(command: str, target_root: str) -> str | None:
         )
         if staged.returncode != 0:
             return None  # cannot read staged set → fail open
-        committed_files = [line.strip() for line in staged.stdout.splitlines() if line.strip()]
 
-        if commit_all:
-            tracked_mod = subprocess.run(
-                ["git", "-C", target_root, "diff", "--name-only"],
-                capture_output=True,
-                text=True,
-                timeout=5,
-            )
-            if tracked_mod.returncode != 0:
-                return None  # cannot read tracked-modified set → fail open
-            committed_files += [
-                line.strip() for line in tracked_mod.stdout.splitlines() if line.strip()
-            ]
+        tracked_mod = subprocess.run(
+            ["git", "-C", target_root, "diff", "--name-only"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if tracked_mod.returncode != 0:
+            return None  # cannot read tracked-modified set → fail open
+
+        candidate_files = [
+            line.strip()
+            for line in (staged.stdout + tracked_mod.stdout).splitlines()
+            if line.strip()
+        ]
     except (subprocess.SubprocessError, OSError, ValueError):
         return None  # fail open
 
-    if not committed_files or not _staged_touches_codex_digest_inputs(committed_files):
+    if not candidate_files or not _staged_touches_codex_digest_inputs(candidate_files):
         return None  # gate does not apply
 
     script_path = Path(target_root) / _CODEX_DIGEST_SCRIPT
     if not script_path.exists():
         return None  # not the codex repo / script absent → fail open
 
-    check = _run_digest_check(command, target_root, commit_all)
+    check = _run_digest_check(target_root)
     if check is None:
         return None  # any infra / materialization failure → fail OPEN
 
