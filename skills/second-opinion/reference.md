@@ -178,7 +178,7 @@ Skip when: mechanical changes, Codex CLI not installed, or user declined in this
 
 After every Codex review (any mode), before cleanup. **Steps 1–3 (pattern capture) run only when the review produced findings; step 4 (run telemetry) runs after every Mode 1 review regardless of findings (on a zero-findings pass, skip steps 1–3 and emit step 4 directly with `findings: []`):**
 
-1. Read `skills/second-opinion/codex-learnings.d/_header.md` and every entry file in `codex-learnings.d/` (glob, exclude `_header.md`) to know the live IDs.
+1. Read `skills/second-opinion/codex-learnings.d/_header.md` and every TOP-LEVEL entry file in `codex-learnings.d/` (glob top-level `*.md`, exclude `_header.md`; `_graduated/`/`_retired/` subdirs hold ARCHIVED entries excluded from the live set) to know the live IDs.
 2. For each finding Codex raised: does it match an existing pattern (any existing P## / C## entry)?
    - **Yes**: no action — pre-flight should have caught it. If it didn't, check why pre-flight missed it and tighten the existing entry file's description.
    - **No**: is this a one-off or a recurring class of mistake?

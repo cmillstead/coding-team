@@ -113,7 +113,11 @@ Each dismissed entry carries EXACTLY ONE of two reasons: `scope-mismatch:<entry-
 (in-scope `provable` category proven absent). No other dismissal reason is valid — there is no third
 bucket and no third reason. `<live count>` is COMPUTED from the file at run time — never a hardcoded
 number. If `N + M` does not equal the live entry count, an entry was dropped: recount and re-emit.
-`<live count>` = number of `.md` files in `codex-learnings.d/` EXCLUDING `_header.md`.
+`<live count>` = number of TOP-LEVEL `.md` files in `codex-learnings.d/` EXCLUDING `_header.md`. Globs are non-recursive — `_graduated/` and `_retired/` subdirs are never reached.
+
+## Archived entries (relocation)
+
+Relocated entries live in `_graduated/` or `_retired/` SUBDIRS of `codex-learnings.d/`. They are excluded from the live set automatically because all readers glob TOP-LEVEL `*.md` (non-recursive). Relocation is `git mv` (history preserved: `git log --follow <file>`). The one-file-per-entry born-tag invariant is preserved — relocation moves the file without editing or renaming its `# <P|C><n>` H1 heading. Relocated entries are excluded by the glob, which is ORTHOGONAL to the two-reason dismissal grammar above — no third dismissal reason is introduced.
 
 ## Banned rationalizations (pre-flight engine)
 

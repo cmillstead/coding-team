@@ -46,11 +46,11 @@ Confirm the repo name matches the project you're working on. If it doesn't, `cd`
 
 ### Step 1: Pattern check — scope by applicability
 
-You are the quality gate. Read the drop-folder (Read tool): first `skills/second-opinion/codex-learnings.d/_header.md` (tag vocabulary, grep battery, audit-line format, banned rationalizations), then every `skills/second-opinion/codex-learnings.d/*.md` EXCEPT `_header.md` (glob the directory — each file is one entry). Signal tokens you emit MUST come from the closed category enum in `_header.md` — off-list ⇒ unread. The **live count** for the audit-line `total:` = number of entry files read (exclude `_header.md`).
+You are the quality gate. Read the drop-folder (Read tool): first `skills/second-opinion/codex-learnings.d/_header.md` (tag vocabulary, grep battery, audit-line format, banned rationalizations), then every TOP-LEVEL `skills/second-opinion/codex-learnings.d/*.md` EXCEPT `_header.md` (glob top-level only — each file is one live entry; `_graduated/` and `_retired/` subdirs hold ARCHIVED entries and are excluded). Signal tokens you emit MUST come from the closed category enum in `_header.md` — off-list ⇒ unread. The **live count** for the audit-line `total:` = number of top-level entry files read (exclude `_header.md`; subdirs not reached).
 
 Run this engine ONCE per change:
 
-1. **Read** `codex-learnings.d/_header.md` (tags + battery + audit format + rationalizations), then read every entry file in `codex-learnings.d/` excluding `_header.md`.
+1. **Read** `codex-learnings.d/_header.md` (tags + battery + audit format + rationalizations), then read every TOP-LEVEL entry file in `codex-learnings.d/` excluding `_header.md` (top-level `*.md` only; archived `_graduated/`/`_retired/` subdirs are excluded from the live set).
 2. **Derive signals once.** Set `mode` = `diff` (a diff) or `plan` (plan prose). For each `provable`
    category, run its grep battery over the diff hunks (DIFF) or plan prose (PLAN) with the Bash tool.
    A signal FIRES if ANY pattern matches; record it with evidence. Batteries are broad on purpose —
