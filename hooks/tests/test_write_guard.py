@@ -925,3 +925,98 @@ class TestNormalFileAllowed:
             assert parsed.get("decision") != "block"
         else:
             assert stdout.strip() == ""
+
+
+# ---------------------------------------------------------------------------
+# Graduated C1 check integration — single-emission, aggregated advisory
+# ---------------------------------------------------------------------------
+
+
+class TestGraduatedC1Advisory:
+    """C1 graduated check wired into write-guard.py produces exactly ONE JSON object."""
+
+    def test_c1_signal_edit_produces_single_json_object(self):
+        """An Edit with a C1 signal produces exactly one JSON object: allow + reason."""
+        event = {
+            "tool_name": "Edit",
+            "tool_input": {
+                "file_path": "/tmp/src/config.ts",
+                "new_string": "interface Options { repoPath: string; }\n",
+            },
+        }
+        parsed, stdout, _stderr, _rc = _run(event)
+        # Exactly one JSON object (not two, not zero)
+        lines = [l for l in stdout.strip().splitlines() if l.strip()]
+        assert len(lines) == 1, f"Expected exactly 1 JSON line, got {len(lines)}: {stdout!r}"
+        assert parsed is not None
+        assert parsed["decision"] == "allow"
+        assert "C1" in parsed.get("reason", "") or "Codex" in parsed.get("reason", "")
+
+    def test_path_safety_and_c1_cofiring_produces_single_json_object(self, repo: Path):
+        """A .py Edit matching both path-safety AND C1 emits exactly ONE JSON object.
+
+        path.startswith( triggers the path-safety advisory (string op on path).
+        repoPath triggers the C1 advisory.
+        Single-emission rule: both reasons must be in the one JSON reason string.
+        """
+        src = repo / "src" / "guard.py"
+        src.parent.mkdir(parents=True)
+        src.write_text("x = 1\n")
+
+        # Combine: path-safety signal (startswith on a path string) + C1 signal (repoPath)
+        new_content = "def check(repoPath: str) -> bool:\n    return repoPath.startswith('/home')\n"
+
+        event = {
+            "tool_name": "Edit",
+            "tool_input": {
+                "file_path": str(src),
+                "new_string": new_content,
+            },
+        }
+        parsed, stdout, _stderr, _rc = _run(event, cwd=repo)
+        lines = [l for l in stdout.strip().splitlines() if l.strip()]
+        assert len(lines) == 1, (
+            f"Expected exactly 1 JSON line (single-emission), got {len(lines)}: {stdout!r}"
+        )
+        assert parsed is not None
+        assert parsed["decision"] == "allow"
+        reason = parsed.get("reason", "")
+        # Both advisories must appear in the single aggregated reason
+        assert "startswith" in reason or "path" in reason.lower(), (
+            f"Path-safety text missing from reason: {reason!r}"
+        )
+        assert "C1" in reason or "Codex" in reason or "contains" in reason, (
+            f"C1 text missing from reason: {reason!r}"
+        )
+
+    def test_blocking_guard_still_emits_single_block(self, repo: Path):
+        """A phase5-blocked file emits a single block — no advisory leaked alongside.
+
+        Sets WRITE_GUARD_ALLOW_INSTRUCTION_EDIT=0 (overwriting any ambient value)
+        so the phase5 guard is armed even when the test session has it enabled.
+        """
+        _write_plan(repo, "plan.md")
+        instr_dir = repo / "skills" / "demo"
+        instr_dir.mkdir(parents=True)
+        instr_file = instr_dir / "SKILL.md"
+        instr_file.write_text("---\n---\n# Demo\nYou are demo.\n")
+
+        # Override to "0" so the phase5 guard is armed regardless of ambient env.
+        # _run merges this over os.environ, so "0" wins even if the session has "1".
+        env = {"WRITE_GUARD_ALLOW_INSTRUCTION_EDIT": "0"}
+
+        # Includes a C1 signal — but block takes precedence
+        event = {
+            "tool_name": "Edit",
+            "tool_input": {
+                "file_path": str(instr_file),
+                "new_string": "repoPath = '/tmp'\n",
+            },
+        }
+        parsed, stdout, _stderr, _rc = _run(event, cwd=repo, env=env)
+        lines = [l for l in stdout.strip().splitlines() if l.strip()]
+        assert len(lines) == 1, (
+            f"Expected exactly 1 JSON line, got {len(lines)}: {stdout!r}"
+        )
+        assert parsed is not None
+        assert parsed["decision"] == "block"

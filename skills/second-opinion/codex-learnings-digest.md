@@ -15,7 +15,6 @@ Author-facing design defaults distilled from codex-learnings.d entries. One line
 - **P33:** A disambiguating guard denies only on an UNAMBIGUOUS dangerous resolution; when the parse is ambiguous it falls to ASK/non-deny, never deny-on-a-guess.
 
 ## C — Code defaults
-- **C1:** When a task spec introduces a path-shaped field, classify it as identifier / filesystem-path / repo-relative and state the validation tier for each — never a lone `contains('/')` check.
 - **C2:** When a spec says "reject 0/empty/-1," first map the field's consumers (`> 0`, `== 0`, `is_empty()`, match arms); if any treats that value as disable/sentinel/default, keep it valid and validate a different bound.
 - **C3:** When writing a CI step that calls any venv-dependent tool, add `python -m venv .venv && . .venv/bin/activate` at the top of that same `run:` block — `actions/setup-python` provides an interpreter, not a venv.
 - **C4:** For any "lossy inline view + full stash for retrieval" feature, design three invariants explicitly: stash the raw source (not a projection), ensure the retrieval pointer survives truncation (reserve budget before capping), and gate the destructive transform on stash success.

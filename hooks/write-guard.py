@@ -19,6 +19,7 @@ import subprocess
 from pathlib import Path
 
 from _lib import event as _event
+from _lib import graduated_checks as _graduated_checks
 from _lib import output as _output
 from _lib.active_plan import find_active_plan_cached, AmbiguousActivePlanError
 
@@ -642,15 +643,30 @@ def main():
         _output.block(reason)
         return
 
-    # 5. Identity framing check (advisory — runs even if no block occurred)
+    # 5-7. Advisory checks — aggregated into a SINGLE emission to avoid
+    # corrupt PreToolUse output when multiple advisories co-fire.
+    #
+    # Block-mode graduated results: emit ONE block and return immediately.
+    # Advisory-mode results: collect all reasons (identity, path-safety, and
+    # graduated checks) then emit exactly ONE advisory with joined reasons.
+    graduated_results = _graduated_checks.dispatch(tool_name, tool_input)
+
+    block_reasons = [r.reason for r in graduated_results if r.mode == "block"]
+    if block_reasons:
+        _output.block("\n\n".join(block_reasons))
+        return
+
+    advisory_reasons = []
     reason = check_identity_framing(tool_name, tool_input)
     if reason:
-        _output.advisory(reason)
-
-    # 6. Path safety check (advisory)
+        advisory_reasons.append(reason)
     reason = check_path_safety(tool_name, tool_input)
     if reason:
-        _output.advisory(reason)
+        advisory_reasons.append(reason)
+    advisory_reasons.extend(r.reason for r in graduated_results if r.mode == "advisory")
+
+    if advisory_reasons:
+        _output.advisory("\n\n".join(advisory_reasons))
 
 
 if __name__ == "__main__":

@@ -62,8 +62,8 @@ change; no renumber; table-safe because an inline-code span contains no `|`). Gr
 - **floor** — reserved for always-applicable entries (P1–P4 plan-symbol concerns; any
   untagged/unclassifiable entry defaults here). A `floor` entry is always `applicable` WHEN IN SCOPE — scope-mismatch is checked first, so a `scope:plan` floor entry (P1–P4) is correctly scope-dismissed in a pure `diff` review.
 
-**Category enum (17):**
-`plan-symbol · negative-existence · ambiguity-guard · helper-reuse · metric-aggregate · path-input ·
+**Category enum (16):**
+`plan-symbol · negative-existence · ambiguity-guard · helper-reuse · metric-aggregate ·
 path-equality · sentinel-semantics · ci-config · lossy-stash · test-hermeticity · command-grammar ·
 select-threading · concurrency-lock · default-flip · migration-parity · tenant-isolation`
 
@@ -77,7 +77,6 @@ existing "Check before dispatch" prose — do NOT invent new criteria.
 
 | Category (provable) | Entries | Fire if ANY matches |
 |---------------------|---------|---------------------|
-| `path-input` | C1 | field name `(path\|dir\|file\|repo\|root\|prefix\|dest\|src)` OR a call `path.resolve\|open(\|fs::\|include_str!\|Path(\|join(` on a string OR a single-gate `.contains("/")` |
 | `path-equality` | C17 | `ends_with\|starts_with\|strip_suffix\|strip_prefix\|contains(` used to compare TWO paths for sameness, OR a `same_file`/`is_same`/path-identity helper |
 | `sentinel-semantics` | C2 | a new `validate`/guard rejecting `0`/`empty`/`-1`/`< 1`, OR `is_empty()\|== 0\|reject\|return Err` near a config/interval/threshold field |
 | `ci-config` | C3 | touched `.github/workflows/*.yml\|Makefile\|noxfile\|tox.ini` OR `maturin\|pip install -e\|setup-python\|venv\|activate` |
