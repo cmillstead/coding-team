@@ -78,6 +78,8 @@ _SINGLE_GATE_RE = re.compile(
 )
 
 
+# Responsibility: C1 — classify path-shaped FIELDS by trust tier; distinct from C17's
+# path-equality comparison (see check_path_safety).
 def check_c1_path_trust(tool_name: str, tool_input: dict) -> CheckResult | None:
     """Advisory when content contains path-trust C1 signals.
 

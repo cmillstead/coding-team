@@ -12,10 +12,12 @@ real plan directories.
 """
 
 import base64
+import importlib.util
 import json
 import os
 import stat
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -23,6 +25,27 @@ import pytest
 
 HOOKS_DIR = Path("/Users/cevin/.claude/skills/coding-team/hooks")
 HOOK_PATH = HOOKS_DIR / "write-guard.py"
+
+# Ensure hooks/ is on sys.path so direct imports from _lib work.
+# conftest.py does not add HOOKS_DIR to sys.path, so we do it once here.
+if str(HOOKS_DIR) not in sys.path:
+    sys.path.insert(0, str(HOOKS_DIR))
+
+from _lib.graduated_checks import check_c1_path_trust  # noqa: E402
+
+
+def _load_write_guard():
+    """Load write-guard.py as a module (hyphen in name requires importlib)."""
+    spec = importlib.util.spec_from_file_location(
+        "write_guard", str(HOOKS_DIR / "write-guard.py")
+    )
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+# Single module-level load — avoids re-running exec_module for each test.
+_WRITE_GUARD = _load_write_guard()
 
 ACTIVE_FRONTMATTER = "---\nstatus: in-progress\n---\n\n"
 
@@ -1109,4 +1132,108 @@ class TestConftestEnvScrub:
         )
         assert parsed["decision"] == "block", (
             f"expected block (scrub removed override flags from ambient env), got {parsed!r}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# C17 / C1 cross-tests — direct-call verification of non-overlapping triggers
+# ---------------------------------------------------------------------------
+
+
+class TestC17C1CrossResponsibility:
+    """Cross-tests verifying that check_path_safety (C17) and check_c1_path_trust (C1)
+    have distinct and non-overlapping trigger surfaces on key inputs.
+
+    These call both functions directly and assert their ACTUAL observed returns —
+    no assumed isolation. The integration (single-emission) contract is separately
+    locked by test_path_safety_and_c1_cofiring_produces_single_json_object.
+    """
+
+    def test_c1_only_path_shaped_field_no_string_op(self):
+        """C1-only trigger: a path-shaped field name with no string ops on it.
+
+        repoPath triggers C1's _FIELD_NAME_RE (camelCase 'Path' component).
+        check_path_safety finds no PATH_SAFETY_PATTERNS match (no .startswith,
+        no string-in-path literal, no f-string path join) so returns None.
+
+        Arrange: content is a plain assignment — path-shaped name, pure assignment.
+        Act: call both functions directly with a .py file.
+        Assert: C1 fires (non-None), path_safety does not (None).
+        """
+        # Arrange
+        content = "repoPath = compute()\n"
+        tool_input = {"file_path": "/tmp/example.py", "new_string": content}
+
+        # Act
+        c1_result = check_c1_path_trust("Edit", tool_input)
+        ps_result = _WRITE_GUARD.check_path_safety("Edit", tool_input)
+
+        # Assert
+        assert c1_result is not None, (
+            f"C1 must fire on 'repoPath = compute()' — got None"
+        )
+        assert ps_result is None, (
+            f"check_path_safety must not fire on a plain assignment with no string op — got: {ps_result!r}"
+        )
+
+    def test_path_safety_fires_embedded_token_c1_does_not(self):
+        """path-safety trigger: embedded token where C1's component-boundary regex misses.
+
+        'filepath.startswith(\"/etc\")' — 'path' is preceded by 'file' (not a boundary
+        per _FIELD_NAME_RE's (?<![A-Za-z]) lookbehind), so C1 returns None.
+        check_path_safety matches the .startswith() pattern regardless of the token.
+
+        Empirically observed: C1 returns None, path_safety returns non-None.
+
+        Arrange: content uses filepath.startswith (embedded token, no C1 boundary).
+        Act: call both functions directly.
+        Assert: path_safety fires, C1 returns None (empirically confirmed).
+        """
+        # Arrange
+        content = 'if filepath.startswith("/etc"):\n    pass\n'
+        tool_input = {"file_path": "/tmp/example.py", "new_string": content}
+
+        # Act
+        ps_result = _WRITE_GUARD.check_path_safety("Edit", tool_input)
+        c1_result = check_c1_path_trust("Edit", tool_input)
+
+        # Assert
+        assert ps_result is not None, (
+            f"check_path_safety must fire on filepath.startswith — got None"
+        )
+        # C1 returns None: 'filepath' has 'file' immediately before 'path' (no boundary).
+        # This is the observed behavior — do not assume clean exclusion; record it here.
+        assert c1_result is None, (
+            f"C1 observed to return None for 'filepath' (no component boundary) — got: {c1_result!r}"
+        )
+
+    def test_cofiring_direct_call_both_checks_fire(self):
+        """Co-firing: a .py file with both a C1 field trigger AND a path string op.
+
+        repoPath (C1 camelCase signal) + repoPath.startswith('/home') (path-safety signal).
+        Both functions must return non-None when called directly.
+
+        This complements test_path_safety_and_c1_cofiring_produces_single_json_object
+        which verifies the single-emission integration contract via subprocess.
+        That test locks the aggregation behaviour; this test locks the direct-call
+        both-fire result that makes the aggregation meaningful.
+
+        Arrange: content triggers both C1 (repoPath field name) and path_safety (.startswith).
+        Act: call both functions directly.
+        Assert: both return non-None.
+        """
+        # Arrange
+        content = "def check(repoPath: str) -> bool:\n    return repoPath.startswith('/home')\n"
+        tool_input = {"file_path": "/tmp/guard.py", "new_string": content}
+
+        # Act
+        c1_result = check_c1_path_trust("Edit", tool_input)
+        ps_result = _WRITE_GUARD.check_path_safety("Edit", tool_input)
+
+        # Assert: both fire (direct-call confirmation of co-firing)
+        assert c1_result is not None, (
+            f"C1 must fire on 'repoPath' — got None"
+        )
+        assert ps_result is not None, (
+            f"check_path_safety must fire on 'repoPath.startswith' — got None"
         )
