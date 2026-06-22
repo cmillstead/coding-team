@@ -204,11 +204,13 @@ After every Codex review (any mode), before cleanup. **Steps 1–3 (pattern capt
      emit `{ "severity": "<P1..P4>", "class": "<id>|novel" }` where `class` is the existing entry ID
      this finding matched (the yes/no from step 2) or `novel` if it matched none. Keep emitting
      `severity` even though Task 1 does not require or validate it.
-   - `target` (active plan/target basename or null), `round` (1-based round index), `round_count` (total
-     rounds this review took) — best-effort/optional. `round_count` is what marks the row countable
+   - `target` (optional; active plan/target basename or null), `round` (optional; final round number
+     reached for this review — equals `round_count` for a converged review), `round_count` (optional
+     but recommended; total rounds this review took) — `round_count` is what marks the row countable
      for frontier-spend accounting; a row **without** `round_count` is "not captured" for spend and
      is never silently miscounted. Emit one record per review (not per round), setting `round` to the
-     round index and `round_count` to the total rounds that review took.
+     final round number and `round_count` to the total rounds the review took (these are equal for a
+     converged review).
    Run it from `$REPO_ROOT`. **Telemetry is observability only — it MUST NOT block or change the
    verdict.** If `harness codex` is not found (Task 1 not deployed), state that once and continue.
    On a non-zero exit: if stderr shows malformed JSON, fix the JSON and re-emit once; if the writer
