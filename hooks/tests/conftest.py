@@ -36,6 +36,43 @@ def pytest_configure(config):
     )
 
 
+# ---------------------------------------------------------------------------
+# C5 hermeticity — session-start env scrub
+# ---------------------------------------------------------------------------
+
+# Flags that, when set in the ambient process env, leak into every subprocess
+# spawned via _run()'s {**os.environ, **env} merge and silently bypass write-guard
+# "should block" tests. Popped at session start so the scrubbed os.environ is the
+# BASE every test inherits. Tests that explicitly pass env={"FLAG": "1"} still WIN
+# because the _run() merge layers their explicit values OVER the scrubbed base.
+_WRITE_GUARD_AMBIENT_FLAGS = (
+    "WRITE_GUARD_ALLOW_INSTRUCTION_EDIT",
+    "WRITE_GUARD_ALLOW_MIGRATION_EDIT",
+)
+
+
+@pytest.fixture(scope="session", autouse=True)
+def scrub_write_guard_ambient_flags():
+    """Pop write-guard override flags from os.environ for the duration of the session.
+
+    Removes WRITE_GUARD_ALLOW_INSTRUCTION_EDIT and WRITE_GUARD_ALLOW_MIGRATION_EDIT
+    from the process environment at session start and restores them at teardown.
+    This ensures that any ambient flag (e.g. set in settings.json or the user's
+    shell) does not leak into "should block" subprocess tests.
+
+    Tests that explicitly pass env={"WRITE_GUARD_ALLOW_*": "1"} to _run() are
+    unaffected — the {**os.environ, **env} merge in _run() layers their explicit
+    values over the scrubbed base, so explicit overrides still take precedence.
+    """
+    saved = {flag: os.environ.pop(flag, None) for flag in _WRITE_GUARD_AMBIENT_FLAGS}
+    yield
+    for flag, value in saved.items():
+        if value is not None:
+            os.environ[flag] = value
+        else:
+            os.environ.pop(flag, None)
+
+
 @dataclass
 class HookResult:
     stdout: str

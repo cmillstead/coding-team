@@ -13,6 +13,7 @@ real plan directories.
 
 import base64
 import json
+import os
 import stat
 import subprocess
 from pathlib import Path
@@ -71,8 +72,6 @@ def _run(
     event: dict, cwd: Path | None = None, env: dict | None = None
 ) -> tuple[dict | None, str, str, int]:
     """Run write-guard.py with the given event; return (parsed_json, stdout, stderr, returncode)."""
-    import os
-
     run_env = None
     if env is not None:
         run_env = {**os.environ, **env}
@@ -1020,3 +1019,94 @@ class TestGraduatedC1Advisory:
         )
         assert parsed is not None
         assert parsed["decision"] == "block"
+
+
+# ---------------------------------------------------------------------------
+# C5 hermeticity — conftest scrub proofs
+# ---------------------------------------------------------------------------
+
+
+class TestConftestEnvScrub:
+    """Proofs for the session-start ambient-flag scrub added in conftest.py.
+
+    UNIT proof: asserts the flags are absent from os.environ after session start.
+    This directly verifies the scrub mechanism without depending on subprocess
+    merge semantics.
+    """
+
+    def test_ambient_flags_absent_from_os_environ(self):
+        """Both write-guard override flags must be absent from os.environ after scrub.
+
+        The session-scoped autouse fixture in conftest.py pops both flags at
+        session start. If either is still present here, the scrub did not run
+        or was bypassed.
+        """
+        assert "WRITE_GUARD_ALLOW_INSTRUCTION_EDIT" not in os.environ, (
+            "WRITE_GUARD_ALLOW_INSTRUCTION_EDIT leaked into os.environ — "
+            "the conftest scrub_write_guard_ambient_flags fixture must not have run"
+        )
+        assert "WRITE_GUARD_ALLOW_MIGRATION_EDIT" not in os.environ, (
+            "WRITE_GUARD_ALLOW_MIGRATION_EDIT leaked into os.environ — "
+            "the conftest scrub_write_guard_ambient_flags fixture must not have run"
+        )
+
+    def test_explicit_env_override_still_wins(self, repo: Path):
+        """Explicit env={"WRITE_GUARD_ALLOW_INSTRUCTION_EDIT": "1"} in _run() allows the edit.
+
+        Even after the session-start scrub removes the flag from os.environ, a
+        test that explicitly passes the flag via env= in _run() must still see it
+        honored — the {**os.environ, **env} merge layers explicit values over the
+        scrubbed base, so explicit wins.
+        """
+        _write_plan(repo, "plan.md")
+        skill_md = repo / "skills" / "demo" / "SKILL.md"
+        skill_md.parent.mkdir(parents=True)
+        skill_md.write_text("# Demo\nYou are demo.\n")
+
+        event = {
+            "tool_name": "Edit",
+            "tool_input": {"file_path": str(skill_md), "new_string": "altered"},
+        }
+        parsed, stdout, _stderr, _rc = _run(
+            event, cwd=repo, env={"WRITE_GUARD_ALLOW_INSTRUCTION_EDIT": "1"}
+        )
+        assert parsed is not None, f"hook produced no parseable JSON: {stdout!r}"
+        if parsed is not None:
+            assert parsed.get("decision") != "block", (
+                f"explicit WRITE_GUARD_ALLOW_INSTRUCTION_EDIT=1 must allow edit, got {stdout!r}"
+            )
+
+    def test_scrub_flows_into_subprocess_no_env_override(self, repo: Path):
+        """PROCESS-LEVEL proof: scrubbed os.environ propagates into hook subprocess.
+
+        This test calls _run() with NO env= argument, so subprocess.run() inherits
+        the ambient os.environ directly. The session-start conftest scrub has already
+        removed WRITE_GUARD_ALLOW_INSTRUCTION_EDIT and WRITE_GUARD_ALLOW_MIGRATION_EDIT
+        from os.environ, so no override flag leaks into the hook process. The hook must
+        therefore apply the full instruction-edit block.
+
+        If the conftest scrub regressed (fixture removed, scope changed, autouse
+        dropped), an ambient WRITE_GUARD_ALLOW_INSTRUCTION_EDIT flag set by the user
+        (e.g. in settings.json env) would leak through and the edit would be wrongly
+        allowed — causing this test to fail. The unit proof (test_ambient_flags_absent_from_os_environ)
+        catches the flag still in os.environ, but only THIS test catches the scrub
+        not flowing into the subprocess.
+        """
+        _write_plan(repo, "plan.md")
+        skill_md = repo / "skills" / "demo" / "SKILL.md"
+        skill_md.parent.mkdir(parents=True)
+        skill_md.write_text("# Demo\nYou are demo.\n")
+
+        event = {
+            "tool_name": "Edit",
+            "tool_input": {"file_path": str(skill_md), "new_string": "altered"},
+        }
+        # No env= argument: subprocess inherits ambient os.environ as-is.
+        # The scrub must have removed the override flags or the block will not fire.
+        parsed, stdout, _stderr, _rc = _run(event, cwd=repo)
+        assert parsed is not None, (
+            f"hook produced no parseable JSON — expected a block decision: {stdout!r}"
+        )
+        assert parsed["decision"] == "block", (
+            f"expected block (scrub removed override flags from ambient env), got {parsed!r}"
+        )

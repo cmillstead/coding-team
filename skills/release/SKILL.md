@@ -126,6 +126,9 @@ If no PR exists, start from step 1.
 
    **Do NOT auto-merge.** Step 8 only runs when the user explicitly requests merge. After step 7 succeeds, report the PR URL and wait. The user decides when to merge.
 
+   **If this change spans both the submodule and the root repo (two-repo change):** follow `pointer-amend-recipe.md` (sibling of this SKILL.md in `skills/release/` within the coding-team submodule) before pushing root.
+   Known rationalization: "the pointer will update later" — it will NOT; an un-amended root pointer records a stale submodule tip. Always amend before pushing root.
+
 ## When to Use
 
 - After Phase 5 execution completes — as an alternative to manual Phase 6
