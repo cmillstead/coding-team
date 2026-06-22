@@ -566,6 +566,10 @@ PATH_SAFE_PATTERNS = [
 ]
 
 
+# Partial enforcement of Codex learning C17 (alias "Case study #35") — usage-site proxy only;
+# structural segment-alignment stays in Codex review.
+# Responsibility: C17 — flags USAGE-SITE string ops on paths (substring-collision risk);
+# structural segment-alignment is NOT verified here (owned by Codex review).
 def check_path_safety(tool_name: str, tool_input: dict) -> str | None:
     """Advisory: warn when Python code uses string operations on paths instead of Path API.
 
