@@ -20,7 +20,8 @@ entries are excluded automatically.
 Entries listed here have a hook that covers a SLICE of their thesis, but the entry
 remains LIVE in the top-level `codex-learnings.d/` because the hook is not full
 coverage. These are NOT graduated entries — they do not appear in the Graduation
-record above, and `_CARRIER_GLOB` still picks them up as live during pre-flight.
+record above, and the non-recursive top-level `*.md` glob (the same sweep that
+excludes graduated entries) still picks them up as live during pre-flight.
 
 | Entry | Enforced slice | Residual (owned by Codex review) | Date |
 |-------|---------------|----------------------------------|------|

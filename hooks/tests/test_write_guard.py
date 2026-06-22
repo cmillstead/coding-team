@@ -12,10 +12,12 @@ real plan directories.
 """
 
 import base64
+import importlib.util
 import json
 import os
 import stat
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -23,6 +25,27 @@ import pytest
 
 HOOKS_DIR = Path("/Users/cevin/.claude/skills/coding-team/hooks")
 HOOK_PATH = HOOKS_DIR / "write-guard.py"
+
+# Ensure hooks/ is on sys.path so direct imports from _lib work.
+# conftest.py does not add HOOKS_DIR to sys.path, so we do it once here.
+if str(HOOKS_DIR) not in sys.path:
+    sys.path.insert(0, str(HOOKS_DIR))
+
+from _lib.graduated_checks import check_c1_path_trust  # noqa: E402
+
+
+def _load_write_guard():
+    """Load write-guard.py as a module (hyphen in name requires importlib)."""
+    spec = importlib.util.spec_from_file_location(
+        "write_guard", str(HOOKS_DIR / "write-guard.py")
+    )
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+# Single module-level load — avoids re-running exec_module for each test.
+_WRITE_GUARD = _load_write_guard()
 
 ACTIVE_FRONTMATTER = "---\nstatus: in-progress\n---\n\n"
 
@@ -1117,27 +1140,6 @@ class TestConftestEnvScrub:
 # ---------------------------------------------------------------------------
 
 
-import importlib.util
-import sys as _sys
-
-
-def _load_write_guard():
-    """Load write-guard.py as a module (hyphen in name requires importlib)."""
-    spec = importlib.util.spec_from_file_location(
-        "write_guard", str(HOOKS_DIR / "write-guard.py")
-    )
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
-
-
-# Ensure hooks/ is on sys.path so `from _lib.graduated_checks import ...` works.
-if str(HOOKS_DIR) not in _sys.path:
-    _sys.path.insert(0, str(HOOKS_DIR))
-
-from _lib.graduated_checks import check_c1_path_trust  # noqa: E402
-
-
 class TestC17C1CrossResponsibility:
     """Cross-tests verifying that check_path_safety (C17) and check_c1_path_trust (C1)
     have distinct and non-overlapping trigger surfaces on key inputs.
@@ -1159,13 +1161,12 @@ class TestC17C1CrossResponsibility:
         Assert: C1 fires (non-None), path_safety does not (None).
         """
         # Arrange
-        wg = _load_write_guard()
         content = "repoPath = compute()\n"
         tool_input = {"file_path": "/tmp/example.py", "new_string": content}
 
         # Act
         c1_result = check_c1_path_trust("Edit", tool_input)
-        ps_result = wg.check_path_safety("Edit", tool_input)
+        ps_result = _WRITE_GUARD.check_path_safety("Edit", tool_input)
 
         # Assert
         assert c1_result is not None, (
@@ -1189,12 +1190,11 @@ class TestC17C1CrossResponsibility:
         Assert: path_safety fires, C1 returns None (empirically confirmed).
         """
         # Arrange
-        wg = _load_write_guard()
         content = 'if filepath.startswith("/etc"):\n    pass\n'
         tool_input = {"file_path": "/tmp/example.py", "new_string": content}
 
         # Act
-        ps_result = wg.check_path_safety("Edit", tool_input)
+        ps_result = _WRITE_GUARD.check_path_safety("Edit", tool_input)
         c1_result = check_c1_path_trust("Edit", tool_input)
 
         # Assert
@@ -1223,13 +1223,12 @@ class TestC17C1CrossResponsibility:
         Assert: both return non-None.
         """
         # Arrange
-        wg = _load_write_guard()
         content = "def check(repoPath: str) -> bool:\n    return repoPath.startswith('/home')\n"
         tool_input = {"file_path": "/tmp/guard.py", "new_string": content}
 
         # Act
         c1_result = check_c1_path_trust("Edit", tool_input)
-        ps_result = wg.check_path_safety("Edit", tool_input)
+        ps_result = _WRITE_GUARD.check_path_safety("Edit", tool_input)
 
         # Assert: both fire (direct-call confirmation of co-firing)
         assert c1_result is not None, (
