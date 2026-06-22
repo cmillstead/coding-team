@@ -9,13 +9,22 @@ PR #82 had a benign one-commit pointer lag: root was pushed before the submodule
 ## The Recipe
 
 1. **Merge the submodule PR first.**
-   Merge the coding-team (submodule) PR via GitHub UI or `gh pr merge`. Do not touch the root repo yet.
+   ```bash
+   gh pr merge <sub-PR-number> --merge --delete-branch
+   ```
+   (GitHub UI is an alternative, but `gh pr merge` is canonical here.)
+   GATE: do not stage, amend, or push the root repo until the submodule PR shows MERGED:
+   ```bash
+   gh pr view <sub-PR-number> --json state -q .state   # must return "MERGED"
+   ```
 
 2. **Pull the merged submodule tip.**
    ```bash
    git -C skills/coding-team checkout main
    git -C skills/coding-team pull
    ```
+
+Run steps 3–5 from the ROOT repo working directory (not from within skills/coding-team).
 
 3. **Stage the updated submodule pointer in the root repo.**
    ```bash
@@ -39,10 +48,16 @@ PR #82 had a benign one-commit pointer lag: root was pushed before the submodule
    ```
    The root PR now records the merged submodule tip — no pointer lag.
 
+6. **Verify the pointer is correct.**
+   ```bash
+   git submodule status
+   ```
+   Confirm the recorded tip (the SHA shown) equals the merged submodule tip (`gh pr view <sub-PR-number> --json mergeCommit -q .mergeCommit.oid`). A leading `+` in the output means the working-tree submodule has diverged from the recorded pointer — recheck steps 2–5.
+
 ## When This Applies
 
 - The feature branch in the root repo contains a submodule pointer bump to a branch commit.
 - The submodule PR merges to `main` before (or at the same time as) the root PR.
 - You want the root PR's recorded pointer to be the final merged commit, not the pre-merge branch tip.
 
-If the root and submodule land simultaneously or independently (no cross-dependency), this step is optional but recommended for cleanliness.
+If the root and submodule land simultaneously or independently (no cross-dependency), run step 6 anyway to confirm no pointer drift.
