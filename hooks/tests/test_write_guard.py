@@ -1146,7 +1146,7 @@ class TestC17C1CrossResponsibility:
 
     These call both functions directly and assert their ACTUAL observed returns —
     no assumed isolation. The integration (single-emission) contract is separately
-    locked by test_path_safety_and_c1_cofiring_produces_single_json_object (line 954).
+    locked by test_path_safety_and_c1_cofiring_produces_single_json_object.
     """
 
     def test_c1_only_path_shaped_field_no_string_op(self):
@@ -1214,7 +1214,7 @@ class TestC17C1CrossResponsibility:
         Both functions must return non-None when called directly.
 
         This complements test_path_safety_and_c1_cofiring_produces_single_json_object
-        (line 954) which verifies the single-emission integration contract via subprocess.
+        which verifies the single-emission integration contract via subprocess.
         That test locks the aggregation behaviour; this test locks the direct-call
         both-fire result that makes the aggregation meaningful.
 
