@@ -72,8 +72,6 @@ def _run(
     event: dict, cwd: Path | None = None, env: dict | None = None
 ) -> tuple[dict | None, str, str, int]:
     """Run write-guard.py with the given event; return (parsed_json, stdout, stderr, returncode)."""
-    import os
-
     run_env = None
     if env is not None:
         run_env = {**os.environ, **env}
@@ -1072,6 +1070,7 @@ class TestConftestEnvScrub:
         parsed, stdout, _stderr, _rc = _run(
             event, cwd=repo, env={"WRITE_GUARD_ALLOW_INSTRUCTION_EDIT": "1"}
         )
+        assert parsed is not None, f"hook produced no parseable JSON: {stdout!r}"
         if parsed is not None:
             assert parsed.get("decision") != "block", (
                 f"explicit WRITE_GUARD_ALLOW_INSTRUCTION_EDIT=1 must allow edit, got {stdout!r}"
