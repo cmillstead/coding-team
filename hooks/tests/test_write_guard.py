@@ -1075,3 +1075,38 @@ class TestConftestEnvScrub:
             assert parsed.get("decision") != "block", (
                 f"explicit WRITE_GUARD_ALLOW_INSTRUCTION_EDIT=1 must allow edit, got {stdout!r}"
             )
+
+    def test_scrub_flows_into_subprocess_no_env_override(self, repo: Path):
+        """PROCESS-LEVEL proof: scrubbed os.environ propagates into hook subprocess.
+
+        This test calls _run() with NO env= argument, so subprocess.run() inherits
+        the ambient os.environ directly. The session-start conftest scrub has already
+        removed WRITE_GUARD_ALLOW_INSTRUCTION_EDIT and WRITE_GUARD_ALLOW_MIGRATION_EDIT
+        from os.environ, so no override flag leaks into the hook process. The hook must
+        therefore apply the full instruction-edit block.
+
+        If the conftest scrub regressed (fixture removed, scope changed, autouse
+        dropped), an ambient WRITE_GUARD_ALLOW_INSTRUCTION_EDIT flag set by the user
+        (e.g. in settings.json env) would leak through and the edit would be wrongly
+        allowed — causing this test to fail. The unit proof (test_ambient_flags_absent_from_os_environ)
+        catches the flag still in os.environ, but only THIS test catches the scrub
+        not flowing into the subprocess.
+        """
+        _write_plan(repo, "plan.md")
+        skill_md = repo / "skills" / "demo" / "SKILL.md"
+        skill_md.parent.mkdir(parents=True)
+        skill_md.write_text("# Demo\nYou are demo.\n")
+
+        event = {
+            "tool_name": "Edit",
+            "tool_input": {"file_path": str(skill_md), "new_string": "altered"},
+        }
+        # No env= argument: subprocess inherits ambient os.environ as-is.
+        # The scrub must have removed the override flags or the block will not fire.
+        parsed, stdout, _stderr, _rc = _run(event, cwd=repo)
+        assert parsed is not None, (
+            f"hook produced no parseable JSON — expected a block decision: {stdout!r}"
+        )
+        assert parsed["decision"] == "block", (
+            f"expected block (scrub removed override flags from ambient env), got {parsed!r}"
+        )
