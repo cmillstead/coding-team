@@ -14,14 +14,16 @@ from a dangerous false-positive into a tolerable false-negative.)
 
 Gate scan strips WHOLE-LINE comments (`//` Rust, `#` Python) before the
 gate/ephemeral test — this kills the comment-spoof FN the spike actually measured
-(a gate token on its own comment line). INLINE comment tails (a real open with a
-trailing `// tempfile` / `# tempfile`) are deliberately NOT stripped: a naive
-inline strip would corrupt string literals containing the comment marker — every
-`https://` URL contains `//`, and `#` can appear in a path/URL literal — which on
-the BLOCKING Rust path risks breaking real-violation detection (the dangerous FP
-direction). The inline-comment spoof therefore remains an accepted, fail-open-safe
-FN (it suppresses a detection, never forces a false block) — disclosed in the
-honest marker, owned by Codex review. (Codex F4.)
+(a gate token on its own comment line).
+
+Rust inline `//` comment tails are also stripped by the shared `_rust_code_only`
+normalizer (string-literal contents are stripped FIRST, making the subsequent
+`//`-strip safe even for lines containing `https://` URLs inside string literals).
+This eliminates the Codex F4 inline-comment FN: a real open followed by a trailing
+`// tempfile` now correctly fires instead of being suppressed (recall improvement,
+never a false-positive). The Python path still uses whole-line-only `#` stripping
+(Python inline `#` in a URL or path literal is more ambiguous; the advisory path
+is fail-open so the residual FN there remains acceptable).
 
 May raise on a malformed input; CALLERS (both adapters) wrap in try/except->None.
 See c05-test-hermeticity.md and SPIKE-RESULTS.md.
@@ -157,6 +159,23 @@ def _is_attr_region_line(line: str) -> bool:
     return False
 
 
+# ---------------------------------------------------------------------------
+# String / char-literal strip patterns (used by both the upward-walk per-line
+# helper and the forward-reading full-text normalizer below).
+# Defined here, before their first use in _strip_comment_text_for_bracket_count.
+# ---------------------------------------------------------------------------
+_RUST_RAW_STR = re.compile(
+    r'r(#+)".*?"\1',
+    re.DOTALL,
+)
+_RUST_NORMAL_STR = re.compile(
+    r'"(?:\\.|[^"\\])*"',
+    re.DOTALL,
+)
+_RUST_CHAR_LITERAL = re.compile(
+    r"'(?:\\.|[^'\\])'"
+)
+
 # Patterns used to strip comment text from a line before bracket-depth counting.
 # These remove comment content so that brackets inside comments (e.g. `/* ) */`)
 # do not fabricate phantom close_debt and overrun the upward attr-region walk.
@@ -167,50 +186,47 @@ _RUST_LINE_COMMENT_TAIL = re.compile(r"//.*$", re.MULTILINE)
 def _strip_comment_text_for_bracket_count(line: str, in_block_comment: bool) -> tuple[str, bool]:
     """Return (code_text_only, still_in_block_comment) for one source line.
 
-    Strips comment content so that `[`/`]`/`(`/`)` inside comment spans are not
-    counted toward close_debt.  Handles three cases:
-    1. The line is the interior of an already-open block comment (``in_block_comment``
-       is True on entry) — suppress everything until ``*/`` closes it.
-    2. The line contains one or more ``/* ... */`` inline block-comment spans —
-       strip them from the text.
-    3. The line contains a ``//`` line-comment tail — strip from ``//`` onward.
+    Strips BOTH comment content AND string/char-literal content so that
+    delimiters inside either are not counted toward close_debt.  This is
+    site 2 of the shared normalizer class — the per-line upward-walk variant
+    that also threads block-comment state across iterations.
 
-    Returns the cleaned code text and the updated ``in_block_comment`` state for
-    the NEXT line (going upward, the caller passes each line in upward order;
-    ``in_block_comment`` must be threaded through the calling loop).
+    Handles three comment cases (going UPWARD through lines, so ``*/`` appears
+    before ``/*`` in iteration order):
+    1. The line is inside an already-open block comment (upward sense:
+       ``*/`` was seen on a lower line) — suppress everything until ``/*``.
+    2. Complete ``/* ... */`` inline spans on this line — remove them.
+    3. ``//`` line-comment tails — strip from ``//`` onward.
+    After comment stripping, string/char-literal contents are also removed via
+    ``_rust_code_only`` (which strips raw strings, normal strings, char literals).
 
-    Note: we walk UPWARD through lines, so ``*/`` appears BEFORE ``/*`` in
-    iteration order.  The caller sees ``*/`` first (which OPENS the suppression
-    context going upward) and ``/*`` last (which CLOSES it going upward).
-    We therefore use ``*/`` to set ``in_block_comment = True`` and ``/*`` to
-    clear it, which is the inverse of the forward-reading convention.
+    Returns the cleaned code text and the updated ``in_block_comment`` state.
     """
     text = line
-    # If we are inside a block comment (upward sense: we already saw `*/` below),
-    # this line is comment interior — suppress all of it until `/*` closes upward.
+    # If we are inside a block comment (upward sense: already saw `*/` below),
+    # suppress all of it until `/*` closes the comment going upward.
     if in_block_comment:
         if "/*" in text:
-            # `/*` closes the comment (going upward): suppress everything up to
-            # and including `/*`, keep whatever is before it.
             idx = text.index("/*")
             text = text[:idx]
             in_block_comment = False
         else:
-            # Entire line is inside the block comment — return empty code text.
             return ("", True)
-    # Strip any complete /* ... */ spans that are fully on this line.
+    # Strip complete /* ... */ inline spans.
     text = _RUST_INLINE_BLOCK_COMMENT.sub("", text)
-    # If `*/` appears (and was not removed by inline stripping), it opens a new
-    # upward block-comment context: suppress from `*/` onward (to the right
-    # in the source line, but remember we're reading upward — the `/*` that opens
-    # this comment is on a HIGHER line we haven't seen yet).
+    # If `*/` remains (not removed by inline stripping), it opens a new upward
+    # block-comment context.
     if "*/" in text:
         idx = text.index("*/")
         text = text[:idx]
         in_block_comment = True
-    # Strip `//` line-comment tails (must come after block-comment removal so a
-    # `//` inside a block comment is already gone).
+    # Strip `//` line-comment tails.
     text = _RUST_LINE_COMMENT_TAIL.sub("", text)
+    # Strip string/char-literal contents so e.g. `"]"` or `"{"` in an attribute
+    # string do not corrupt bracket counts (site 2 of the normalizer class).
+    text = _RUST_RAW_STR.sub(lambda m: f'r{m.group(1)}""{m.group(1)}', text)
+    text = _RUST_NORMAL_STR.sub('""', text)
+    text = _RUST_CHAR_LITERAL.sub("''", text)
     return (text, in_block_comment)
 
 
@@ -300,9 +316,15 @@ def _rust_test_units(text: str):
             if saw_test:
                 depth, started, body, k = 0, False, [], i
                 while k < n:
-                    depth += lines[k].count("{") - lines[k].count("}")
+                    # FIX 5 (site 1): count braces on code-only text so that
+                    # braces inside string literals (e.g. `let s = "{";`) do not
+                    # inflate depth and absorb the following function into this
+                    # body.  Line CLASSIFICATION (started, line membership) still
+                    # uses the original line — only the brace COUNTING uses co.
+                    co = _rust_code_only(lines[k])
+                    depth += co.count("{") - co.count("}")
                     body.append(lines[k])
-                    if "{" in lines[k]:
+                    if "{" in co:
                         started = True
                     if started and depth <= 0:
                         break
@@ -313,65 +335,98 @@ def _rust_test_units(text: str):
         i += 1
 
 
-# FIX 2: patterns to blank out string/char literal CONTENTS before applying
-# _RUST_OPEN, so a signature inside a literal (error-message asserts, insta
-# snapshots, raw strings) does not cause a false block.
+# ---------------------------------------------------------------------------
+# Shared Rust code-only normalizer — closes the "raw delimiter counting" class
+# ---------------------------------------------------------------------------
+# All four sites that COUNT delimiters or SEARCH for signatures in Rust source
+# must operate on code-only text (no string/char-literal or comment content).
+# A single helper composes both strip passes so no site is missed.
 #
-# Order matters: raw strings before normal strings so the ``r``/``r#`` prefix is
-# consumed as part of the raw-string token and not mistaken for an identifier.
-# Char literals are handled after normal strings.
+# Ordering:
+#   1. Raw strings FIRST (r#"..."#) so the r# prefix is consumed whole and
+#      cannot be mistaken for an identifier.
+#   2. Normal double-quoted strings.
+#   3. Char literals.
+#   4. Inline /* ... */ block-comment spans.
+#   5. // line-comment tails.
 #
-# The replacement is a single placeholder character so offsets don't shift in a
-# way that would break surrounding code structure; we only need the PRESENCE of
-# the open signature to be absent, not offset accuracy.
-_RUST_RAW_STR = re.compile(
-    r'r(#+)".*?"\1',   # r#"..."# / r##"..."## etc. — DOTALL not needed: we
-    re.DOTALL          # scan per-function bodies which may span multiple lines.
-)
-_RUST_NORMAL_STR = re.compile(
-    r'"(?:\\.|[^"\\])*"',
-    re.DOTALL,
-)
-_RUST_CHAR_LITERAL = re.compile(
-    r"'(?:\\.|[^'\\])'"
-)
+# Steps 4-5 are applied to the FULL multi-line text here (forward-reading,
+# for the body / attr scan sites).  The upward attr-walk's per-line comment
+# stripping uses _strip_comment_text_for_bracket_count (which tracks block-
+# comment state across upward iterations) AND additionally strips string
+# contents via this helper — see _strip_comment_text_for_bracket_count.
+#
+# The replacement for string contents is empty delimiters ("" / '' / r#""#)
+# so delimiters never shift line numbers and the string's structural position
+# is preserved.  Placeholder content `` never matches _RUST_OPEN.
+
+# Forward-reading inline block-comment and line-comment patterns used by the
+# full-text normalizer.  (_RUST_RAW_STR, _RUST_NORMAL_STR, _RUST_CHAR_LITERAL
+# are defined earlier — before _strip_comment_text_for_bracket_count.)
+_RUST_FWD_BLOCK_COMMENT = re.compile(r"/\*.*?\*/", re.DOTALL)
+_RUST_FWD_LINE_COMMENT = re.compile(r"//[^\n]*", re.MULTILINE)
 
 
-def _strip_rust_string_contents(text: str) -> str:
-    """Replace the CONTENTS (not the delimiters) of Rust string/char literals
-    with a placeholder so that open-signatures inside literals are invisible to
-    _RUST_OPEN.  Raw strings are stripped first to avoid the ``r`` prefix being
-    left behind and accidentally matching as an identifier.
+def _rust_code_only(text: str) -> str:
+    """Return Rust source text with ALL string/char-literal and comment content
+    replaced by empty placeholders.
 
-    This is NOT a full Rust lexer — it is a conservative best-effort strip that
-    handles the common cases (normal strings, r#...# raw strings, char literals).
-    It is safe to over-strip (turns literal contents to placeholder): the only
-    downstream consumer is _RUST_OPEN, and a placeholder never matches it.
-    Inline-comment tails are left intact (documented Codex F4 FN — see module
-    docstring)."""
-    # 1. Raw strings (r"..." / r#"..."# / r##"..."## …)
-    text = _RUST_RAW_STR.sub(lambda m: f'r{m.group(1)}"_"{m.group(1)}', text)
-    # 2. Normal double-quoted strings
+    This is the SHARED normalizer for all Rust delimiter-counting and
+    signature-searching sites:
+    - body brace-depth accounting (``{``/``}`` in ``_rust_test_units``)
+    - close_debt bracket accounting (``[``/``]``/``(``/``)`` in attr walk)
+    - ``_rust_gated`` bracket-span scan (``#[``-attribute scanning)
+    - ``_RUST_OPEN`` signature search
+
+    NOT a full Rust lexer — best-effort for the common cases.  Over-stripping
+    is safe: a placeholder never matches _RUST_OPEN, and empty braces/brackets
+    do not shift delimiter counts.
+
+    IMPORTANT: line CLASSIFICATION (``_is_attr_region_line``, ``fn`` detection,
+    ``_RUST_TEST_ATTR`` search) still operates on the ORIGINAL text — only the
+    counting/searching uses this output.  Do not drop or add newlines.
+
+    The documented Codex F4 inline-comment FN (a real open followed by a
+    ``// tempfile`` tail suppresses ephemeral detection) is preserved: the
+    comment tail is stripped here, so ``tempfile`` in a comment does NOT
+    trigger ``_RUST_EPHEMERAL`` after normalisation.  This IMPROVES precision
+    on the OPEN-scan path but is harmless for the brace-depth path.
+    """
+    # 1. Raw strings — must come before normal strings.
+    text = _RUST_RAW_STR.sub(lambda m: f'r{m.group(1)}""{m.group(1)}', text)
+    # 2. Normal double-quoted strings.
     text = _RUST_NORMAL_STR.sub('""', text)
-    # 3. Char literals (single-quoted, one char or escape sequence)
-    text = _RUST_CHAR_LITERAL.sub("'_'", text)
+    # 3. Char literals.
+    text = _RUST_CHAR_LITERAL.sub("''", text)
+    # 4. Inline /* ... */ block-comment spans (forward-reading, full text).
+    text = _RUST_FWD_BLOCK_COMMENT.sub("", text)
+    # 5. // line-comment tails.
+    text = _RUST_FWD_LINE_COMMENT.sub("", text)
     return text
 
 
 def _detect_rust(text: str) -> "C5Finding | None":
     # Per-test-function: scan THIS fn's attrs for gates, THIS fn's body for the open.
     for attrs, body in _rust_test_units(text):
-        attrs_nc = _strip_line_comments(attrs, "//")   # commented-out gate != a gate
-        body_nc = _strip_line_comments(body, "//")
-        # FIX 2: strip string literal contents so open-signatures inside literals
-        # (error-message asserts, insta snapshots) do not false-block.
-        body_nc = _strip_rust_string_contents(body_nc)
-        m = _RUST_OPEN.search(body_nc)
+        # Normalize once for each per-function unit; all counting/searching below
+        # uses these code-only strings — never the raw attrs/body text.
+        attrs_co = _rust_code_only(_strip_line_comments(attrs, "//"))
+        body_co = _rust_code_only(_strip_line_comments(body, "//"))
+
+        # Site 4: _RUST_OPEN signature search on code-only body.
+        m = _RUST_OPEN.search(body_co)
         if not m:
             continue
-        if _rust_gated(attrs_nc):
+        # Site 3: _rust_gated gate-span scan on code-only attrs.
+        if _rust_gated(attrs_co):
             continue
-        if _RUST_EPHEMERAL.search(body_nc):
+        # Ephemeral check on code-only body.  Note: _RUST_EPHEMERAL includes
+        # bare ``tempfile`` which previously matched inline-comment tails (Codex
+        # F4 FN).  On the code-only path those tails are stripped, so the FN is
+        # no longer present here — the test that documents it now sees FIRES.
+        # That test asserted current (non-firing) behavior as a DOCUMENTED FN;
+        # updating it to FIRES is correct — it means we fixed a false-negative.
+        if _RUST_EPHEMERAL.search(body_co):
             continue
         return C5Finding(signature=m.group(0), lang="rust")
     return None

@@ -302,14 +302,28 @@ class TestRustConservativeGate:
 # ===========================================================================
 
 class TestRustInlineCommentFN:
-    def test_inline_comment_tempfile_suppresses_open(self):
-        """Codex F4 (documented FN, accepted fail-open-safe residual):
-        AxonService::open(&repo); // tempfile  → does NOT fire.
-        Inline-comment tail with 'tempfile' token triggers the ephemeral check
-        on body_nc (inline comments are NOT stripped to avoid corrupting URLs).
-        This is an accepted FN — inline stripping risks eating 'https://' URLs
-        on the BLOCKING path. Assert current behavior explicitly so it is not
-        silently claimed-fixed in a future change."""
+    def test_inline_comment_tempfile_no_longer_suppresses_open(self):
+        """Codex F4 FN ELIMINATED by the shared code-only normalizer (FIX 5 / R3):
+        AxonService::open(&repo); // tempfile  → NOW FIRES.
+
+        Previously the inline '// tempfile' tail was NOT stripped (to avoid
+        corrupting 'https://' URLs in string literals), so _RUST_EPHEMERAL
+        matched 'tempfile' in the comment and suppressed the detection (a
+        fail-open-safe FN, documented).
+
+        The shared _rust_code_only normalizer strips BOTH string-literal
+        contents AND '//'-comment tails before delimiter counting and signature
+        searching.  Stripping string contents first makes the subsequent '//'
+        strip safe even for lines containing 'https://' URLs (the URL content
+        has already been replaced by empty delimiters, so '//' in a stripped
+        string does not corrupt real code).  As a result the comment tail is
+        removed, _RUST_EPHEMERAL no longer sees 'tempfile', and the real open
+        is correctly detected — the FN is eliminated.
+
+        This test is updated from 'assert result is None' to 'assert result is
+        not None' to reflect the improved recall.  The fix is still fail-open-
+        safe: it removes a false-negative (under-blocking), never adds a
+        false-positive (over-blocking)."""
         # Arrange
         text = (
             "#[test]\n"
@@ -320,10 +334,10 @@ class TestRustInlineCommentFN:
         # Act
         result = _c5_detect(text, "rust")
         # Assert
-        assert result is None, (
-            "Inline-comment-spoofed ephemeral suppression is an accepted "
-            "fail-open-safe FN (Codex F4). Current behavior is non-fire; "
-            "this test documents the residual so any fix must be explicit."
+        assert result is not None, (
+            "With the code-only normalizer, '// tempfile' is stripped before "
+            "the ephemeral check — the real open is now correctly detected. "
+            "This is a recall improvement, not a false block."
         )
 
 
@@ -871,4 +885,84 @@ class TestRustCommentBracketDebt:
         assert result is not None, (
             "A multi-line block comment with interior ')' above '#[test]' "
             "must not suppress via phantom debt — the ungated open must FIRE."
+        )
+
+
+# ===========================================================================
+# FIX 5 — body-brace depth must NOT count braces inside string literals (R3)
+# ===========================================================================
+
+class TestRustBodyBraceStringLiteral:
+    def test_string_brace_in_first_test_absorbs_gated_second_test_returns_none(self):
+        """FIX 5 regression (P1 Codex R3):
+        Ungated 'first()' contains 'let s = \"{\";' — the raw '{' inside the
+        string inflates brace depth so the body-walk never closes 'first()'
+        and absorbs 'second()' (which is gated with #[ignore] and has a real
+        Database::open). Attributed to the UNGATED first(), the open fires —
+        false block. After the fix, brace depth is counted on code-only text;
+        string braces are neutralised → first() closes correctly → second()
+        is a separate unit → #[ignore] gate suppresses → None."""
+        # Arrange
+        text = (
+            "#[test]\n"
+            "fn first() {\n"
+            '    let s = "{";\n'
+            "}\n"
+            "\n"
+            "#[ignore]\n"
+            "#[test]\n"
+            "fn second() {\n"
+            "    let db = Database::open(&real_path).unwrap();\n"
+            "}\n"
+        )
+        # Act
+        result = _c5_detect(text, "rust")
+        # Assert
+        assert result is None, (
+            "The gated 'second()' must NOT be absorbed into 'first()' body due "
+            "to a '{' inside a string literal inflating brace depth."
+        )
+
+    def test_string_brace_decoy_in_single_ungated_test_still_fires(self):
+        """FIX 5: braces inside a string literal in a SINGLE ungated test must
+        not corrupt brace depth in a way that prevents detecting the real open.
+        'let s = \"}}}{{{\";' plus 'Database::open(&p)' → FIRES (net brace count
+        is still correct after literal-stripping; body closes normally)."""
+        # Arrange
+        text = (
+            "#[test]\n"
+            "fn t() {\n"
+            '    let s = "}}}{{{";\n'
+            "    let db = Database::open(&p).unwrap();\n"
+            "}\n"
+        )
+        # Act
+        result = _c5_detect(text, "rust")
+        # Assert
+        assert result is not None, (
+            "Braces inside a string literal must not prevent detecting the "
+            "real Database::open call in the same function."
+        )
+
+    def test_doc_attr_string_bracket_does_not_break_gate_span_scan(self):
+        """FIX 5 / site 3: an attribute string containing ']' (e.g. #[doc = \"]\"])
+        on a gated test must not break the _rust_gated bracket-span scan.
+        A raw ']' inside the string would close the span prematurely, leaving
+        an unbalanced '[' which could be misclassified. After the fix, string
+        contents are neutralised before the span scan → None (correctly gated)."""
+        # Arrange
+        text = (
+            '#[doc = "see Database::open(]"]\n'
+            "#[ignore]\n"
+            "#[test]\n"
+            "fn t() {\n"
+            "    let db = Database::open(&real_path).unwrap();\n"
+            "}\n"
+        )
+        # Act
+        result = _c5_detect(text, "rust")
+        # Assert
+        assert result is None, (
+            "A ']' inside an attribute string must not break the gate-span "
+            "bracket scan — the #[ignore] gate must still suppress."
         )
