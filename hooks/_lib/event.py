@@ -26,8 +26,13 @@ def get_tool_input(event: dict) -> dict:
 
 
 def get_tool_result(event: dict) -> str:
-    """Normalize tool_result to string."""
-    result = event.get("tool_result", "")
+    """Normalize tool result to string.
+
+    Reads the real PostToolUse key `tool_response` first (as captured by the
+    live probe — see 01-02-PROBE-FINDING.md), then falls back to `tool_result`
+    and `tool_output` for cross-version robustness.
+    """
+    result = event.get("tool_response", event.get("tool_result", event.get("tool_output", "")))
     if isinstance(result, str):
         return result
     if isinstance(result, dict):

@@ -223,8 +223,8 @@ class TestCommitMessageUnparseable:
 class TestExitCodeCheck:
     """Tests that the commit gate checks verification exit codes, not just existence."""
 
-    def test_blocks_commit_when_tests_failed(self, run_hook, make_event, tmp_state_dir, tmp_path):
-        """Commit blocked when most recent test run had non-zero exit code."""
+    def test_advises_commit_when_tests_failed(self, run_hook, make_event, tmp_state_dir, tmp_path):
+        """Commit is advisory (not blocked) when most recent test run had non-zero exit code."""
         (tmp_path / "Makefile").touch()
         old_cwd = os.getcwd()
         os.chdir(tmp_path)
@@ -233,14 +233,14 @@ class TestExitCodeCheck:
             event = make_event("Bash", command='git commit -m "feat: add feature"')
             result = run_hook("git-safety-guard.py", event)
             assert result.parsed is not None
-            assert result.parsed["decision"] == "block"
+            assert result.parsed["decision"] == "allow"
             assert "FAILED" in result.parsed["reason"]
             assert "Tests failed" in result.parsed["reason"]
         finally:
             os.chdir(old_cwd)
 
-    def test_blocks_commit_when_lint_failed(self, run_hook, make_event, tmp_state_dir, tmp_path):
-        """Commit blocked when most recent lint run had non-zero exit code."""
+    def test_advises_commit_when_lint_failed(self, run_hook, make_event, tmp_state_dir, tmp_path):
+        """Commit is advisory (not blocked) when most recent lint run had non-zero exit code."""
         (tmp_path / "Makefile").touch()
         old_cwd = os.getcwd()
         os.chdir(tmp_path)
@@ -249,14 +249,14 @@ class TestExitCodeCheck:
             event = make_event("Bash", command='git commit -m "feat: add feature"')
             result = run_hook("git-safety-guard.py", event)
             assert result.parsed is not None
-            assert result.parsed["decision"] == "block"
+            assert result.parsed["decision"] == "allow"
             assert "FAILED" in result.parsed["reason"]
             assert "Lint failed" in result.parsed["reason"]
         finally:
             os.chdir(old_cwd)
 
-    def test_blocks_commit_when_both_failed(self, run_hook, make_event, tmp_state_dir, tmp_path):
-        """Commit blocked when both test and lint runs failed."""
+    def test_advises_commit_when_both_failed(self, run_hook, make_event, tmp_state_dir, tmp_path):
+        """Commit is advisory (not blocked) when both test and lint runs failed."""
         (tmp_path / "Makefile").touch()
         old_cwd = os.getcwd()
         os.chdir(tmp_path)
@@ -265,7 +265,7 @@ class TestExitCodeCheck:
             event = make_event("Bash", command='git commit -m "feat: add feature"')
             result = run_hook("git-safety-guard.py", event)
             assert result.parsed is not None
-            assert result.parsed["decision"] == "block"
+            assert result.parsed["decision"] == "allow"
             assert "Tests failed" in result.parsed["reason"]
             assert "Lint failed" in result.parsed["reason"]
         finally:
@@ -311,7 +311,7 @@ class TestExitCodeCheck:
             os.chdir(old_cwd)
 
     def test_pre_existing_failure_rationalization_in_message(self, run_hook, make_event, tmp_state_dir, tmp_path):
-        """Block message includes named rationalization about pre-existing failures."""
+        """Advisory message includes named rationalization about pre-existing failures."""
         (tmp_path / "Makefile").touch()
         old_cwd = os.getcwd()
         os.chdir(tmp_path)
@@ -320,7 +320,169 @@ class TestExitCodeCheck:
             event = make_event("Bash", command='git commit -m "feat: add feature"')
             result = run_hook("git-safety-guard.py", event)
             assert result.parsed is not None
+            assert result.parsed["decision"] == "allow"
             assert "pre-existing failure" in result.parsed["reason"].lower()
+        finally:
+            os.chdir(old_cwd)
+
+
+class TestPostToolUseCapture:
+    """Tests for PostToolUse behavior with the real tool_response schema."""
+
+    def test_posttooluse_tool_response_event_no_exit_code_captured(
+        self, run_hook, make_event, tmp_state_dir
+    ):
+        """Reality test: a real PostToolUse `tool_response`-keyed event does NOT produce
+        a captured non-None exit code in state.
+
+        Documents the REAL wire schema (01-02-PROBE-FINDING.md): CC delivers PostToolUse
+        Bash results under `tool_response` (keys: stdout/stderr/interrupted/isImage/
+        noOutputExpected — NO exit_code). Because git-safety-guard.py :752 discriminates
+        Pre vs Post on `"tool_result" in ev`, a real `tool_response`-only event has NO
+        `tool_result` key and is therefore routed to the PreToolUse branch, which records
+        exit_code=None. This is WHY de-registering git-safety-guard from PostToolUse is
+        safe: even if it received real PostToolUse events it could never capture exit codes
+        from them. The hook cannot capture failures from real PostToolUse events.
+        """
+        import hashlib
+        import json
+        from pathlib import Path
+
+        # Arrange: REAL PostToolUse wire shape — `tool_response` key, NO `tool_result`,
+        # NO exit_code field. Build the dict literally (not via make_event, which only
+        # adds `tool_result`).
+        real_post_tool_use_event = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "pytest tests/"},
+            "tool_response": {
+                "stdout": "FAILED test_foo.py::test_bar - AssertionError",
+                "stderr": "",
+                "interrupted": False,
+                "isImage": False,
+                "noOutputExpected": False,
+                # NO exit_code — matches 01-02-PROBE-FINDING.md ground truth
+            },
+        }
+
+        # Seed a prior state entry so the hook has a state file to append to
+        _seed_verification_state(tmp_state_dir, test_exit_code=None, lint_exit_code=None)
+
+        # Act: run the hook — no `tool_result` key → routes to PreToolUse branch,
+        # tracks command with exit_code=None (the PreToolUse fallback behaviour)
+        result = run_hook("git-safety-guard.py", real_post_tool_use_event)
+
+        # The hook is silent (no JSON output) for a non-git command
+        assert result.returncode == 0, f"Hook crashed: stderr={result.stderr!r}"
+        assert result.stdout.strip() == "", (
+            f"Hook should emit no output for this event; got: {result.stdout!r}"
+        )
+
+        # Assert: the captured exit code is None — the PreToolUse fallback records None
+        # because no exit_code field existed on the real `tool_response` payload
+        session_hash = hashlib.sha256(tmp_state_dir.encode()).hexdigest()[:12]
+        state_file = Path(f"/tmp/claude-verification-{session_hash}.json")
+        if state_file.exists():
+            st = json.loads(state_file.read_text())
+            verifications = st.get("verifications", [])
+            pytest_entries = [v for v in verifications if "pytest" in v["command"]]
+            if pytest_entries:
+                last_pytest = pytest_entries[-1]
+                assert last_pytest["exit_code"] is None, (
+                    f"Expected exit_code=None (PreToolUse fallback, no exit_code on wire), "
+                    f"got {last_pytest['exit_code']!r}"
+                )
+
+    def test_failed_state_produces_advisory_not_block_on_commit(
+        self, run_hook, make_event, tmp_state_dir, tmp_path
+    ):
+        """A state with exit_code=1 recorded produces advisory (not block) on commit."""
+        # Arrange: state with a failed pytest run (exit_code=1)
+        _seed_verification_state(tmp_state_dir, test_exit_code=1, lint_exit_code=0)
+
+        (tmp_path / "Makefile").touch()
+        old_cwd = os.getcwd()
+        os.chdir(tmp_path)
+        try:
+            # Act: PreToolUse commit attempt
+            ev = make_event("Bash", command='git commit -m "feat: something"')
+            result = run_hook("git-safety-guard.py", ev)
+
+            # Assert: advisory (allow + reason), NOT block
+            assert result.parsed is not None, (
+                f"Expected advisory JSON, got: {result.stdout!r}"
+            )
+            assert result.parsed["decision"] == "allow", (
+                f"Expected advisory (allow), got decision={result.parsed['decision']!r}"
+            )
+            assert "FAILED" in result.parsed["reason"], (
+                "Advisory reason should mention FAILED"
+            )
+        finally:
+            os.chdir(old_cwd)
+
+    def test_posttooluse_none_tool_result_does_not_crash(
+        self, run_hook, make_event, tmp_state_dir
+    ):
+        """PostToolUse with None/string tool_result does not crash and stays silent."""
+        # tool_result=None: make_event omits tool_result entirely — use a string instead
+        # to exercise the string-path in _extract_exit_code
+        ev = make_event("Bash", command="pytest tests/", tool_result="some output text")
+        result = run_hook("git-safety-guard.py", ev)
+        # Should be silent (no block, no crash)
+        assert result.returncode == 0, f"Hook crashed: stderr={result.stderr!r}"
+        assert result.stdout.strip() == "", (
+            f"Expected silent output for string tool_result, got: {result.stdout!r}"
+        )
+
+    def test_posttooluse_missing_tool_result_no_output(
+        self, run_hook, make_event, tmp_state_dir
+    ):
+        """PostToolUse event with no tool_result field (omitted) is treated as PreToolUse.
+
+        Codifies the dormant discriminator: git-safety-guard.py :752 gates on
+        `"tool_result" in ev`; a real PostToolUse event (which carries `tool_response`,
+        not `tool_result`) therefore falls through to the PreToolUse branch. This is
+        consistent with git-safety-guard being de-registered from PostToolUse — it was
+        never routing real PostToolUse events correctly anyway.
+        """
+        # When tool_result is not in the event, the hook treats it as PreToolUse.
+        # A non-git command should produce no output (silent pass-through).
+        ev = make_event("Bash", command="pytest tests/")
+        # No tool_result key → PreToolUse path → tracks as verification, no output
+        result = run_hook("git-safety-guard.py", ev)
+        assert result.returncode == 0
+        assert result.stdout.strip() == ""
+
+    def test_missing_verification_still_blocks(
+        self, run_hook, make_event, tmp_state_dir, tmp_path
+    ):
+        """Regression: no recent test/lint verification → missing path still BLOCKS."""
+        import hashlib
+        from pathlib import Path
+
+        # Arrange: empty/no state file (no verification run at all)
+        session_hash = hashlib.sha256(tmp_state_dir.encode()).hexdigest()[:12]
+        state_file = Path(f"/tmp/claude-verification-{session_hash}.json")
+        if state_file.exists():
+            state_file.unlink()
+
+        (tmp_path / "Makefile").touch()
+        old_cwd = os.getcwd()
+        os.chdir(tmp_path)
+        try:
+            ev = make_event("Bash", command='git commit -m "feat: untested change"')
+            result = run_hook("git-safety-guard.py", ev)
+
+            # Assert: hard BLOCK (missing path, not advisory)
+            assert result.parsed is not None, (
+                f"Expected block JSON, got: {result.stdout!r}"
+            )
+            assert result.parsed["decision"] == "block", (
+                f"Expected block for missing verification, got {result.parsed['decision']!r}"
+            )
+            assert "NOT run" in result.parsed["reason"] or "MUST run" in result.parsed["reason"], (
+                f"Expected 'NOT run'/'MUST run' in block reason: {result.parsed['reason']!r}"
+            )
         finally:
             os.chdir(old_cwd)
 
