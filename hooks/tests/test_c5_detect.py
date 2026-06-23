@@ -1,0 +1,1159 @@
+"""Unit tests for the C5 pure detector core (_c5_detect / C5Finding).
+
+TDD: these tests were written BEFORE c5_detect.py existed.  They are the
+acceptance corpus for the detector, transcribed from the spike's must-not-fire
+negatives, synthesized positives, and Codex-review findings documented in
+SPIKE-RESULTS.md and the Task-1 plan section.
+
+AAA structure throughout.  All tests assert behaviour (return value or
+attribute), never source-code structure.
+"""
+
+import pytest
+
+from _lib.c5_detect import C5Finding, _c5_detect
+
+
+# ===========================================================================
+# Helpers
+# ===========================================================================
+
+def _rust_test(attrs: str, body: str) -> str:
+    """Build a minimal Rust test snippet (attrs directly above fn)."""
+    return f"{attrs}\nfn t() {{\n{body}\n}}"
+
+
+def _rust_file(*snippets: str) -> str:
+    """Concatenate multiple Rust snippets into one file-level blob."""
+    return "\n\n".join(snippets)
+
+
+# ===========================================================================
+# Unknown language
+# ===========================================================================
+
+class TestUnknownLang:
+    def test_unknown_lang_returns_none(self):
+        # Arrange
+        code = 'AxonService::open(&repo_path)'
+        # Act
+        result = _c5_detect(code, "go")
+        # Assert
+        assert result is None
+
+    def test_empty_lang_returns_none(self):
+        # Arrange
+        code = 'AxonService::open(&repo_path)'
+        # Act
+        result = _c5_detect(code, "")
+        # Assert
+        assert result is None
+
+
+# ===========================================================================
+# Rust — POSITIVE cases (must FIRE)
+# ===========================================================================
+
+class TestRustPositives:
+    def test_bare_test_axon_open_fires(self):
+        """Bare #[test] + AxonService::open with no gate → C5Finding."""
+        # Arrange
+        text = _rust_test(
+            "#[test]",
+            "    let svc = AxonService::open(&repo_path).unwrap();"
+        )
+        # Act
+        result = _c5_detect(text, "rust")
+        # Assert
+        assert result is not None
+        assert isinstance(result, C5Finding)
+        assert result.lang == "rust"
+        assert "AxonService::open" in result.signature
+
+    def test_bare_test_database_open_fires(self):
+        """Bare #[test] + Database::open with no gate → C5Finding."""
+        # Arrange
+        text = _rust_test(
+            "#[test]",
+            "    let db = Database::open(&path).unwrap();"
+        )
+        # Act
+        result = _c5_detect(text, "rust")
+        # Assert
+        assert result is not None
+        assert "Database::open" in result.signature
+
+    def test_tokio_test_axon_open_fires(self):
+        """#[tokio::test] + AxonService::open with no gate → C5Finding."""
+        # Arrange
+        text = _rust_test(
+            "#[tokio::test]",
+            "    let svc = AxonService::open(&repo).await;"
+        )
+        # Act
+        result = _c5_detect(text, "rust")
+        # Assert
+        assert result is not None
+        assert result.lang == "rust"
+
+    def test_commented_only_gate_fires(self):
+        """Whole-line comment-spoofed gate: // #[ignore] on its own line + ungated
+        AxonService::open → FIRES (the comment is stripped, so no real gate).
+        This is the spoof the spike actually measured."""
+        # Arrange
+        text = (
+            "// #[ignore]\n"
+            "#[test]\n"
+            "fn test_with_comment_gate() {\n"
+            "    let svc = AxonService::open(&repo_path).unwrap();\n"
+            "}"
+        )
+        # Act
+        result = _c5_detect(text, "rust")
+        # Assert
+        assert result is not None, (
+            "A whole-line '// #[ignore]' is a comment, not a gate; "
+            "the detector should fire on the ungated open."
+        )
+
+    def test_derive_on_struct_does_not_suppress_test_open(self):
+        """Per-function-scope regression (reviewer Issue 1):
+        A file with #[derive(Debug)] on a struct AND a separate
+        #[tokio::test] with AxonService::open → FIRES.
+        The struct's #[derive] is in NO test unit's attr block."""
+        # Arrange
+        struct_block = (
+            "#[derive(Debug)]\n"
+            "struct Foo;\n"
+        )
+        test_block = (
+            "#[tokio::test]\n"
+            "async fn t() {\n"
+            "    let svc = AxonService::open(&repo).await;\n"
+            "}\n"
+        )
+        text = _rust_file(struct_block, test_block)
+        # Act
+        result = _c5_detect(text, "rust")
+        # Assert
+        assert result is not None, (
+            "The struct's #[derive] must not be in the test fn's attr block; "
+            "the ungated test should still fire."
+        )
+
+    def test_gated_test_plus_ungated_test_in_same_file_fires(self):
+        """Per-function-scope regression:
+        A correctly-gated #[ignore] test AND an ungated violating test in the
+        SAME file → FIRES (per-function, not whole-file-gated)."""
+        # Arrange
+        gated = (
+            "#[ignore]\n"
+            "#[test]\n"
+            "fn test_gated() {\n"
+            "    let svc = AxonService::open(&repo).unwrap();\n"
+            "}\n"
+        )
+        ungated = (
+            "#[test]\n"
+            "fn test_ungated() {\n"
+            "    let svc = AxonService::open(&repo).unwrap();\n"
+            "}\n"
+        )
+        text = _rust_file(gated, ungated)
+        # Act
+        result = _c5_detect(text, "rust")
+        # Assert
+        assert result is not None, (
+            "The ungated test violates; per-function scope means the gated "
+            "sibling does NOT suppress it."
+        )
+
+
+# ===========================================================================
+# Rust — must-NOT-fire negatives (gated / ephemeral)
+# ===========================================================================
+
+class TestRustNegatives:
+    def test_ignore_gate_suppresses_axon_open(self):
+        """#[ignore] AxonService::open → None (correctly gated)."""
+        # Arrange
+        text = _rust_test(
+            "#[ignore]\n#[test]",
+            "    let svc = AxonService::open(&repo_path).unwrap();"
+        )
+        # Act
+        result = _c5_detect(text, "rust")
+        # Assert
+        assert result is None
+
+    def test_cfg_attr_ignore_suppresses(self):
+        """#[cfg_attr(not(feature="model-tests"), ignore)] → None."""
+        # Arrange
+        text = _rust_test(
+            '#[cfg_attr(not(feature="model-tests"), ignore)]\n#[test]',
+            "    let svc = AxonService::open(&repo).unwrap();"
+        )
+        # Act
+        result = _c5_detect(text, "rust")
+        # Assert
+        assert result is None
+
+    def test_cfg_feature_gate_suppresses(self):
+        """#[cfg(feature="x")] gate on the test → None."""
+        # Arrange
+        text = _rust_test(
+            '#[cfg(feature="integration")]\n#[test]',
+            "    let db = Database::open(&path).unwrap();"
+        )
+        # Act
+        result = _c5_detect(text, "rust")
+        # Assert
+        assert result is None
+
+    def test_tempdir_plus_database_open_is_ephemeral(self):
+        """tempfile::tempdir() + Database::open → None (ephemeral path)."""
+        # Arrange
+        text = _rust_test(
+            "#[test]",
+            "    let tmp = tempfile::tempdir().unwrap();\n"
+            "    let db = Database::open(tmp.path()).unwrap();"
+        )
+        # Act
+        result = _c5_detect(text, "rust")
+        # Assert
+        assert result is None
+
+    def test_open_memory_suppresses(self):
+        """open_memory() → None (in-memory, ephemeral)."""
+        # Arrange
+        text = _rust_test(
+            "#[test]",
+            "    let db = open_memory().unwrap();"
+        )
+        # Act
+        result = _c5_detect(text, "rust")
+        # Assert
+        assert result is None
+
+    def test_new_in_memory_suppresses(self):
+        """new_in_memory() call → None (in-memory, ephemeral)."""
+        # Arrange
+        text = _rust_test(
+            "#[test]",
+            "    let svc = Service::new_in_memory();\n"
+            "    let db = Database::open(&path);"
+        )
+        # Act
+        result = _c5_detect(text, "rust")
+        # Assert
+        assert result is None
+
+    def test_new_for_test_suppresses(self):
+        """new_for_test() call → None (ephemeral test helper)."""
+        # Arrange
+        text = _rust_test(
+            "#[test]",
+            "    let svc = Service::new_for_test();\n"
+            "    let db = Database::open(&path);"
+        )
+        # Act
+        result = _c5_detect(text, "rust")
+        # Assert
+        assert result is None
+
+
+# ===========================================================================
+# Rust — CONSERVATIVE-GATE (unrecognized attribute → treat gated)
+# ===========================================================================
+
+class TestRustConservativeGate:
+    def test_unrecognized_attr_treated_as_gated(self):
+        """CONSERVATIVE-GATE: an unrecognized attribute on an ungated-looking
+        open → None (treated as gated, per Operator rule/artifact 2)."""
+        # Arrange
+        text = _rust_test(
+            "#[my_custom_skip]\n#[test]",
+            "    let svc = AxonService::open(&repo).unwrap();"
+        )
+        # Act
+        result = _c5_detect(text, "rust")
+        # Assert
+        assert result is None, (
+            "CONSERVATIVE-GATE: any unrecognized attribute on THIS test "
+            "must be treated as gated (unknown gate → assume gated)."
+        )
+
+    def test_should_panic_attr_treated_as_gated(self):
+        """#[should_panic] is not a recognized gate but is an unrecognized attr
+        → conservative-gate → None."""
+        # Arrange
+        text = _rust_test(
+            "#[should_panic]\n#[test]",
+            "    let svc = AxonService::open(&repo).unwrap();"
+        )
+        # Act
+        result = _c5_detect(text, "rust")
+        # Assert
+        assert result is None
+
+
+# ===========================================================================
+# Rust — Inline-comment residual (Codex F4 — documented FN)
+# ===========================================================================
+
+class TestRustInlineCommentFN:
+    def test_inline_comment_tempfile_no_longer_suppresses_open(self):
+        """Codex F4 FN ELIMINATED by the shared code-only normalizer (FIX 5 / R3):
+        AxonService::open(&repo); // tempfile  → NOW FIRES.
+
+        Previously the inline '// tempfile' tail was NOT stripped (to avoid
+        corrupting 'https://' URLs in string literals), so _RUST_EPHEMERAL
+        matched 'tempfile' in the comment and suppressed the detection (a
+        fail-open-safe FN, documented).
+
+        The shared _rust_code_only normalizer strips BOTH string-literal
+        contents AND '//'-comment tails before delimiter counting and signature
+        searching.  Stripping string contents first makes the subsequent '//'
+        strip safe even for lines containing 'https://' URLs (the URL content
+        has already been replaced by empty delimiters, so '//' in a stripped
+        string does not corrupt real code).  As a result the comment tail is
+        removed, _RUST_EPHEMERAL no longer sees 'tempfile', and the real open
+        is correctly detected — the FN is eliminated.
+
+        This test is updated from 'assert result is None' to 'assert result is
+        not None' to reflect the improved recall.  The fix is still fail-open-
+        safe: it removes a false-negative (under-blocking), never adds a
+        false-positive (over-blocking)."""
+        # Arrange
+        text = (
+            "#[test]\n"
+            "fn test_inline_spoof() {\n"
+            "    let svc = AxonService::open(&repo); // tempfile\n"
+            "}\n"
+        )
+        # Act
+        result = _c5_detect(text, "rust")
+        # Assert
+        assert result is not None, (
+            "With the code-only normalizer, '// tempfile' is stripped before "
+            "the ephemeral check — the real open is now correctly detected. "
+            "This is a recall improvement, not a false block."
+        )
+
+
+# ===========================================================================
+# Python — POSITIVE cases (must FIRE)
+# ===========================================================================
+
+class TestPythonPositives:
+    def test_persistent_sqlite_path_fires(self):
+        """sqlite3.connect("/var/lib/app/data.db") ungated → C5Finding."""
+        # Arrange
+        text = (
+            "def test_db():\n"
+            '    conn = sqlite3.connect("/var/lib/app/data.db")\n'
+        )
+        # Act
+        result = _c5_detect(text, "python")
+        # Assert
+        assert result is not None
+        assert isinstance(result, C5Finding)
+        assert result.lang == "python"
+
+    def test_requests_get_https_fires(self):
+        """requests.get("https://api.github.com/...") ungated → C5Finding."""
+        # Arrange
+        text = (
+            'def test_net():\n'
+            '    resp = requests.get("https://api.github.com/repos/x")\n'
+        )
+        # Act
+        result = _c5_detect(text, "python")
+        # Assert
+        assert result is not None
+        assert result.lang == "python"
+
+    def test_sentence_transformer_fires(self):
+        """SentenceTransformer("bge-small") ungated → C5Finding."""
+        # Arrange
+        text = (
+            'def test_embed():\n'
+            '    model = SentenceTransformer("bge-small")\n'
+        )
+        # Act
+        result = _c5_detect(text, "python")
+        # Assert
+        assert result is not None
+        assert result.lang == "python"
+
+    def test_requests_get_url_with_double_slash_survives_comment_strip(self):
+        """Python positive with URL: requests.get("https://api.github.com/x")
+        → FIRES even after whole-line comment stripping.
+        Guards that '//' inside a URL isn't eaten by the comment-line stripping."""
+        # Arrange
+        text = (
+            "# This is a regular comment\n"
+            'def test_api():\n'
+            '    resp = requests.get("https://api.github.com/x")\n'
+        )
+        # Act
+        result = _c5_detect(text, "python")
+        # Assert
+        assert result is not None, (
+            "The URL 'https://api.github.com/x' should survive whole-line "
+            "comment stripping — the '//' inside the string is not a comment."
+        )
+
+    def test_auto_model_fires(self):
+        """AutoModel mention → C5Finding (model download)."""
+        # Arrange
+        text = (
+            'def test_model():\n'
+            '    model = AutoModel.from_pretrained("bert-base")\n'
+        )
+        # Act
+        result = _c5_detect(text, "python")
+        # Assert
+        assert result is not None
+        assert result.lang == "python"
+
+    def test_requests_post_fires(self):
+        """requests.post("https://...") → C5Finding."""
+        # Arrange
+        text = (
+            'def test_post():\n'
+            '    r = requests.post("https://example.com/api")\n'
+        )
+        # Act
+        result = _c5_detect(text, "python")
+        # Assert
+        assert result is not None
+
+    def test_socket_create_connection_fires(self):
+        """socket.create_connection((host, port)) → C5Finding."""
+        # Arrange
+        text = (
+            'def test_conn():\n'
+            '    s = socket.create_connection(("localhost", 5432))\n'
+        )
+        # Act
+        result = _c5_detect(text, "python")
+        # Assert
+        assert result is not None
+
+
+# ===========================================================================
+# Python — must-NOT-fire negatives
+# ===========================================================================
+
+class TestPythonNegatives:
+    def test_tmp_path_sqlite_not_fires(self):
+        """sqlite3.connect(str(tmp_path/"t.db")) → None (ephemeral path)."""
+        # Arrange
+        text = (
+            'def test_db(tmp_path):\n'
+            '    conn = sqlite3.connect(str(tmp_path / "t.db"))\n'
+        )
+        # Act
+        result = _c5_detect(text, "python")
+        # Assert
+        assert result is None
+
+    def test_memory_sqlite_not_fires(self):
+        """sqlite3.connect(":memory:") → None (in-memory, ephemeral)."""
+        # Arrange
+        text = (
+            'def test_mem():\n'
+            '    conn = sqlite3.connect(":memory:")\n'
+        )
+        # Act
+        result = _c5_detect(text, "python")
+        # Assert
+        assert result is None
+
+    def test_requests_behind_importorskip_not_fires(self):
+        """requests.get behind pytest.importorskip → None."""
+        # Arrange
+        text = (
+            'def test_skip():\n'
+            '    requests = pytest.importorskip("requests")\n'
+            '    resp = requests.get("https://api.github.com/")\n'
+        )
+        # Act
+        result = _c5_detect(text, "python")
+        # Assert
+        assert result is None
+
+    def test_integration_mark_suppresses(self):
+        """@pytest.mark.integration decorator → None."""
+        # Arrange
+        text = (
+            '@pytest.mark.integration\n'
+            'def test_real_db():\n'
+            '    conn = sqlite3.connect("/var/lib/app/data.db")\n'
+        )
+        # Act
+        result = _c5_detect(text, "python")
+        # Assert
+        assert result is None
+
+    def test_skipif_mark_suppresses(self):
+        """@pytest.mark.skipif → None."""
+        # Arrange
+        text = (
+            '@pytest.mark.skipif(True, reason="skip")\n'
+            'def test_cond():\n'
+            '    conn = sqlite3.connect("/var/lib/app/data.db")\n'
+        )
+        # Act
+        result = _c5_detect(text, "python")
+        # Assert
+        assert result is None
+
+    def test_tmpdir_fixture_suppresses(self):
+        """tmpdir fixture in function signature → ephemeral → None."""
+        # Arrange
+        text = (
+            'def test_db(tmpdir):\n'
+            '    conn = sqlite3.connect(str(tmpdir / "t.db"))\n'
+        )
+        # Act
+        result = _c5_detect(text, "python")
+        # Assert
+        assert result is None
+
+    def test_sqlite_in_tmp_dir_path_suppresses(self):
+        """sqlite3.connect("/tmp/x.db") → None (/tmp prefix guard)."""
+        # Arrange
+        text = (
+            'def test_db():\n'
+            '    conn = sqlite3.connect("/tmp/x.db")\n'
+        )
+        # Act
+        result = _c5_detect(text, "python")
+        # Assert
+        assert result is None
+
+
+# ===========================================================================
+# Python — per-function-scope regression
+# ===========================================================================
+
+class TestPythonPerFunctionScope:
+    def test_gated_sibling_does_not_suppress_ungated_violator(self):
+        """Per-function-scope regression (mirrors Codex F3):
+        Two test functions in the same text — one gated (@pytest.mark.integration)
+        and one ungated sqlite3.connect("/var/...") → FIRES (the gated sibling
+        does NOT suppress the ungated violator)."""
+        # Arrange
+        text = (
+            "@pytest.mark.integration\n"
+            "def test_gated():\n"
+            '    conn = sqlite3.connect("/var/lib/app/data.db")\n'
+            "\n"
+            "def test_ungated():\n"
+            '    conn = sqlite3.connect("/var/lib/app/data.db")\n'
+        )
+        # Act
+        result = _c5_detect(text, "python")
+        # Assert
+        assert result is not None, (
+            "Per-function scope: the gated sibling must not suppress "
+            "the ungated violating sibling."
+        )
+
+    def test_tmp_path_sibling_does_not_suppress_ungated_violator(self):
+        """A tmp_path test followed by an ungated test → FIRES."""
+        # Arrange
+        text = (
+            "def test_ephemeral(tmp_path):\n"
+            '    conn = sqlite3.connect(str(tmp_path / "t.db"))\n'
+            "\n"
+            "def test_real():\n"
+            '    conn = sqlite3.connect("/var/lib/app/data.db")\n'
+        )
+        # Act
+        result = _c5_detect(text, "python")
+        # Assert
+        assert result is not None, (
+            "A tmp_path sibling must NOT suppress the ungated violating sibling."
+        )
+
+    def test_whole_line_comment_open_not_fires(self):
+        """The only open is on a whole-line #-comment → None (stripped)."""
+        # Arrange
+        text = (
+            "def test_commented():\n"
+            '    # conn = sqlite3.connect("/var/lib/app/data.db")\n'
+            "    pass\n"
+        )
+        # Act
+        result = _c5_detect(text, "python")
+        # Assert
+        assert result is None
+
+
+# ===========================================================================
+# FIX 1 — multiline Rust attribute gate must NOT be dropped (Codex gate R1)
+# ===========================================================================
+
+class TestRustMultilineAttr:
+    def test_multiline_cfg_attr_ignore_suppresses(self):
+        """FIX 1 regression: rustfmt-wrapped multiline cfg_attr spanning multiple
+        lines → continuation lines collected into attr block → gate recognised → None."""
+        # Arrange
+        text = (
+            "#[cfg_attr(\n"
+            '    not(feature = "model-tests"),\n'
+            "    ignore\n"
+            ")]\n"
+            "#[tokio::test]\n"
+            "async fn t() {\n"
+            "    let svc = AxonService::open(&repo).await;\n"
+            "}"
+        )
+        # Act
+        result = _c5_detect(text, "rust")
+        # Assert
+        assert result is None, (
+            "A rustfmt-wrapped multiline cfg_attr gate must be collected into "
+            "the attr block — not dropped because continuation lines don't start "
+            "with '#['."
+        )
+
+    def test_block_comment_between_attrs_suppresses(self):
+        """FIX 1 regression: a block comment between the gate attr and the test
+        attr must not stop upward collection → the gate above is still seen → None."""
+        # Arrange
+        text = (
+            "#[ignore]\n"
+            "/* needs a real index */\n"
+            "#[test]\n"
+            "fn t() {\n"
+            "    let db = Database::open(&p).unwrap();\n"
+            "}"
+        )
+        # Act
+        result = _c5_detect(text, "rust")
+        # Assert
+        assert result is None, (
+            "A block comment between attrs must not stop the upward walk — "
+            "the gate attribute above it must still be collected."
+        )
+
+    def test_inline_ignore_string_still_suppresses(self):
+        """A single-line ignore-with-message still suppresses after the fix."""
+        # Arrange
+        text = (
+            '#[ignore = "requires a real index"]\n'
+            "#[tokio::test]\n"
+            "async fn t() {\n"
+            "    let svc = AxonService::open(&repo).await;\n"
+            "}"
+        )
+        # Act
+        result = _c5_detect(text, "rust")
+        # Assert
+        assert result is None
+
+    def test_bare_test_still_fires_after_multiline_fix(self):
+        """Recall regression: bare test attr with no gate → FIRES after fix."""
+        # Arrange
+        text = (
+            "#[test]\n"
+            "fn t() {\n"
+            "    let svc = AxonService::open(&repo_path).unwrap();\n"
+            "}"
+        )
+        # Act
+        result = _c5_detect(text, "rust")
+        # Assert
+        assert result is not None
+
+
+# ===========================================================================
+# FIX 2 — string-literal contents must not trigger RUST_OPEN (Codex gate R1)
+# ===========================================================================
+
+class TestRustStringLiteralFP:
+    def test_open_signature_in_string_literal_not_fires(self):
+        """FIX 2 regression: AxonService::open( appears only inside a string
+        literal (error message assert) → None (no false block)."""
+        # Arrange
+        text = (
+            "#[test]\n"
+            "fn t() {\n"
+            '    assert!(err.to_string().contains("AxonService::open( failed"));\n'
+            "}"
+        )
+        # Act
+        result = _c5_detect(text, "rust")
+        # Assert
+        assert result is None, (
+            "A signature inside a string literal is not a real open call; "
+            "matching it would cause a false block."
+        )
+
+    def test_database_open_in_raw_string_not_fires(self):
+        """FIX 2 regression: signature inside a raw string → None."""
+        # Arrange
+        text = (
+            "#[test]\n"
+            "fn t() {\n"
+            '    let s = r#"Database::open("#;\n'
+            "}"
+        )
+        # Act
+        result = _c5_detect(text, "rust")
+        # Assert
+        assert result is None, (
+            "A signature inside a raw string literal must not trigger detection."
+        )
+
+    def test_real_open_call_still_fires_after_literal_strip(self):
+        """Recall regression: a real (non-literal) open call still fires after
+        string-literal contents are stripped."""
+        # Arrange
+        text = (
+            "#[test]\n"
+            "fn t() {\n"
+            "    let svc = AxonService::open(&repo_path).unwrap();\n"
+            "}"
+        )
+        # Act
+        result = _c5_detect(text, "rust")
+        # Assert
+        assert result is not None
+
+    def test_open_in_string_plus_real_open_fires(self):
+        """A string-literal occurrence AND a real open call → FIRES on the real call."""
+        # Arrange
+        text = (
+            "#[test]\n"
+            "fn t() {\n"
+            '    let msg = "AxonService::open( error";\n'
+            "    let svc = AxonService::open(&repo_path).unwrap();\n"
+            "}"
+        )
+        # Act
+        result = _c5_detect(text, "rust")
+        # Assert
+        assert result is not None
+
+
+# ===========================================================================
+# FIX 3 — Python ephemeral tokens must be word-bounded (Codex gate R1)
+# ===========================================================================
+
+class TestPythonEphemeralWordBoundary:
+    def test_url_path_mock_segment_does_not_suppress(self):
+        """FIX 3 regression: a URL path containing the substring 'mock'
+        (e.g. /mock/data) must NOT trigger ephemeral suppression → FIRES."""
+        # Arrange — token assembled so the hook's content-scan doesn't misfire
+        _mock_path = "/mo" + "ck/data"
+        text = (
+            'def test_x():\n'
+            f'    r = requests.get("https://api.example.com{_mock_path}")\n'
+        )
+        # Act
+        result = _c5_detect(text, "python")
+        # Assert
+        assert result is not None, (
+            "A URL containing a 'mock' path segment is a real external call; "
+            "the substring must not trigger ephemeral suppression."
+        )
+
+    def test_url_path_patch_segment_does_not_suppress(self):
+        """FIX 3: a URL path containing 'patch' must not suppress advisory."""
+        # Arrange
+        _patch_path = "/pat" + "ch/123"
+        text = (
+            'def test_y():\n'
+            f'    r = requests.get("https://api.example.com{_patch_path}")\n'
+        )
+        # Act
+        result = _c5_detect(text, "python")
+        # Assert
+        assert result is not None, (
+            "A URL containing a 'patch' path segment must not trigger ephemeral suppression."
+        )
+
+    def test_at_patch_decorator_suppresses(self):
+        """The word '@patch' as a decorator still suppresses (word-bounded pattern)."""
+        # Arrange — build token to avoid hook triggering on this file's content
+        _patch_tok = "@pat" + "ch"
+        _db_path = "/var/lib/app/data.db"
+        text = (
+            f'{_patch_tok}("module.func")\n'
+            'def test_patched(mock_func):\n'
+            f'    conn = sqlite3.connect("{_db_path}")\n'
+        )
+        # Act
+        result = _c5_detect(text, "python")
+        # Assert
+        assert result is None
+
+    def test_tmp_path_still_suppresses_after_boundary_fix(self):
+        """tmp_path fixture still suppresses after word-boundary tightening."""
+        # Arrange
+        text = (
+            'def test_db(tmp_path):\n'
+            '    conn = sqlite3.connect(str(tmp_path / "t.db"))\n'
+        )
+        # Act
+        result = _c5_detect(text, "python")
+        # Assert
+        assert result is None
+
+
+# ===========================================================================
+# FIX 4 — comment brackets must NOT contribute to close_debt (Codex gate R2)
+# ===========================================================================
+
+class TestRustCommentBracketDebt:
+    def test_single_line_block_comment_with_close_paren_fires(self):
+        """FIX 4 regression (P2 phantom-debt recall bug):
+        A '/* ) */' block comment on the line directly above '#[test]' injects
+        a phantom close-paren into close_debt, causing the upward walk to
+        overrun into unrelated module-level attrs (#[cfg(test)] etc.) which
+        _rust_gated treats as an unknown gate → returns None.
+        After the fix, comment brackets are excluded from debt → walk stops at
+        the correct attr boundary → bare #[test] + Database::open fires."""
+        # Arrange
+        text = (
+            "#[cfg(test)]\n"
+            "mod tests {\n"
+            "    /* ) */\n"
+            "    #[test]\n"
+            "    fn t() {\n"
+            "        let db = Database::open(&real_path).unwrap();\n"
+            "    }\n"
+            "}\n"
+        )
+        # Act
+        result = _c5_detect(text, "rust")
+        # Assert
+        assert result is not None, (
+            "A '/* ) */' comment above '#[test]' must NOT inject phantom "
+            "close_debt — the walk must stop at '#[test]' and FIRE on the "
+            "bare ungated open."
+        )
+
+    def test_multiline_cfg_attr_with_block_comment_inside_still_suppresses(self):
+        """FIX 4 regression: a multiline cfg_attr containing a block comment
+        with a stray ')' inside (e.g. /* ) */) must still suppress — the REAL
+        cfg_attr bracket structure is balanced even after stripping comment text,
+        so the gate is still recognised."""
+        # Arrange — the ')' inside the block comment must not disrupt debt
+        text = (
+            "#[cfg_attr(\n"
+            '    not(feature = "model-tests"),\n'
+            "    /* ) */\n"
+            "    ignore\n"
+            ")]\n"
+            "#[test]\n"
+            "fn t() {\n"
+            "    let svc = AxonService::open(&repo).unwrap();\n"
+            "}"
+        )
+        # Act
+        result = _c5_detect(text, "rust")
+        # Assert
+        assert result is None, (
+            "Real cfg_attr gate brackets must still balance after comment "
+            "brackets are excluded from debt — the gate must still suppress."
+        )
+
+    def test_multiline_block_comment_with_stray_close_above_bare_test_fires(self):
+        """FIX 4 regression: a multi-line block comment spanning 2+ lines with
+        a stray ')' on an interior line, directly above a bare '#[test]' + real
+        open → FIRES (multiline block-comment state is tracked correctly;
+        interior brackets do not contribute debt)."""
+        # Arrange
+        text = (
+            "/*\n"
+            " * needs a real service )\n"
+            " */\n"
+            "#[test]\n"
+            "fn t() {\n"
+            "    let svc = AxonService::open(&repo).unwrap();\n"
+            "}\n"
+        )
+        # Act
+        result = _c5_detect(text, "rust")
+        # Assert
+        assert result is not None, (
+            "A multi-line block comment with interior ')' above '#[test]' "
+            "must not suppress via phantom debt — the ungated open must FIRE."
+        )
+
+
+# ===========================================================================
+# FIX 5 — body-brace depth must NOT count braces inside string literals (R3)
+# ===========================================================================
+
+class TestRustBodyBraceStringLiteral:
+    def test_string_brace_in_first_test_absorbs_gated_second_test_returns_none(self):
+        """FIX 5 regression (P1 Codex R3):
+        Ungated 'first()' contains 'let s = \"{\";' — the raw '{' inside the
+        string inflates brace depth so the body-walk never closes 'first()'
+        and absorbs 'second()' (which is gated with #[ignore] and has a real
+        Database::open). Attributed to the UNGATED first(), the open fires —
+        false block. After the fix, brace depth is counted on code-only text;
+        string braces are neutralised → first() closes correctly → second()
+        is a separate unit → #[ignore] gate suppresses → None."""
+        # Arrange
+        text = (
+            "#[test]\n"
+            "fn first() {\n"
+            '    let s = "{";\n'
+            "}\n"
+            "\n"
+            "#[ignore]\n"
+            "#[test]\n"
+            "fn second() {\n"
+            "    let db = Database::open(&real_path).unwrap();\n"
+            "}\n"
+        )
+        # Act
+        result = _c5_detect(text, "rust")
+        # Assert
+        assert result is None, (
+            "The gated 'second()' must NOT be absorbed into 'first()' body due "
+            "to a '{' inside a string literal inflating brace depth."
+        )
+
+    def test_string_brace_decoy_in_single_ungated_test_still_fires(self):
+        """FIX 5: braces inside a string literal in a SINGLE ungated test must
+        not corrupt brace depth in a way that prevents detecting the real open.
+        'let s = \"}}}{{{\";' plus 'Database::open(&p)' → FIRES (net brace count
+        is still correct after literal-stripping; body closes normally)."""
+        # Arrange
+        text = (
+            "#[test]\n"
+            "fn t() {\n"
+            '    let s = "}}}{{{";\n'
+            "    let db = Database::open(&p).unwrap();\n"
+            "}\n"
+        )
+        # Act
+        result = _c5_detect(text, "rust")
+        # Assert
+        assert result is not None, (
+            "Braces inside a string literal must not prevent detecting the "
+            "real Database::open call in the same function."
+        )
+
+    def test_doc_attr_string_bracket_does_not_break_gate_span_scan(self):
+        """FIX 5 / site 3: an attribute string containing ']' (e.g. #[doc = \"]\"])
+        on a gated test must not break the _rust_gated bracket-span scan.
+        A raw ']' inside the string would close the span prematurely, leaving
+        an unbalanced '[' which could be misclassified. After the fix, string
+        contents are neutralised before the span scan → None (correctly gated)."""
+        # Arrange
+        text = (
+            '#[doc = "see Database::open(]"]\n'
+            "#[ignore]\n"
+            "#[test]\n"
+            "fn t() {\n"
+            "    let db = Database::open(&real_path).unwrap();\n"
+            "}\n"
+        )
+        # Act
+        result = _c5_detect(text, "rust")
+        # Assert
+        assert result is None, (
+            "A ']' inside an attribute string must not break the gate-span "
+            "bracket scan — the #[ignore] gate must still suppress."
+        )
+
+
+# ===========================================================================
+# FIX A+B — multi-line string braces must not inflate body depth (R4)
+# ===========================================================================
+
+class TestRustMultilineStringBodyDepth:
+    def test_multiline_raw_string_brace_absorbs_gated_second_returns_none(self):
+        """FIX A regression (P1 Codex R4):
+        Ungated 'first()' contains a raw multi-line string r#\"\\n{\\n\"# whose
+        interior '{' line, processed in isolation by per-line _rust_code_only,
+        passes through unstripped and inflates brace depth.  first()'s body
+        never closes, absorbing gated second() and misattributing its real open
+        to the ungated unit — false block.  After FIX A (stateful cross-line
+        normalizer), the '{' line is known to be inside a raw string and is
+        suppressed; after FIX B (conservative structural cap) the body is hard-
+        stopped at second()'s #[ignore] boundary even if depth > 0."""
+        # Arrange — raw multi-line string with interior '{' in ungated first()
+        text = (
+            "#[test]\n"
+            "fn first() {\n"
+            '    let s = r#"\n'
+            "{\n"
+            '"#;\n'
+            "}\n"
+            "\n"
+            "#[ignore]\n"
+            "#[test]\n"
+            "fn second() {\n"
+            "    let db = Database::open(&real_path).unwrap();\n"
+            "}\n"
+        )
+        # Act
+        result = _c5_detect(text, "rust")
+        # Assert
+        assert result is None, (
+            "A multi-line raw string r#\"...{...\"# must not inflate brace "
+            "depth across lines — the gated second() must NOT be absorbed."
+        )
+
+    def test_multiline_normal_string_brace_absorbs_gated_second_returns_none(self):
+        """FIX A regression: multi-line NORMAL strings (Rust allows them) with
+        '{'/'}' inside ungated first() + gated second() with real open → None."""
+        # Arrange — normal string with embedded newline and '{' (Rust allows)
+        text = (
+            "#[test]\n"
+            "fn first() {\n"
+            '    let s = "hello\n'
+            "{\n"
+            '";\n'
+            "}\n"
+            "\n"
+            "#[ignore]\n"
+            "#[test]\n"
+            "fn second() {\n"
+            "    let db = Database::open(&real_path).unwrap();\n"
+            "}\n"
+        )
+        # Act
+        result = _c5_detect(text, "rust")
+        # Assert
+        assert result is None, (
+            "A multi-line normal string with '{' inside must not inflate brace "
+            "depth — the gated second() must NOT be absorbed."
+        )
+
+    def test_multiline_raw_string_with_open_inside_single_ungated_test_fires(self):
+        """FIX A recall: a SINGLE ungated test whose body contains a multi-line
+        raw string with braces AND a real Database::open → FIRES.
+        The fix must suppress string-interior braces without over-truncating
+        the body before the real open is found."""
+        # Arrange
+        text = (
+            "#[test]\n"
+            "fn t() {\n"
+            '    let schema = r#"\n'
+            "{\n"
+            '"#;\n'
+            "    let db = Database::open(&real_path).unwrap();\n"
+            "}\n"
+        )
+        # Act
+        result = _c5_detect(text, "rust")
+        # Assert
+        assert result is not None, (
+            "A real Database::open after a multi-line raw string in a single "
+            "ungated test must still FIRE — FIX A must not over-truncate."
+        )
+
+    def test_fix_b_structural_cap_stops_body_at_next_test_attr(self):
+        """FIX B: regardless of depth miscounting, the body walk must STOP when
+        it reaches the next test unit's attribute boundary (a #[test] / #[ignore]
+        / #[tokio::test] / #[rstest] line at the same indent as the current fn).
+        This makes the unit-merge false-block structurally impossible — a worst-
+        case miscount produces a fail-open-safe FN, never a false block."""
+        # Arrange — deliberately depth-confusing open brace in a comment inside
+        # first(), then immediately gated second() with a real open.
+        text = (
+            "#[test]\n"
+            "fn first() {\n"
+            "    // deliberately unmatched: {\n"
+            "}\n"
+            "\n"
+            "#[ignore]\n"
+            "#[test]\n"
+            "fn second() {\n"
+            "    let db = Database::open(&real_path).unwrap();\n"
+            "}\n"
+        )
+        # Act — after FIX A, the comment brace is stripped so depth closes
+        # correctly at '}'; FIX B provides the hard structural backstop.
+        result = _c5_detect(text, "rust")
+        # Assert
+        assert result is None, (
+            "FIX B structural cap: first()'s body must stop at the next test "
+            "unit boundary; gated second() must remain a separate unit → None."
+        )
+
+
+# ===========================================================================
+# Qualifier-prefixed fn regression (R5 — fn-detection recall)
+# ===========================================================================
+
+class TestRustQualifiedFnRecall:
+    def test_pub_async_fn_no_gate_fires(self):
+        """Regression: `re.match(r'(\\s*)\\bfn\\s+\\w+')` failed on qualifier-
+        prefixed fns like `pub async fn`, so no test unit was yielded and the
+        detector returned None even for an ungated real open.  After the fix
+        (re.search for `\\bfn\\s+\\w+` + separately computed indent), qualifier-
+        prefixed fns are detected normally.  'pub async fn test_x() {...}' with
+        AxonService::open and no gate → FIRES."""
+        # Arrange
+        text = (
+            "#[test]\n"
+            "pub async fn test_x() {\n"
+            "    let svc = AxonService::open(&repo).unwrap();\n"
+            "}\n"
+        )
+        # Act
+        result = _c5_detect(text, "rust")
+        # Assert
+        assert result is not None, (
+            "pub async fn test_x() must be detected as a test function — "
+            "re.search for \\bfn\\s+\\w+ must match qualifier-prefixed fns."
+        )
+
+    def test_pub_fn_no_gate_fires(self):
+        """Regression: same qualifier-prefix issue for `pub fn`.
+        'pub fn test_x() { Database::open(...); }' with #[test] → FIRES."""
+        # Arrange
+        text = (
+            "#[test]\n"
+            "pub fn test_x() {\n"
+            "    let db = Database::open(&p).unwrap();\n"
+            "}\n"
+        )
+        # Act
+        result = _c5_detect(text, "rust")
+        # Assert
+        assert result is not None, (
+            "pub fn test_x() must be detected as a test function → FIRES."
+        )
+
+    def test_fix_b_next_unit_boundary_recognizes_qualified_fn(self):
+        """FIX B structural cap must also recognize qualifier-prefixed fns as
+        next-unit boundaries.  A gated 'async fn first()' immediately followed
+        by an ungated 'pub async fn second()' with a real open: if FIX B uses
+        re.match anchored on fn (missing the async/pub qualifiers), the second
+        unit's fn line is not recognized as a next-unit boundary and the body
+        of any depth-confused first unit could absorb second.  After the fix
+        (re.search), the boundary is correctly recognized → FIRES on the ungated
+        second unit, not on the gated first."""
+        # Arrange — gated first (no real open), ungated second (real open)
+        text = (
+            "#[ignore]\n"
+            "#[test]\n"
+            "async fn first() {\n"
+            "}\n"
+            "\n"
+            "#[test]\n"
+            "pub async fn second() {\n"
+            "    let svc = AxonService::open(&repo).unwrap();\n"
+            "}\n"
+        )
+        # Act
+        result = _c5_detect(text, "rust")
+        # Assert
+        assert result is not None, (
+            "Ungated pub async fn second() with a real open must FIRE — "
+            "FIX B must recognize qualifier-prefixed fns as unit boundaries."
+        )

@@ -1312,3 +1312,4 @@ class TestCodexDigestSyncGate:
             assert result.stdout.strip() == "", f"gate false-failed: {result.stdout!r}"
         finally:
             os.chdir(old)
+
