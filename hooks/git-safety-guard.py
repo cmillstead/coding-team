@@ -30,6 +30,7 @@ import time
 from pathlib import Path
 
 from _lib import event, git, state, output
+from _lib.c5_detect import _c5_detect
 
 # ---------------------------------------------------------------------------
 # Secret patterns
@@ -112,6 +113,20 @@ def is_secret_file(filepath: str) -> str | None:
 
 def is_verification(command: str) -> bool:
     return any(re.search(p, command) for p in VERIFICATION_PATTERNS)
+
+
+def is_commit(command: str) -> bool:
+    """Return True iff the command contains a git commit (NOT push/merge).
+
+    C5's staged-index scan is meaningful ONLY when the staged set is about to
+    become THIS commit. On `git push` the staged set is not being committed, and
+    scanning it would false-BLOCK a push on unrelated staged WIP (Codex F1). So C5
+    gates on commit only — narrower than the digest gate's is_commit_or_push.
+    Mirrors the existing command-applicability helpers; inherits the SAME documented
+    `git -c k=v commit` miss (fail-open-safe residual, disclosed in the marker) —
+    this is applicability detection, NOT the C5 violation SIGNAL (which is staged
+    state), so it is NOT the C10 command-grammar arms-race the design forbids."""
+    return bool(re.search(r'\bgit\s+commit\b', command))
 
 
 def is_commit_or_push(command: str) -> bool:
@@ -687,6 +702,104 @@ def check_codex_digest_sync(command: str, target_root: str) -> str | None:
 
 
 # ---------------------------------------------------------------------------
+# C5 test-hermeticity block (Rust, staged-index scan)
+# ---------------------------------------------------------------------------
+
+C5_ALLOW_UNGATED_TEST_ENV = "C5_ALLOW_UNGATED_TEST"
+
+
+def _c5_block_overridden() -> bool:
+    """True if the operator has explicitly acknowledged an ungated-test commit
+    (downgrades the C5 block to a no-op). Mirrors write-guard's override convention."""
+    return os.environ.get(C5_ALLOW_UNGATED_TEST_ENV, "").strip().lower() in (
+        "1", "true", "yes", "on",
+    )
+
+
+def check_c5_test_hermeticity(command: str, target_root: str) -> str | None:
+    """C5 (test-hermeticity) BLOCKING enforcement — Rust only, conservative.
+
+    Blocks a commit whose staged Rust test diff contains a POSITIVELY-recognized
+    ungated open against an external resource (on-disk DB/index, network, daemon).
+    Spike basis: FP=0 over 984 real test-fns + off-idiom traps; recall 4/4 on real
+    #[ignore] gold positives; FN (off-idiom) is fail-open-safe.
+
+    CONSERVATIVE-GATE RULE: on any unrecognized / ambiguous / conditional gate form
+    (e.g. cfg_attr(not(feature=...), ignore), custom skip macros), assume GATED and
+    do NOT block. Block only on positively-confirmed ungated opens. This trades the
+    open-ended gate-vocabulary completeness problem (C10) from FP (dangerous) to FN
+    (tolerable). Override hatch available; mode is reversible to advisory.
+
+    Does NOT guarantee hermeticity. C5 remains LIVE (not graduated). Python is
+    advisory-only (see check below). See c05-test-hermeticity.md.
+    """
+    try:
+        if _c5_block_overridden():
+            return None
+
+        # STAGED INDEX ONLY — never the working tree, never the digest gate's union.
+        staged = subprocess.run(
+            ["git", "-C", target_root, "diff", "--cached", "--name-only"],
+            capture_output=True, text=True, timeout=5,
+        )
+        if staged.returncode != 0:
+            return None  # cannot read staged set -> fail open
+
+        rust_paths = [p.strip() for p in staged.stdout.splitlines()
+                      if p.strip().endswith(".rs")]
+        # Keep the path filter LOOSE (any staged .rs); the real test-scope + gate
+        # decision is #[cfg(test)]/#[test] + gate presence in the staged blob,
+        # applied by _c5_detect. (Off-idiom helper-wrap is a fail-open-safe FN.)
+        if not rust_paths:
+            return None
+
+        findings: list[tuple[str, str]] = []  # (path, signature)
+        for path in rust_paths:
+            blob = subprocess.run(
+                ["git", "-C", target_root, "show", f":{path}"],
+                capture_output=True, text=True, timeout=5,
+            )
+            if blob.returncode != 0:
+                continue  # path not in index / unreadable -> skip (fail open for it)
+            finding = _c5_detect(blob.stdout, "rust")
+            if finding is not None:
+                findings.append((path, finding.signature))
+
+        if not findings:
+            return None
+
+        listed = "\n".join(f"  - {p}: ungated open `{sig}`" for p, sig in findings)
+        msg = (
+            "C5 TEST HERMETICITY — ungated external-resource open in a staged Rust test\n\n"
+            "These staged Rust test(s) open a real external resource (on-disk DB/index, "
+            "network, or daemon) WITHOUT a recognized opt-in gate, so they run the slow/"
+            "nondeterministic real path inside the default cargo test suite:\n"
+            f"{listed}\n\n"
+            "Fix: gate each as opt-in — #[ignore = \"requires a real index; run with "
+            "--ignored\"], a #[cfg(feature = \"...\")] flag, or an env gate — keeping the "
+            "absent-resource skip as belt-and-suspenders for the opt-in run.\n\n"
+            "Known rationalization: 'it skips cleanly when the resource is absent' — the "
+            "skip-guard only covers the ABSENT branch; on an indexed box the default suite "
+            "runs the real path.\n\n"
+            f"Override (novel/false gate form only): set {C5_ALLOW_UNGATED_TEST_ENV}=1 in "
+            "the environment and re-commit. This downgrades the block to a no-op; use it only "
+            "if the gate form is legitimate but unrecognized, and report it so the detector learns.\n"
+        )
+        if len(msg) > 2000:
+            msg = msg[:2000] + "\n... (truncated)"
+        return msg
+    except Exception:
+        # GUARANTEED fail-OPEN (Codex F2). git-safety-guard's top handler (:949)
+        # blocks CLOSED on ANY uncaught exception, so an unanticipated error here
+        # would BLOCK the commit — the opposite of fail-open. A specific tuple can
+        # miss an exception type and invert the posture; for a BLOCKING safety
+        # adapter the guaranteed-open `except Exception` is required (named, not a
+        # bare `except:` — satisfies code-style; mirrors the harness top handler's
+        # own `except Exception`). NEVER narrow this to a tuple.
+        return None
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -835,6 +948,15 @@ def main():
         digest_block = check_codex_digest_sync(command, target_root)
         if digest_block:
             output.block(digest_block)
+            return
+
+    # --- 2.6 C5 test-hermeticity block (Rust, staged-index scan) ---
+    # Rides the commit-time staged set; STAGED INDEX ONLY; COMMIT-only (not push).
+    if is_commit(command):
+        target_root = resolve_commit_target_root(command)
+        c5_block = check_c5_test_hermeticity(command, target_root)
+        if c5_block:
+            output.block(c5_block)
             return
 
     # --- 3. Verification checklist (commit/push) ---
