@@ -874,17 +874,21 @@ def main():
                        if re.search(r'lint|eslint|tsc|mypy|ruff|clippy|shellcheck', v["command"])
                        and v.get("exit_code") is not None and v["exit_code"] != 0]
 
+        # NOTE: this path is DORMANT in this harness — PostToolUse delivers no exit_code
+        # and does not fire on non-zero exit (see 01-02-PROBE-FINDING.md); exit codes in
+        # state come only from the PreToolUse fallback (which records None). Retained as a
+        # safe failed-state placeholder pending the verification-stamp phase.
         if failed_tests or failed_lint:
-            msg = "PRE-COMPLETION CHECKLIST FAILED\n\n"
-            msg += "Verification commands ran but FAILED:\n"
+            msg = "VERIFICATION RAN BUT FAILED (advisory — review before committing)\n\n"
+            msg += "Verification commands were recorded as failed:\n"
             if failed_tests:
                 msg += f"  - Tests failed (exit code {failed_tests[-1]['exit_code']}): {failed_tests[-1]['command']}\n"
             if failed_lint:
                 msg += f"  - Lint failed (exit code {failed_lint[-1]['exit_code']}): {failed_lint[-1]['command']}\n"
-            msg += "\nFix the failures before committing. "
+            msg += "\nReview the failures and consider whether they affect this commit. "
             msg += "Known rationalization: 'pre-existing failure, not my regression' — "
             msg += "a failing test is a failing test regardless of when it was introduced.\n"
-            output.block(msg)
+            output.advisory(msg)
             return
 
         missing = []

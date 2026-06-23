@@ -4,7 +4,7 @@ Tiebreakers for ambiguous decisions. Referenced by any AI agent working in this 
 
 ## 1. Real Over Mocks
 Use real implementations in tests. NEVER mock what you can run locally. Real tests catch real bugs. Mocks test your assumptions about the dependency, not the dependency itself.
-- **Enforcement**: `no-mocks` git hook blocks mock patterns
+- **Enforcement**: write-guard's `check_no_mocks()` blocks mock patterns at Edit/Write time (PreToolUse hook, not a git hook)
 - **Escape hatch**: `# mock-ok: <reason>` on the line
 
 ## 2. Repository Is Source of Truth
@@ -24,11 +24,11 @@ After constraint design, invest most heavily in observability. Task completion r
 
 ## 7. Verify Before Claiming Done
 NEVER claim work is complete without running verification commands. Evidence before assertions. Run tests, linters, type checks — then report. An agent that passes all tests and skips edge cases has satisfied the letter, not the spirit.
-- **Enforcement**: `pre-commit-verify` git hook blocks commits without verification stamp
+- **Enforcement**: `git-safety-guard.py` blocks commits/pushes when tests/lint were not run; the `/verify` skill surfaces the checklist — no dedicated git hook or stamp mechanism exists for this
 
 ## 8. Bounded Iteration
 If the same fix fails 3 times, STOP. Escalate to human with context: what you tried, what failed, what you think the problem is. Doom loops waste tokens, money, and context window.
-- **Enforcement**: loop detection hook tracks repeated failures
+- **Enforcement**: `loop-detection.py` IS registered as a PostToolUse/Bash hook (MAX_RETRIES=3) but is currently NON-FUNCTIONAL — it reads the wrong event key (`tool_result` at :142; the real key is `tool_response`) and PostToolUse never fires on a non-zero exit, so it observes no failures; honest repair is tracked as a deferred loop-detection finding (the mechanism fix is out of scope here)
 
 ## 9. Ask Before High-Impact Changes
 Adding dependencies, modifying schemas, changing public APIs, deleting shared files — these affect the team and the project's long-term direction. Pause and confirm before proceeding.

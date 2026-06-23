@@ -5,7 +5,7 @@ import re
 import sys
 
 sys.path.insert(0, os.path.dirname(__file__))
-from _lib.event import parse_event, get_tool_name, get_command
+from _lib.event import parse_event, get_tool_name, get_command, get_tool_result
 from _lib.output import advisory
 
 
@@ -65,7 +65,7 @@ def main():
     if not is_lint_command(command):
         return
 
-    output = data.get("tool_output", "")
+    output = get_tool_result(data)
     if not output:
         return
 

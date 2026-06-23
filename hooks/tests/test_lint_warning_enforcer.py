@@ -1,7 +1,5 @@
 """Tests for lint-warning-enforcer.py hook."""
 
-import json
-
 
 class TestNonBashTool:
     def test_non_bash_tool_produces_no_output(self, run_hook, make_event):
@@ -16,7 +14,13 @@ class TestNonLintCommand:
         event = {
             "tool_name": "Bash",
             "tool_input": {"command": "ls -la"},
-            "tool_output": "total 42\ndrwxr-xr-x  5 user  staff  160 Mar 26 file.txt",
+            "tool_response": {
+                "stdout": "total 42\ndrwxr-xr-x  5 user  staff  160 Mar 26 file.txt",
+                "stderr": "",
+                "interrupted": False,
+                "isImage": False,
+                "noOutputExpected": False,
+            },
         }
         result = run_hook("lint-warning-enforcer.py", event)
         assert result.stdout.strip() == ""
@@ -25,7 +29,13 @@ class TestNonLintCommand:
         event = {
             "tool_name": "Bash",
             "tool_input": {"command": "git status"},
-            "tool_output": "On branch main\nnothing to commit",
+            "tool_response": {
+                "stdout": "On branch main\nnothing to commit",
+                "stderr": "",
+                "interrupted": False,
+                "isImage": False,
+                "noOutputExpected": False,
+            },
         }
         result = run_hook("lint-warning-enforcer.py", event)
         assert result.stdout.strip() == ""
@@ -36,10 +46,16 @@ class TestLintWithWarnings:
         event = {
             "tool_name": "Bash",
             "tool_input": {"command": "npm run lint"},
-            "tool_output": (
-                "src/app.ts(12,5): warning: unused variable 'x'\n"
-                "src/utils.ts(8,3): warning: missing return type\n"
-            ),
+            "tool_response": {
+                "stdout": (
+                    "src/app.ts(12,5): warning: unused variable 'x'\n"
+                    "src/utils.ts(8,3): warning: missing return type\n"
+                ),
+                "stderr": "",
+                "interrupted": False,
+                "isImage": False,
+                "noOutputExpected": False,
+            },
         }
         result = run_hook("lint-warning-enforcer.py", event)
         assert result.parsed is not None
@@ -51,7 +67,13 @@ class TestLintWithWarnings:
         event = {
             "tool_name": "Bash",
             "tool_input": {"command": "tsc --noEmit"},
-            "tool_output": "src/index.ts(5,1): warning: implicit any type\n",
+            "tool_response": {
+                "stdout": "src/index.ts(5,1): warning: implicit any type\n",
+                "stderr": "",
+                "interrupted": False,
+                "isImage": False,
+                "noOutputExpected": False,
+            },
         }
         result = run_hook("lint-warning-enforcer.py", event)
         assert result.parsed is not None
@@ -62,7 +84,13 @@ class TestLintWithWarnings:
         event = {
             "tool_name": "Bash",
             "tool_input": {"command": "cargo clippy"},
-            "tool_output": "warning: unused import `std::io`\n",
+            "tool_response": {
+                "stdout": "warning: unused import `std::io`\n",
+                "stderr": "",
+                "interrupted": False,
+                "isImage": False,
+                "noOutputExpected": False,
+            },
         }
         result = run_hook("lint-warning-enforcer.py", event)
         assert result.parsed is not None
@@ -74,7 +102,13 @@ class TestLintCleanOutput:
         event = {
             "tool_name": "Bash",
             "tool_input": {"command": "eslint src/"},
-            "tool_output": "All files pass linting.\n",
+            "tool_response": {
+                "stdout": "All files pass linting.\n",
+                "stderr": "",
+                "interrupted": False,
+                "isImage": False,
+                "noOutputExpected": False,
+            },
         }
         result = run_hook("lint-warning-enforcer.py", event)
         assert result.stdout.strip() == ""
@@ -86,8 +120,65 @@ class TestExcludedWarningPatterns:
         event = {
             "tool_name": "Bash",
             "tool_input": {"command": "npm run build"},
-            "tool_output": "npm warn deprecated glob@7.2.0\nnpm warn deprecated inflight@1.0.6\nBuild complete.\n",
+            "tool_response": {
+                "stdout": "npm warn deprecated glob@7.2.0\nnpm warn deprecated inflight@1.0.6\nBuild complete.\n",
+                "stderr": "",
+                "interrupted": False,
+                "isImage": False,
+                "noOutputExpected": False,
+            },
         }
         result = run_hook("lint-warning-enforcer.py", event)
         # npm warn lines are excluded — should produce no advisory
+        assert result.stdout.strip() == ""
+
+
+class TestToolResultRouting:
+    def test_lint_warnings_in_tool_response_trigger_advisory(self, run_hook):
+        """Real PostToolUse Bash event shape: tool_response dict (no exit_code) with stdout containing lint warnings."""
+        event = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "ruff check src/"},
+            "tool_response": {
+                "stdout": (
+                    "src/foo.py:10:5: warning: invalid escape sequence '\\d'\n"
+                    "src/bar.py:22:1: warning: trailing whitespace\n"
+                ),
+                "stderr": "",
+                "interrupted": False,
+                "isImage": False,
+                "noOutputExpected": False,
+            },
+        }
+        result = run_hook("lint-warning-enforcer.py", event)
+        assert result.parsed is not None, "Advisory must fire for lint warnings in tool_response"
+        assert result.parsed["decision"] == "allow"
+        reason = result.parsed["reason"]
+        assert "warning" in reason.lower()
+        assert "2" in reason  # both warning lines counted
+
+    def test_empty_tool_response_returns_silently(self, run_hook):
+        """Empty / absent tool_response must not raise and must produce no output (fail-open)."""
+        event = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "mypy src/"},
+            # tool_response is absent — hook must return silently
+        }
+        result = run_hook("lint-warning-enforcer.py", event)
+        assert result.stdout.strip() == ""
+
+    def test_blank_stdout_tool_response_returns_silently(self, run_hook):
+        """tool_response with empty stdout must produce no output (fail-open early-out)."""
+        event = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "pylint src/"},
+            "tool_response": {
+                "stdout": "",
+                "stderr": "",
+                "interrupted": False,
+                "isImage": False,
+                "noOutputExpected": False,
+            },
+        }
+        result = run_hook("lint-warning-enforcer.py", event)
         assert result.stdout.strip() == ""
