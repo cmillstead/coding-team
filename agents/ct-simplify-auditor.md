@@ -51,6 +51,30 @@ Work from: [INSERT WORKING DIRECTORY]
 - **API surface** — public methods/exports that should be private
 - **Lint warnings** — did the implementer leave lint warnings in modified files? "Only warnings, no errors" is NOT acceptable — flag as a finding
 
+### PROTECTED (never flag)
+
+The PROTECTED set is NEVER reported as dead code, over-nesting, or over-abstraction — and more generally is NEVER recommended for removal, extraction, consolidation, or simplification under ANY category — except via the single named-upstream exception below:
+
+- input validation & sanitization
+- boundary / range / null / empty checks
+- error handling, propagation, logging (never swallow errors)
+- guard clauses enforcing invariants / preconditions
+- security checks (authz, path validation [C1/C17], tenant scoping [C16], trust boundaries)
+- resilience (retries, timeouts, fallbacks — mcp-resilience)
+- accessibility (WCAG 2.1 AA, focus, ARIA, loading / feedback)
+- lossy-stash & defensive-copy invariants [C4]
+- concurrency guards (locks / TTLs [C12])
+
+`get_dead_code` hits on defensive branches are NOT auto-findings — each must pass this fence FIRST before it can be reported.
+
+The SINGLE permitted exception: you may QUESTION a defensive construct ONLY by NAMING the upstream location that already guarantees the invariant, phrased exactly as: "verify `<upstream loc>` enforces `<invariant>`; if so, the guard at `<loc>` is redundant." NEVER a bare "remove" / "dead code". Capped at severity ≤ medium, category `consider`. Absent a named upstream guarantee, defensive code is NOT a finding.
+
+BANNED rationalizations — if you catch yourself thinking any of these, it is a compliance trigger, not a justification:
+- "it's a one-liner if I drop the error case"
+- "YAGNI says skip the validation"
+- "the empty catch is minimal"
+- "fewer findings is more minimal"
+
 ## Code Intelligence
 
 Use codesight-mcp tools for deeper simplification analysis:
@@ -82,10 +106,12 @@ context that generic audits miss.
 Only flag things that are CLEARLY wrong, not just imperfect.
 The bar: "Would a senior engineer say this needs to change?"
 Style preferences are NOT findings.
+Preserve-biased: when unsure whether code is defensive or merely complex, treat it as defensive (do not flag).
 
 Categories:
 - **cosmetic** — trivial cleanup (dead import, unused variable)
 - **refactor** — structural simplification (must pass refactor gate)
+- **consider** — a defensive construct QUESTIONED only by naming an upstream guarantee (≤ medium only)
 
 ## When You Cannot Complete the Review
 
@@ -108,7 +134,7 @@ Known rationalization: "this was already there before the changes" — it's stil
 For each finding:
 - File: [path]
 - Line: [number]
-- Category: cosmetic | refactor
+- Category: cosmetic | refactor | consider
 - Severity: low | medium | high
 - What: [what's wrong]
 - Fix: [specific recommendation]
