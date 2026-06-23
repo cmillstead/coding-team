@@ -1,16 +1,18 @@
 # skills/coding-team/hooks/_lib/c5_detect.py
-"""C5 (test-hermeticity) pure detector — shared by the Rust block adapter
-(git-safety-guard.py) and the Python advisory adapter (graduated_checks.py).
+"""C5 (test-hermeticity) pure detector — shared by the all-advisory C5 adapter
+in ``graduated_checks.py`` (PreToolUse Edit|Write), covering both Python (``.py``,
+test-file-path gated) and Rust (``.rs``).  This is an author-time ADVISORY, never
+a commit block.
 
 PURE: no I/O, no subprocess, no filesystem. Given test-file text + a language,
 returns a finding describing a POSITIVELY-recognized ungated open against an
 external/shared/non-ephemeral resource, or None.
 
-CONSERVATIVE-GATE HARD RULE (operator condition 2): on ANY unrecognized,
-ambiguous, or conditional attribute/macro present on the test, treat the test
-as GATED and return None. Fail toward NOT-detecting, never toward detecting on
-uncertainty. (This converts the open-ended gate-vocabulary completeness problem
-from a dangerous false-positive into a tolerable false-negative.)
+CONSERVATIVE-GATE RULE (operator condition 2): on ANY unrecognized, ambiguous,
+or conditional attribute/macro present on the test, treat the test as GATED and
+return None. Fail toward NOT-detecting, never toward detecting on uncertainty.
+(This trims false-positive advisory noise; it was originally a zero-FP hard
+requirement for the blocking pilot, and is now belt-and-suspenders precision.)
 
 Gate scan strips WHOLE-LINE comments (`//` Rust, `#` Python) before the
 gate/ephemeral test — this kills the comment-spoof FN the spike actually measured
@@ -25,8 +27,8 @@ never a false-positive). The Python path still uses whole-line-only `#` strippin
 (Python inline `#` in a URL or path literal is more ambiguous; the advisory path
 is fail-open so the residual FN there remains acceptable).
 
-May raise on a malformed input; CALLERS (both adapters) wrap in try/except->None.
-See c05-test-hermeticity.md and SPIKE-RESULTS.md.
+May raise on a malformed input; callers (the advisory adapter) wrap in
+try/except->None. See c05-test-hermeticity.md and SPIKE-RESULTS.md.
 """
 import re
 from dataclasses import dataclass
@@ -58,7 +60,7 @@ _RUST_TEST_ATTR = re.compile(r"#\[\s*(?:test|tokio::test|rstest)\b")
 # `// tempfile` comment also suppressed detection (Codex F4 accepted FN) because
 # inline comments were not stripped.  The shared _rust_code_only normalizer (FIX 5)
 # strips `//` tails AFTER stripping string contents, so inline-comment spoofing is
-# no longer possible on the Rust blocking path; the F4 FN is eliminated.
+# no longer possible on the Rust advisory path; the F4 FN is eliminated.
 _RUST_EPHEMERAL = re.compile(
     r"open_memory|tempfile|TempDir::new|tmp\.path\(\)"
     r"|new_for_test|new_in_memory"
@@ -80,7 +82,7 @@ def _rust_gated(attr_text: str) -> bool:
     ``attr_text`` is the attribute block of ONE test function ONLY (its contiguous
     #[...] lines, including multiline continuations) — NEVER the whole file.
     Scanning the whole file would treat a #[derive(...)]/#[allow(...)] on any
-    unrelated struct as an 'unrecognized attribute' and suppress every violation in
+    unrelated struct as an 'unrecognized attribute' and suppress every finding in
     that file (near-total recall loss). The operator rule is 'unknown gate form ON
     THE TEST', so the unit must be scoped to the test's own attributes.
 
@@ -261,8 +263,8 @@ def _rust_test_units(text: str):
     ``#[rstest]`` attr line, or a ``fn `` at the same-or-lower indentation as the
     current test fn), before the brace closes.  If depth is still > 0 at that
     boundary, we miscounted — the safe resolution is to end the current unit
-    (at worst a fail-open-safe FN), NEVER to merge two units (which would
-    misattribute a gated open to an ungated unit = a false BLOCK).
+    (at worst a fail-open-safe FN), never to merge two units (which would
+    misattribute a gated open to an ungated unit = a false advisory nudge).
 
     We use a "pending close debt" tracker going upward through source lines:
     - Going upward, a line with MORE `]`/`)` than `[`/`(` in its CODE (non-comment)
@@ -342,9 +344,9 @@ def _rust_test_units(text: str):
                     # FIX B: conservative structural cap — stop the body at the
                     # start of the NEXT test unit's attribute region, even if
                     # depth still looks > 0 (which would indicate a miscount).
-                    # This makes the unit-merge false-block class structurally
-                    # impossible: a worst-case miscount produces a fail-open-safe
-                    # FN, never a false BLOCK.
+                    # A worst-case miscount produces a fail-open-safe FN; it never
+                    # merges two units and misattributes a gated open to an ungated
+                    # unit (which would be a false advisory nudge).
                     # Trigger conditions (only after the body has started so we
                     # don't immediately stop at the fn line itself):
                     #   (i)  a line matching a test attribute (#[test], #[ignore],
@@ -452,7 +454,7 @@ def _rust_code_only(text: str) -> str:
 # The per-line `_rust_code_only` regex approach does not thread string state
 # across lines.  A multi-line raw string r#"\n{\n"# has its '{' on a separate
 # line that, processed in isolation, looks like plain code — so the brace
-# inflates depth and causes unit-merge false blocks.
+# inflates depth and causes one unit to absorb the next (unit-merge).
 #
 # The stateful normalizer walks each character of a line and carries four
 # pieces of cross-line state into the next line:
