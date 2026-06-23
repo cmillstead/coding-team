@@ -790,3 +790,85 @@ class TestPythonEphemeralWordBoundary:
         result = _c5_detect(text, "python")
         # Assert
         assert result is None
+
+
+# ===========================================================================
+# FIX 4 — comment brackets must NOT contribute to close_debt (Codex gate R2)
+# ===========================================================================
+
+class TestRustCommentBracketDebt:
+    def test_single_line_block_comment_with_close_paren_fires(self):
+        """FIX 4 regression (P2 phantom-debt recall bug):
+        A '/* ) */' block comment on the line directly above '#[test]' injects
+        a phantom close-paren into close_debt, causing the upward walk to
+        overrun into unrelated module-level attrs (#[cfg(test)] etc.) which
+        _rust_gated treats as an unknown gate → returns None.
+        After the fix, comment brackets are excluded from debt → walk stops at
+        the correct attr boundary → bare #[test] + Database::open fires."""
+        # Arrange
+        text = (
+            "#[cfg(test)]\n"
+            "mod tests {\n"
+            "    /* ) */\n"
+            "    #[test]\n"
+            "    fn t() {\n"
+            "        let db = Database::open(&real_path).unwrap();\n"
+            "    }\n"
+            "}\n"
+        )
+        # Act
+        result = _c5_detect(text, "rust")
+        # Assert
+        assert result is not None, (
+            "A '/* ) */' comment above '#[test]' must NOT inject phantom "
+            "close_debt — the walk must stop at '#[test]' and FIRE on the "
+            "bare ungated open."
+        )
+
+    def test_multiline_cfg_attr_with_block_comment_inside_still_suppresses(self):
+        """FIX 4 regression: a multiline cfg_attr containing a block comment
+        with a stray ')' inside (e.g. /* ) */) must still suppress — the REAL
+        cfg_attr bracket structure is balanced even after stripping comment text,
+        so the gate is still recognised."""
+        # Arrange — the ')' inside the block comment must not disrupt debt
+        text = (
+            "#[cfg_attr(\n"
+            '    not(feature = "model-tests"),\n'
+            "    /* ) */\n"
+            "    ignore\n"
+            ")]\n"
+            "#[test]\n"
+            "fn t() {\n"
+            "    let svc = AxonService::open(&repo).unwrap();\n"
+            "}"
+        )
+        # Act
+        result = _c5_detect(text, "rust")
+        # Assert
+        assert result is None, (
+            "Real cfg_attr gate brackets must still balance after comment "
+            "brackets are excluded from debt — the gate must still suppress."
+        )
+
+    def test_multiline_block_comment_with_stray_close_above_bare_test_fires(self):
+        """FIX 4 regression: a multi-line block comment spanning 2+ lines with
+        a stray ')' on an interior line, directly above a bare '#[test]' + real
+        open → FIRES (multiline block-comment state is tracked correctly;
+        interior brackets do not contribute debt)."""
+        # Arrange
+        text = (
+            "/*\n"
+            " * needs a real service )\n"
+            " */\n"
+            "#[test]\n"
+            "fn t() {\n"
+            "    let svc = AxonService::open(&repo).unwrap();\n"
+            "}\n"
+        )
+        # Act
+        result = _c5_detect(text, "rust")
+        # Assert
+        assert result is not None, (
+            "A multi-line block comment with interior ')' above '#[test]' "
+            "must not suppress via phantom debt — the ungated open must FIRE."
+        )

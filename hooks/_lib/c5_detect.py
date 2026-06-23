@@ -157,6 +157,63 @@ def _is_attr_region_line(line: str) -> bool:
     return False
 
 
+# Patterns used to strip comment text from a line before bracket-depth counting.
+# These remove comment content so that brackets inside comments (e.g. `/* ) */`)
+# do not fabricate phantom close_debt and overrun the upward attr-region walk.
+_RUST_INLINE_BLOCK_COMMENT = re.compile(r"/\*.*?\*/", re.DOTALL)
+_RUST_LINE_COMMENT_TAIL = re.compile(r"//.*$", re.MULTILINE)
+
+
+def _strip_comment_text_for_bracket_count(line: str, in_block_comment: bool) -> tuple[str, bool]:
+    """Return (code_text_only, still_in_block_comment) for one source line.
+
+    Strips comment content so that `[`/`]`/`(`/`)` inside comment spans are not
+    counted toward close_debt.  Handles three cases:
+    1. The line is the interior of an already-open block comment (``in_block_comment``
+       is True on entry) — suppress everything until ``*/`` closes it.
+    2. The line contains one or more ``/* ... */`` inline block-comment spans —
+       strip them from the text.
+    3. The line contains a ``//`` line-comment tail — strip from ``//`` onward.
+
+    Returns the cleaned code text and the updated ``in_block_comment`` state for
+    the NEXT line (going upward, the caller passes each line in upward order;
+    ``in_block_comment`` must be threaded through the calling loop).
+
+    Note: we walk UPWARD through lines, so ``*/`` appears BEFORE ``/*`` in
+    iteration order.  The caller sees ``*/`` first (which OPENS the suppression
+    context going upward) and ``/*`` last (which CLOSES it going upward).
+    We therefore use ``*/`` to set ``in_block_comment = True`` and ``/*`` to
+    clear it, which is the inverse of the forward-reading convention.
+    """
+    text = line
+    # If we are inside a block comment (upward sense: we already saw `*/` below),
+    # this line is comment interior — suppress all of it until `/*` closes upward.
+    if in_block_comment:
+        if "/*" in text:
+            # `/*` closes the comment (going upward): suppress everything up to
+            # and including `/*`, keep whatever is before it.
+            idx = text.index("/*")
+            text = text[:idx]
+            in_block_comment = False
+        else:
+            # Entire line is inside the block comment — return empty code text.
+            return ("", True)
+    # Strip any complete /* ... */ spans that are fully on this line.
+    text = _RUST_INLINE_BLOCK_COMMENT.sub("", text)
+    # If `*/` appears (and was not removed by inline stripping), it opens a new
+    # upward block-comment context: suppress from `*/` onward (to the right
+    # in the source line, but remember we're reading upward — the `/*` that opens
+    # this comment is on a HIGHER line we haven't seen yet).
+    if "*/" in text:
+        idx = text.index("*/")
+        text = text[:idx]
+        in_block_comment = True
+    # Strip `//` line-comment tails (must come after block-comment removal so a
+    # `//` inside a block comment is already gone).
+    text = _RUST_LINE_COMMENT_TAIL.sub("", text)
+    return (text, in_block_comment)
+
+
 def _rust_test_units(text: str):
     """Yield (attr_block, body) per #[test]-anchored fn. attr_block = the contiguous
     attribute/comment/blank lines directly above the fn; body = the fn signature line
@@ -168,14 +225,21 @@ def _rust_test_units(text: str):
     the continuation lines (``    not(...),``, ``    ignore``, ``)]``) do not start
     with ``#[``, so the original walk stopped prematurely and lost the gate.
 
+    FIX 4: the close_debt bracket counter now strips comment text (``//`` tails,
+    ``/* ... */`` inline spans, and multiline block comments) before counting
+    brackets.  A ``/* ) */`` line above ``#[test]`` previously injected phantom
+    close_debt, overrunning the attr-region walk into surrounding module attrs
+    (``#[cfg(test)]``) which _rust_gated treated as an unknown gate and suppressed
+    a real violation.  After this fix, only REAL attribute-syntax brackets count.
+
     We use a "pending close debt" tracker going upward through source lines:
-    - Going upward, a line with MORE `]`/`)` than `[`/`(` (net closing brackets)
-      signals that there must be an unmatched open bracket ABOVE — we MUST keep
-      walking upward to capture the full attribute.
+    - Going upward, a line with MORE `]`/`)` than `[`/`(` in its CODE (non-comment)
+      text signals that there must be an unmatched open bracket ABOVE — we MUST
+      keep walking upward to capture the full attribute.
     - ``close_debt`` accumulates unmatched closing brackets encountered so far;
       when it is > 0 we are "inside" a multiline attribute that spans above us.
-    - Block-comment lines (``/* ... */``) between attrs are also collected so
-      they do not break the walk.
+    - Block-comment lines (``/* ... */``) between attrs are accepted as attr-region
+      lines (they don't break the walk) but contribute ZERO bracket debt.
     """
     lines = text.splitlines()
     n = len(lines)
@@ -184,35 +248,51 @@ def _rust_test_units(text: str):
         if re.search(r"\bfn\s+\w+", lines[i]):
             j, attrs, saw_test = i - 1, [], False
             # close_debt > 0 means the lines collected so far (below in source
-            # order) have more `]`/`)` than `[`/`(`, so there must be an
-            # unmatched `#[`/`(` somewhere above — we must keep walking.
+            # order) have more `]`/`)` than `[`/`(` in code (non-comment) text,
+            # so there must be an unmatched `#[`/`(` somewhere above.
             close_debt = 0
+            # FIX 4: track multiline block-comment state as we walk upward.
+            # Going upward, `*/` opens suppression and `/*` closes it.
+            in_block_comment = False
             while j >= 0:
                 line = lines[j]
                 stripped = line.lstrip()
-                # Net closes on this line (going upward, closes = debt we need
-                # to resolve by finding matching opens above).
-                line_opens = line.count("[") + line.count("(")
-                line_closes = line.count("]") + line.count(")")
-                net_closes = line_closes - line_opens   # positive = more closes
+
+                # FIX 4: capture block-comment state BEFORE processing this line
+                # so condition (d) can use the pre-update value.
+                was_in_block_comment = in_block_comment
+
+                # Strip comment content from this line, updating in_block_comment
+                # for the NEXT upward iteration.
+                code_only, in_block_comment = _strip_comment_text_for_bracket_count(
+                    line, in_block_comment
+                )
+                line_opens = code_only.count("[") + code_only.count("(")
+                line_closes = code_only.count("]") + code_only.count(")")
+                net_closes = line_closes - line_opens   # positive = more close brackets
 
                 # Include this line if:
-                # (a) it is recognisably part of an attribute region, OR
+                # (a) it is recognisably part of an attribute region (incl. block
+                #     comment lines, which are accepted but contribute zero debt), OR
                 # (b) we still have unmatched closes from lines already collected
                 #     (we are inside a multiline attribute), OR
-                # (c) this line itself contributes unmatched closes (it is the
-                #     closing half of a multiline attribute whose `#[` is above).
+                # (c) this line contributes unmatched closes in CODE (non-comment)
+                #     text — it is the closing half of a multiline attribute, OR
+                # (d) was_in_block_comment — this line is inside a block comment
+                #     whose `*/` was seen on a lower line; include it so the
+                #     comment body doesn't truncate collection before `/*` is found.
                 is_attr_line = _is_attr_region_line(stripped)
                 in_multiline = close_debt > 0
-                starts_close = net_closes > 0   # e.g. the `)]` line
+                starts_close = net_closes > 0
 
-                if not (is_attr_line or in_multiline or starts_close):
+                if not (is_attr_line or in_multiline or starts_close or was_in_block_comment):
                     break
 
                 attrs.append(line)
                 if _RUST_TEST_ATTR.search(line):
                     saw_test = True
-                # Update close_debt: closes increase debt, opens reduce it.
+                # Update close_debt using ONLY code (non-comment) bracket counts
+                # so comment brackets never fabricate phantom debt (FIX 4).
                 close_debt += net_closes
                 if close_debt < 0:
                     close_debt = 0
