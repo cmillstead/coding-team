@@ -13,6 +13,8 @@ import re
 from dataclasses import dataclass
 from typing import Callable, Literal
 
+from _lib.c5_detect import _c5_detect
+
 
 @dataclass
 class CheckResult:
@@ -124,6 +126,56 @@ def check_c1_path_trust(tool_name: str, tool_input: dict) -> CheckResult | None:
 
 
 # ---------------------------------------------------------------------------
+# C5 — test-hermeticity Python ADVISORY (2026-06-22)
+# ---------------------------------------------------------------------------
+
+# Python test-file idiom: test_*.py / *_test.py / under a tests/ dir.
+_PY_TEST_PATH_RE = re.compile(r"(?:^|/)tests?/|(?:^|/)test_[^/]*\.py$|_test\.py$")
+
+_C5_REASON = (
+    "C5 (test-hermeticity) ADVISORY — this test appears to open a real external "
+    "resource (persistent DB path, real URL, model download, or fixed host:port) "
+    "without an opt-in gate. Make it opt-in (@pytest.mark.integration / "
+    "pytest.importorskip / env gate) or use a temp/in-memory fixture; otherwise it "
+    "runs the slow/nondeterministic real path in the default pytest suite. Advisory "
+    "only — author-time reminder, not a block. See c05-test-hermeticity.md."
+)
+
+
+# Responsibility: C5 (Python) — author-time advisory; test-file-path-gated FIRST
+# (precision-first, unlike C1's broad all-content match).
+def check_c5_test_hermeticity(tool_name: str, tool_input: dict) -> CheckResult | None:
+    """C5 (test-hermeticity) ADVISORY — Python only, knowingly non-blocking.
+
+    Reminder, not a gate. The Python suite is hermetic-by-mandate (real temp
+    fixtures required), so there is no provable blocking recall — FP=0 is reachable
+    only by firing on nothing, and any recall-bearing variant reintroduces FP on
+    mandated tmp_path/tempfile usage (negative-reasoning-bound, the C17 shape).
+    Surfaces a nudge at author-time; the thesis stays owned by Codex review.
+    C5 remains LIVE (not graduated). See c05-test-hermeticity.md."""
+    try:
+        # GATE 1 (Codex F3): test-file path FIRST — never fire on docs/non-test source.
+        file_path = tool_input.get("file_path", "")
+        if not file_path or not _PY_TEST_PATH_RE.search(file_path):
+            return None
+
+        if tool_name == "Write":
+            content = tool_input.get("content", "")
+        elif tool_name == "Edit":
+            content = tool_input.get("new_string", "")
+        else:
+            return None
+        if not content:
+            return None
+
+        if _c5_detect(content, "python") is None:
+            return None
+        return CheckResult(reason=_C5_REASON, mode="advisory")
+    except Exception:  # noqa: BLE001 — GUARANTEED fail-open (Codex F2): an advisory must NEVER crash the Edit|Write hook. A specific tuple omits ValueError and any unforeseen type; except Exception (named, not bare) ensures a detector/input failure degrades to a silent no-op, never an exception that breaks the author's edit.
+        return None
+
+
+# ---------------------------------------------------------------------------
 # Registry — ordered list of check callables
 # ---------------------------------------------------------------------------
 
@@ -131,6 +183,7 @@ CheckCallable = Callable[[str, dict], "CheckResult | None"]
 
 GRADUATED_CHECKS: list[CheckCallable] = [
     check_c1_path_trust,
+    check_c5_test_hermeticity,   # APPEND — dispatch() is already all-hit
 ]
 
 

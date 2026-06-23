@@ -14,7 +14,13 @@ HOOKS_DIR = Path("/Users/cevin/.claude/skills/coding-team/hooks")
 if str(HOOKS_DIR) not in sys.path:
     sys.path.insert(0, str(HOOKS_DIR))
 
-from _lib.graduated_checks import CheckResult, check_c1_path_trust, dispatch, GRADUATED_CHECKS
+from _lib.graduated_checks import (
+    CheckResult,
+    check_c1_path_trust,
+    check_c5_test_hermeticity,
+    dispatch,
+    GRADUATED_CHECKS,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -363,3 +369,203 @@ class TestFieldNameRegexBoundary:
             f"Expected no C1 match for {word!r} (false positive), got {result!r}. "
             f"Field-name regex must not fire on mid-word token substrings."
         )
+
+
+# ---------------------------------------------------------------------------
+# C5 — test-hermeticity Python advisory
+# ---------------------------------------------------------------------------
+
+
+class TestC5Advisory:
+    """check_c5_test_hermeticity fires advisory on ungated external opens in test files."""
+
+    # -- fires ---------------------------------------------------------------
+
+    def test_edit_to_test_file_with_ungated_sqlite(self):
+        """Edit to tests/test_db.py with ungated sqlite3.connect persistent path -> advisory."""
+        content = 'def test_real():\n    conn = sqlite3.connect("/var/lib/app/data.db")\n    conn.close()\n'
+        result = check_c5_test_hermeticity(
+            "Edit",
+            {"file_path": "tests/test_db.py", "new_string": content},
+        )
+        assert result is not None
+        assert result.mode == "advisory"
+
+    def test_write_to_test_file_with_ungated_requests(self):
+        """Write to test_net.py with ungated requests.get(https://...) -> advisory."""
+        content = 'def test_net():\n    resp = requests.get("https://example.com")\n    assert resp.ok\n'
+        result = check_c5_test_hermeticity(
+            "Write",
+            {"file_path": "test_net.py", "content": content},
+        )
+        assert result is not None
+        assert result.mode == "advisory"
+
+    # -- (F3) must-not-fire on path gate ------------------------------------
+
+    def test_docs_file_does_not_fire(self):
+        """Same violating content in docs/guide.md -> None (not a test file)."""
+        content = 'sqlite3.connect("/var/lib/app/data.db")\n'
+        result = check_c5_test_hermeticity(
+            "Edit",
+            {"file_path": "docs/guide.md", "new_string": content},
+        )
+        assert result is None
+
+    def test_non_test_source_file_does_not_fire(self):
+        """Same violating content in src/db.py -> None (not a test file)."""
+        content = 'conn = sqlite3.connect("/var/lib/app/data.db")\n'
+        result = check_c5_test_hermeticity(
+            "Edit",
+            {"file_path": "src/db.py", "new_string": content},
+        )
+        assert result is None
+
+    def test_readme_does_not_fire(self):
+        """README.md mentioning sqlite3.connect path -> None (not a test file)."""
+        content = 'See also: sqlite3.connect("/x")\n'
+        result = check_c5_test_hermeticity(
+            "Edit",
+            {"file_path": "README.md", "new_string": content},
+        )
+        assert result is None
+
+    # -- must-not-fire on content -------------------------------------------
+
+    def test_in_memory_sqlite_does_not_fire(self):
+        """sqlite3.connect(':memory:') is ephemeral -> None."""
+        content = "def test_mem():\n    conn = sqlite3.connect(':memory:')\n    conn.close()\n"
+        result = check_c5_test_hermeticity(
+            "Edit",
+            {"file_path": "tests/test_db.py", "new_string": content},
+        )
+        assert result is None
+
+    def test_tmp_path_fixture_does_not_fire(self):
+        """tmp_path in test body (ephemeral) -> None."""
+        content = "def test_local(tmp_path):\n    db = tmp_path / 'test.db'\n    conn = sqlite3.connect(str(db))\n    conn.close()\n"
+        result = check_c5_test_hermeticity(
+            "Edit",
+            {"file_path": "tests/test_db.py", "new_string": content},
+        )
+        assert result is None
+
+    def test_importorskip_gate_does_not_fire(self):
+        """pytest.importorskip acts as a gate -> None."""
+        content = (
+            "def test_optional():\n"
+            "    mod = pytest.importorskip('some_optional')\n"
+            '    conn = sqlite3.connect("/var/lib/app/data.db")\n'
+            "    conn.close()\n"
+        )
+        result = check_c5_test_hermeticity(
+            "Edit",
+            {"file_path": "tests/test_opt.py", "new_string": content},
+        )
+        assert result is None
+
+    # -- (Codex F3) per-function-scope regression ---------------------------
+
+    def test_per_function_scope_gated_sibling_does_not_suppress_ungated(self):
+        """A test file with one gated test AND one ungated violator -> FIRES.
+
+        The gated sibling (using tmp_path) must NOT suppress the ungated violator.
+        This locks the per-function scope behavior from Codex F3.
+        """
+        content = (
+            "def test_gated(tmp_path):\n"
+            "    db = tmp_path / 'test.db'\n"
+            "    conn = sqlite3.connect(str(db))\n"
+            "    conn.close()\n"
+            "\n"
+            "def test_ungated():\n"
+            '    conn = sqlite3.connect("/var/lib/app/data.db")\n'
+            "    conn.close()\n"
+        )
+        result = check_c5_test_hermeticity(
+            "Write",
+            {"file_path": "tests/test_x.py", "content": content},
+        )
+        assert result is not None
+        assert result.mode == "advisory"
+
+    def test_per_function_scope_integration_mark_sibling_does_not_suppress(self):
+        """A @pytest.mark.integration sibling must NOT suppress an ungated violator."""
+        content = (
+            "@pytest.mark.integration\n"
+            "def test_integration():\n"
+            '    conn = sqlite3.connect("/var/lib/app/data.db")\n'
+            "    conn.close()\n"
+            "\n"
+            "def test_ungated():\n"
+            '    conn2 = sqlite3.connect("/var/lib/app/other.db")\n'
+            "    conn2.close()\n"
+        )
+        result = check_c5_test_hermeticity(
+            "Write",
+            {"file_path": "tests/test_x.py", "content": content},
+        )
+        assert result is not None
+        assert result.mode == "advisory"
+
+    # -- (F3) comment stripping ----------------------------------------------
+
+    def test_whole_line_comment_open_does_not_fire(self):
+        """A test file where the only open is in a whole-line # comment -> None."""
+        content = (
+            "def test_commented():\n"
+            '    # conn = sqlite3.connect("/var/lib/app/data.db")\n'
+            "    assert True\n"
+        )
+        result = check_c5_test_hermeticity(
+            "Edit",
+            {"file_path": "tests/test_db.py", "new_string": content},
+        )
+        assert result is None
+
+    # -- non-Edit/Write tool -------------------------------------------------
+
+    def test_non_edit_write_tool_returns_none(self):
+        """A tool that is not Edit or Write -> None."""
+        result = check_c5_test_hermeticity(
+            "Read",
+            {"file_path": "tests/test_db.py"},
+        )
+        assert result is None
+
+    def test_bash_tool_returns_none(self):
+        """Bash tool -> None."""
+        result = check_c5_test_hermeticity(
+            "Bash",
+            {"command": 'sqlite3 "/var/lib/data.db"'},
+        )
+        assert result is None
+
+    # -- (Codex F2) forced exception -----------------------------------------
+    # Sanctioned pytest-fixture use: forces a crash in _c5_detect that real inputs
+    # cannot produce; proves except Exception covers ValueError (Codex F2 gap).
+    # mock-ok: pytest setattr fixture forces unanticipated ValueError in _c5_detect; proves except Exception covers ValueError; real inputs cannot deterministically trigger this
+    def test_forced_exception_returns_none_no_crash(self, monkeypatch):  # mock-ok: setattr fixture forces crash; proves except Exception (Codex F2)
+        """Inject a ValueError into _c5_detect to prove fail-open coverage.
+
+        The pytest setattr fixture is sanctioned here (see # mock-ok on the
+        function definition line) because forcing an arbitrary exception inside
+        _c5_detect is impossible with real inputs — the detector is deterministic.
+        This proves that except Exception (not a narrower tuple) is in place,
+        which is the exact gap Codex F2 identified.
+        """
+        import _lib.graduated_checks as gc
+
+        def _raise_on_call(text: str, lang: str) -> None:
+            raise ValueError("simulated detector failure")
+
+        # mock-ok: setattr forces crash in _c5_detect; proves except Exception covers ValueError (Codex F2)
+        monkeypatch.setattr(gc, "_c5_detect", _raise_on_call)
+        result = check_c5_test_hermeticity(
+            "Edit",
+            {
+                "file_path": "tests/test_db.py",
+                "new_string": 'def test_real():\n    conn = sqlite3.connect("/x/data.db")\n',
+            },
+        )
+        assert result is None, "Expected None (fail-open) when _c5_detect raises ValueError"

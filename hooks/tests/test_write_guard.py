@@ -1011,6 +1011,54 @@ class TestGraduatedC1Advisory:
             f"C1 text missing from reason: {reason!r}"
         )
 
+    def test_c1_and_c5_cofiring_on_py_test_edit_single_json(self, repo: Path):
+        """An Edit to a tests/test_x.py triggering BOTH C1 and C5 -> exactly ONE JSON line.
+
+        C1 fires on open( (a path-call token).
+        C5 fires on ungated sqlite3.connect("/var/...") in a test file.
+        Single-emission contract: both reasons must appear in the ONE aggregated JSON.
+        This locks that appending C5 to GRADUATED_CHECKS did not break single-emission
+        aggregation through write-guard's dispatch.
+        """
+        tests_dir = repo / "tests"
+        tests_dir.mkdir(parents=True)
+        test_file = tests_dir / "test_x.py"
+        test_file.write_text("x = 1\n")
+
+        # new_string triggers BOTH:
+        #   C1 — open( is a path-call token (Signal 2)
+        #   C5 — ungated sqlite3.connect("/var/lib/app/data.db") in a test file
+        new_content = (
+            'def test_real():\n'
+            '    conn = sqlite3.connect("/var/lib/app/data.db")\n'
+            '    with open("/var/lib/app/cfg.json") as f:\n'
+            '        data = f.read()\n'
+            '    conn.close()\n'
+        )
+
+        event = {
+            "tool_name": "Edit",
+            "tool_input": {
+                "file_path": str(test_file),
+                "new_string": new_content,
+            },
+        }
+        parsed, stdout, _stderr, _rc = _run(event, cwd=repo)
+        lines = [line for line in stdout.strip().splitlines() if line.strip()]
+        assert len(lines) == 1, (
+            f"Expected exactly 1 JSON line (single-emission), got {len(lines)}: {stdout!r}"
+        )
+        assert parsed is not None
+        assert parsed["decision"] == "allow"
+        reason = parsed.get("reason", "")
+        # Both C1 and C5 advisories must appear in the single aggregated reason
+        assert "C1" in reason or "Codex" in reason or "open(" in reason, (
+            f"C1 text missing from aggregated reason: {reason!r}"
+        )
+        assert "C5" in reason or "hermeticity" in reason or "test-hermeticity" in reason, (
+            f"C5 text missing from aggregated reason: {reason!r}"
+        )
+
     def test_blocking_guard_still_emits_single_block(self, repo: Path):
         """A phase5-blocked file emits a single block — no advisory leaked alongside.
 
