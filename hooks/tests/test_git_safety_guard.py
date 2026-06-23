@@ -1312,3 +1312,437 @@ class TestCodexDigestSyncGate:
             assert result.stdout.strip() == "", f"gate false-failed: {result.stdout!r}"
         finally:
             os.chdir(old)
+
+
+# ---------------------------------------------------------------------------
+# Helpers for C5 test-hermeticity block adapter tests
+# ---------------------------------------------------------------------------
+
+_HOOK_PATH = Path(__file__).parent.parent / "git-safety-guard.py"
+
+
+def _run_hook_with_env(event: dict, env: dict | None = None) -> dict | None:
+    """Run git-safety-guard.py with optional extra env vars; return parsed JSON or None."""
+    run_env = {**os.environ, **(env or {})}
+    result = subprocess.run(
+        ["python3", str(_HOOK_PATH)],
+        input=json.dumps(event),
+        capture_output=True,
+        text=True,
+        timeout=10,
+        env=run_env,
+    )
+    try:
+        return json.loads(result.stdout)
+    except (json.JSONDecodeError, ValueError):
+        return None
+
+
+def _make_c5_git_repo(tmp_path: Path) -> Path:
+    """Create a minimal git repo on a non-protected branch, ready for staged content."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(["init", "-b", "feat/c5-test", str(repo)], cwd=tmp_path)
+    (repo / "README.md").write_text("# test repo\n")
+    _git(["add", "README.md"], cwd=repo)
+    _git(["commit", "-m", "chore: initial"], cwd=repo)
+    return repo
+
+
+def _stage_rust_file(repo: Path, name: str, content: str) -> None:
+    """Write a Rust file to the repo and stage it."""
+    (repo / name).write_text(content)
+    _git(["add", name], cwd=repo)
+
+
+# ---------------------------------------------------------------------------
+# C5 test hermeticity block adapter — TestC5BlockHermeticity
+# ---------------------------------------------------------------------------
+
+
+class TestC5BlockHermeticity:
+    """Integration tests for check_c5_test_hermeticity in git-safety-guard.py.
+
+    All tests use real git tmp repos (no mocks for git). The sole exception is
+    the detector-crash fail-open test which uses a pytest fixture to force a
+    ValueError that real input cannot deterministically produce.
+    """
+
+    # ------------------------------------------------------------------
+    # Must-not-fire negatives (staged .rs file → None, no block)
+    # ------------------------------------------------------------------
+
+    def test_no_block_ignored_axonservice_open(self, tmp_path):
+        """#[ignore]-gated AxonService::open must NOT block (gold positive gated)."""
+        repo = _make_c5_git_repo(tmp_path)
+        content = (
+            "#[cfg(test)]\nmod tests {\n"
+            "    #[ignore = \"requires a real index\"]\n"
+            "    #[tokio::test]\n"
+            "    async fn test_open_real() {\n"
+            "        let svc = AxonService::open(&repo_path);\n"
+            "    }\n"
+            "}\n"
+        )
+        _stage_rust_file(repo, "svc.rs", content)
+        mod = _load_hook_module()
+        result = mod.check_c5_test_hermeticity(
+            f"cd {repo} && git commit -m \"feat: add test\"", str(repo)
+        )
+        assert result is None, f"Expected None for #[ignore]-gated open, got: {result!r}"
+
+    def test_no_block_tempdir_database_open(self, tmp_path):
+        """tempfile::tempdir() + Database::open is ephemeral — must NOT block."""
+        repo = _make_c5_git_repo(tmp_path)
+        content = (
+            "#[cfg(test)]\nmod tests {\n"
+            "    #[tokio::test]\n"
+            "    async fn test_with_tempdir() {\n"
+            "        let dir = tempfile::tempdir().unwrap();\n"
+            "        let db = Database::open(dir.path());\n"
+            "    }\n"
+            "}\n"
+        )
+        _stage_rust_file(repo, "db.rs", content)
+        mod = _load_hook_module()
+        result = mod.check_c5_test_hermeticity(
+            f"cd {repo} && git commit -m \"feat: add test\"", str(repo)
+        )
+        assert result is None, f"Expected None for tempdir-ephemeral open, got: {result!r}"
+
+    def test_no_block_open_memory(self, tmp_path):
+        """open_memory() is ephemeral — must NOT block."""
+        repo = _make_c5_git_repo(tmp_path)
+        content = (
+            "#[cfg(test)]\nmod tests {\n"
+            "    #[test]\n"
+            "    fn test_in_memory() {\n"
+            "        let db = Database::open_memory();\n"
+            "    }\n"
+            "}\n"
+        )
+        _stage_rust_file(repo, "mem.rs", content)
+        mod = _load_hook_module()
+        result = mod.check_c5_test_hermeticity(
+            f"cd {repo} && git commit -m \"feat: add test\"", str(repo)
+        )
+        assert result is None, f"Expected None for open_memory, got: {result!r}"
+
+    def test_no_block_cfg_attr_not_feature_ignore(self, tmp_path):
+        """#[cfg_attr(not(feature=\"model-tests\"), ignore)] is a recognized gate — no block."""
+        repo = _make_c5_git_repo(tmp_path)
+        content = (
+            "#[cfg(test)]\nmod tests {\n"
+            "    #[cfg_attr(not(feature = \"model-tests\"), ignore)]\n"
+            "    #[tokio::test]\n"
+            "    async fn test_with_model() {\n"
+            "        let emb = CandleEmbedder::new(model_path);\n"
+            "    }\n"
+            "}\n"
+        )
+        _stage_rust_file(repo, "embedder.rs", content)
+        mod = _load_hook_module()
+        result = mod.check_c5_test_hermeticity(
+            f"cd {repo} && git commit -m \"feat: add test\"", str(repo)
+        )
+        assert result is None, f"Expected None for cfg_attr-ignore gate, got: {result!r}"
+
+    # ------------------------------------------------------------------
+    # Ungated synthesized violation → block message
+    # ------------------------------------------------------------------
+
+    def test_blocks_ungated_axonservice_open(self, tmp_path):
+        """Bare #[tokio::test] + AxonService::open on a real path → block naming path + signature."""
+        repo = _make_c5_git_repo(tmp_path)
+        content = (
+            "#[cfg(test)]\nmod tests {\n"
+            "    #[tokio::test]\n"
+            "    async fn test_open_real_index() {\n"
+            "        let svc = AxonService::open(&real_index_path);\n"
+            "    }\n"
+            "}\n"
+        )
+        _stage_rust_file(repo, "svc_test.rs", content)
+        mod = _load_hook_module()
+        result = mod.check_c5_test_hermeticity(
+            f"cd {repo} && git commit -m \"feat: add test\"", str(repo)
+        )
+        assert result is not None, "Expected block for ungated AxonService::open"
+        assert "C5 TEST HERMETICITY" in result
+        assert "svc_test.rs" in result
+        assert "AxonService::open(" in result
+        assert "#[ignore" in result  # fix hint present
+
+    # ------------------------------------------------------------------
+    # Per-function-scope regression
+    # ------------------------------------------------------------------
+
+    def test_derive_does_not_suppress_violation(self, tmp_path):
+        """#[derive(Debug)] struct does NOT suppress an ungated test violation."""
+        repo = _make_c5_git_repo(tmp_path)
+        content = (
+            "#[derive(Debug)]\n"
+            "struct MyIndex { path: String }\n\n"
+            "#[cfg(test)]\nmod tests {\n"
+            "    #[tokio::test]\n"
+            "    async fn test_open_real() {\n"
+            "        let db = Database::open(&real_path);\n"
+            "    }\n"
+            "}\n"
+        )
+        _stage_rust_file(repo, "index.rs", content)
+        mod = _load_hook_module()
+        result = mod.check_c5_test_hermeticity(
+            f"cd {repo} && git commit -m \"feat: add test\"", str(repo)
+        )
+        assert result is not None, "#[derive(Debug)] must NOT suppress a violation"
+        assert "C5 TEST HERMETICITY" in result
+
+    def test_mixed_file_gated_and_ungated(self, tmp_path):
+        """File with one #[ignore]-gated test AND one ungated violation → blocks on the ungated."""
+        repo = _make_c5_git_repo(tmp_path)
+        content = (
+            "#[cfg(test)]\nmod tests {\n"
+            "    #[ignore = \"requires real index\"]\n"
+            "    #[tokio::test]\n"
+            "    async fn test_gated() {\n"
+            "        let svc = AxonService::open(&real_path);\n"
+            "    }\n\n"
+            "    #[tokio::test]\n"
+            "    async fn test_ungated() {\n"
+            "        let svc = AxonService::open(&another_real_path);\n"
+            "    }\n"
+            "}\n"
+        )
+        _stage_rust_file(repo, "mixed.rs", content)
+        mod = _load_hook_module()
+        result = mod.check_c5_test_hermeticity(
+            f"cd {repo} && git commit -m \"feat: add tests\"", str(repo)
+        )
+        assert result is not None, "Ungated violation must block even when a gated sibling exists"
+        assert "C5 TEST HERMETICITY" in result
+
+    # ------------------------------------------------------------------
+    # Off-idiom traps → None (fail-open-safe FN)
+    # ------------------------------------------------------------------
+
+    def test_no_block_helper_wrapped_open(self, tmp_path):
+        """Helper-wrapped open (no ::open( in test body) → None (off-idiom FN)."""
+        repo = _make_c5_git_repo(tmp_path)
+        content = (
+            "fn open_real_service(path: &str) -> AxonService {\n"
+            "    AxonService::open(path)\n"
+            "}\n\n"
+            "#[cfg(test)]\nmod tests {\n"
+            "    #[tokio::test]\n"
+            "    async fn test_via_helper() {\n"
+            "        let svc = open_real_service(\"/real/path\");\n"
+            "    }\n"
+            "}\n"
+        )
+        _stage_rust_file(repo, "helper.rs", content)
+        mod = _load_hook_module()
+        result = mod.check_c5_test_hermeticity(
+            f"cd {repo} && git commit -m \"feat: add test\"", str(repo)
+        )
+        assert result is None, f"Expected None for helper-wrapped open (off-idiom FN), got: {result!r}"
+
+    def test_no_block_unrecognized_attribute_conservative_gate(self, tmp_path):
+        """Unrecognized attribute on a test with an open → CONSERVATIVE-GATE → None."""
+        repo = _make_c5_git_repo(tmp_path)
+        content = (
+            "#[cfg(test)]\nmod tests {\n"
+            "    #[my_custom_skip_macro]\n"
+            "    #[tokio::test]\n"
+            "    async fn test_with_unknown_gate() {\n"
+            "        let db = Database::open(&real_path);\n"
+            "    }\n"
+            "}\n"
+        )
+        _stage_rust_file(repo, "custom.rs", content)
+        mod = _load_hook_module()
+        result = mod.check_c5_test_hermeticity(
+            f"cd {repo} && git commit -m \"feat: add test\"", str(repo)
+        )
+        assert result is None, f"Expected None for unrecognized attribute (conservative gate), got: {result!r}"
+
+    # ------------------------------------------------------------------
+    # (F2) Staged-only: unstaged violation must NOT block
+    # ------------------------------------------------------------------
+
+    def test_no_block_unstaged_violation(self, tmp_path):
+        """Working-tree-only violation (unstaged) → commit must NOT block (staged index only)."""
+        repo = _make_c5_git_repo(tmp_path)
+        # Write violation but do NOT stage it
+        content = (
+            "#[cfg(test)]\nmod tests {\n"
+            "    #[tokio::test]\n"
+            "    async fn test_ungated() {\n"
+            "        let db = Database::open(&real_path);\n"
+            "    }\n"
+            "}\n"
+        )
+        (repo / "unstaged.rs").write_text(content)
+        # Stage a different (clean) file so the commit is non-empty
+        (repo / "clean.rs").write_text("fn main() {}\n")
+        _git(["add", "clean.rs"], cwd=repo)
+
+        mod = _load_hook_module()
+        result = mod.check_c5_test_hermeticity(
+            f"cd {repo} && git commit -m \"feat: add clean\"", str(repo)
+        )
+        assert result is None, f"Unstaged violation must not block, got: {result!r}"
+
+    # ------------------------------------------------------------------
+    # (F1) Commit-only: git push must NOT trigger C5
+    # ------------------------------------------------------------------
+
+    def test_no_block_on_git_push(self, tmp_path):
+        """git push with staged Rust violation → NO block (C5 gates on is_commit, not push).
+
+        Tests the full hook subprocess to exercise the is_commit wiring gate in main()
+        — calling the adapter directly bypasses the gate, so we must go via the hook.
+        """
+        repo = _make_c5_git_repo(tmp_path)
+        content = (
+            "#[cfg(test)]\nmod tests {\n"
+            "    #[tokio::test]\n"
+            "    async fn test_ungated() {\n"
+            "        let svc = AxonService::open(&real_path);\n"
+            "    }\n"
+            "}\n"
+        )
+        _stage_rust_file(repo, "push_test.rs", content)
+        event = {
+            "tool_name": "Bash",
+            "tool_input": {"command": f"cd {repo} && git push origin feat/c5-test"},
+        }
+        parsed = _run_hook_with_env(event)
+        # Must NOT produce a C5 block (push bypasses is_commit gate in main()).
+        if parsed is not None:
+            assert parsed.get("decision") != "block" or "C5" not in parsed.get("reason", ""), (
+                f"git push must not trigger C5 block, got: {parsed!r}"
+            )
+
+    def test_blocks_on_git_commit_with_same_violation(self, tmp_path):
+        """Same staged violation → git commit DOES block via the full hook."""
+        repo = _make_c5_git_repo(tmp_path)
+        content = (
+            "#[cfg(test)]\nmod tests {\n"
+            "    #[tokio::test]\n"
+            "    async fn test_ungated() {\n"
+            "        let svc = AxonService::open(&real_path);\n"
+            "    }\n"
+            "}\n"
+        )
+        _stage_rust_file(repo, "commit_test.rs", content)
+        event = {
+            "tool_name": "Bash",
+            "tool_input": {"command": f"cd {repo} && git commit -m \"feat: add test\""},
+        }
+        parsed = _run_hook_with_env(event)
+        assert parsed is not None, "git commit with staged violation must block"
+        assert parsed.get("decision") == "block", f"Expected block, got: {parsed!r}"
+        assert "C5 TEST HERMETICITY" in parsed.get("reason", ""), (
+            f"Expected C5 block reason, got: {parsed!r}"
+        )
+
+    # ------------------------------------------------------------------
+    # (F2) Fail-open on detector crash
+    # ------------------------------------------------------------------
+
+    # mock-ok: forces ValueError from a simulated detector bug — real staged input cannot produce this
+    def test_fail_open_on_detector_crash(self, tmp_path, monkeypatch):  # mock-ok: forces ValueError from simulated detector bug unreproducible with real input
+        """Adapter returns None (not crash/block) when the detector raises an unexpected error."""
+        repo = _make_c5_git_repo(tmp_path)
+        content = (
+            "#[cfg(test)]\nmod tests {\n"
+            "    #[tokio::test]\n"
+            "    async fn test_ungated() {\n"
+            "        let svc = AxonService::open(&real_path);\n"
+            "    }\n"
+            "}\n"
+        )
+        _stage_rust_file(repo, "crash_test.rs", content)
+
+        mod = _load_hook_module()
+
+        # mock-ok: forces ValueError from simulated detector bug unreproducible with real input
+        def _raise_value_error(text: str, lang: str):
+            raise ValueError("simulated detector crash")
+
+        monkeypatch.setattr(mod, "_c5_detect", _raise_value_error)  # mock-ok: forces ValueError from simulated detector bug unreproducible with real input
+        result = mod.check_c5_test_hermeticity(
+            f"cd {repo} && git commit -m \"feat: add test\"", str(repo)
+        )
+        assert result is None, f"Detector crash must fail open (return None), got: {result!r}"
+
+    # ------------------------------------------------------------------
+    # Infra fail-open: non-repo target → None
+    # ------------------------------------------------------------------
+
+    def test_fail_open_non_repo_target(self, tmp_path):
+        """target_root not a git repo → None (infra fail-open)."""
+        non_repo = tmp_path / "not_a_repo"
+        non_repo.mkdir()
+        mod = _load_hook_module()
+        result = mod.check_c5_test_hermeticity(
+            f"cd {non_repo} && git commit -m \"feat: add test\"", str(non_repo)
+        )
+        assert result is None, f"Non-repo target must fail open, got: {result!r}"
+
+    # ------------------------------------------------------------------
+    # Override: C5_ALLOW_UNGATED_TEST=1 → no block
+    # ------------------------------------------------------------------
+
+    def test_override_disables_block(self, tmp_path):
+        """C5_ALLOW_UNGATED_TEST=1 with a real staged violation → no block."""
+        repo = _make_c5_git_repo(tmp_path)
+        content = (
+            "#[cfg(test)]\nmod tests {\n"
+            "    #[tokio::test]\n"
+            "    async fn test_ungated() {\n"
+            "        let svc = AxonService::open(&real_path);\n"
+            "    }\n"
+            "}\n"
+        )
+        _stage_rust_file(repo, "override_test.rs", content)
+        event = {
+            "tool_name": "Bash",
+            "tool_input": {"command": f"cd {repo} && git commit -m \"feat: add test\""},
+        }
+        parsed = _run_hook_with_env(event, env={"C5_ALLOW_UNGATED_TEST": "1"})
+        # Must NOT be a block decision (either None/empty stdout or non-block decision)
+        if parsed is not None:
+            assert parsed.get("decision") != "block", (
+                f"Override must suppress C5 block, got: {parsed!r}"
+            )
+
+    # ------------------------------------------------------------------
+    # Truncation: many violations → message bounded (~2000 + suffix)
+    # ------------------------------------------------------------------
+
+    def test_block_message_truncated_at_2000(self, tmp_path):
+        """Many staged violations → block message length bounded (~2000 + suffix)."""
+        repo = _make_c5_git_repo(tmp_path)
+        # Stage many files with violations to produce a long findings list
+        for i in range(30):
+            name = f"test_{i:03d}_very_long_module_name_to_push_message_size.rs"
+            content = (
+                "#[cfg(test)]\nmod tests {\n"
+                f"    #[tokio::test]\n"
+                f"    async fn test_violation_{i}() {{\n"
+                f"        let svc = AxonService::open(&real_path_{i});\n"
+                "    }\n"
+                "}\n"
+            )
+            _stage_rust_file(repo, name, content)
+
+        mod = _load_hook_module()
+        result = mod.check_c5_test_hermeticity(
+            f"cd {repo} && git commit -m \"feat: add many tests\"", str(repo)
+        )
+        assert result is not None, "Expected block for many violations"
+        assert len(result) <= 2000 + len("\n... (truncated)") + 10, (
+            f"Message not bounded: len={len(result)}"
+        )
