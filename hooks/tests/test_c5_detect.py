@@ -966,3 +966,194 @@ class TestRustBodyBraceStringLiteral:
             "A ']' inside an attribute string must not break the gate-span "
             "bracket scan — the #[ignore] gate must still suppress."
         )
+
+
+# ===========================================================================
+# FIX A+B — multi-line string braces must not inflate body depth (R4)
+# ===========================================================================
+
+class TestRustMultilineStringBodyDepth:
+    def test_multiline_raw_string_brace_absorbs_gated_second_returns_none(self):
+        """FIX A regression (P1 Codex R4):
+        Ungated 'first()' contains a raw multi-line string r#\"\\n{\\n\"# whose
+        interior '{' line, processed in isolation by per-line _rust_code_only,
+        passes through unstripped and inflates brace depth.  first()'s body
+        never closes, absorbing gated second() and misattributing its real open
+        to the ungated unit — false block.  After FIX A (stateful cross-line
+        normalizer), the '{' line is known to be inside a raw string and is
+        suppressed; after FIX B (conservative structural cap) the body is hard-
+        stopped at second()'s #[ignore] boundary even if depth > 0."""
+        # Arrange — raw multi-line string with interior '{' in ungated first()
+        text = (
+            "#[test]\n"
+            "fn first() {\n"
+            '    let s = r#"\n'
+            "{\n"
+            '"#;\n'
+            "}\n"
+            "\n"
+            "#[ignore]\n"
+            "#[test]\n"
+            "fn second() {\n"
+            "    let db = Database::open(&real_path).unwrap();\n"
+            "}\n"
+        )
+        # Act
+        result = _c5_detect(text, "rust")
+        # Assert
+        assert result is None, (
+            "A multi-line raw string r#\"...{...\"# must not inflate brace "
+            "depth across lines — the gated second() must NOT be absorbed."
+        )
+
+    def test_multiline_normal_string_brace_absorbs_gated_second_returns_none(self):
+        """FIX A regression: multi-line NORMAL strings (Rust allows them) with
+        '{'/'}' inside ungated first() + gated second() with real open → None."""
+        # Arrange — normal string with embedded newline and '{' (Rust allows)
+        text = (
+            "#[test]\n"
+            "fn first() {\n"
+            '    let s = "hello\n'
+            "{\n"
+            '";\n'
+            "}\n"
+            "\n"
+            "#[ignore]\n"
+            "#[test]\n"
+            "fn second() {\n"
+            "    let db = Database::open(&real_path).unwrap();\n"
+            "}\n"
+        )
+        # Act
+        result = _c5_detect(text, "rust")
+        # Assert
+        assert result is None, (
+            "A multi-line normal string with '{' inside must not inflate brace "
+            "depth — the gated second() must NOT be absorbed."
+        )
+
+    def test_multiline_raw_string_with_open_inside_single_ungated_test_fires(self):
+        """FIX A recall: a SINGLE ungated test whose body contains a multi-line
+        raw string with braces AND a real Database::open → FIRES.
+        The fix must suppress string-interior braces without over-truncating
+        the body before the real open is found."""
+        # Arrange
+        text = (
+            "#[test]\n"
+            "fn t() {\n"
+            '    let schema = r#"\n'
+            "{\n"
+            '"#;\n'
+            "    let db = Database::open(&real_path).unwrap();\n"
+            "}\n"
+        )
+        # Act
+        result = _c5_detect(text, "rust")
+        # Assert
+        assert result is not None, (
+            "A real Database::open after a multi-line raw string in a single "
+            "ungated test must still FIRE — FIX A must not over-truncate."
+        )
+
+    def test_fix_b_structural_cap_stops_body_at_next_test_attr(self):
+        """FIX B: regardless of depth miscounting, the body walk must STOP when
+        it reaches the next test unit's attribute boundary (a #[test] / #[ignore]
+        / #[tokio::test] / #[rstest] line at the same indent as the current fn).
+        This makes the unit-merge false-block structurally impossible — a worst-
+        case miscount produces a fail-open-safe FN, never a false block."""
+        # Arrange — deliberately depth-confusing open brace in a comment inside
+        # first(), then immediately gated second() with a real open.
+        text = (
+            "#[test]\n"
+            "fn first() {\n"
+            "    // deliberately unmatched: {\n"
+            "}\n"
+            "\n"
+            "#[ignore]\n"
+            "#[test]\n"
+            "fn second() {\n"
+            "    let db = Database::open(&real_path).unwrap();\n"
+            "}\n"
+        )
+        # Act — after FIX A, the comment brace is stripped so depth closes
+        # correctly at '}'; FIX B provides the hard structural backstop.
+        result = _c5_detect(text, "rust")
+        # Assert
+        assert result is None, (
+            "FIX B structural cap: first()'s body must stop at the next test "
+            "unit boundary; gated second() must remain a separate unit → None."
+        )
+
+
+# ===========================================================================
+# Qualifier-prefixed fn regression (R5 — fn-detection recall)
+# ===========================================================================
+
+class TestRustQualifiedFnRecall:
+    def test_pub_async_fn_no_gate_fires(self):
+        """Regression: `re.match(r'(\\s*)\\bfn\\s+\\w+')` failed on qualifier-
+        prefixed fns like `pub async fn`, so no test unit was yielded and the
+        detector returned None even for an ungated real open.  After the fix
+        (re.search for `\\bfn\\s+\\w+` + separately computed indent), qualifier-
+        prefixed fns are detected normally.  'pub async fn test_x() {...}' with
+        AxonService::open and no gate → FIRES."""
+        # Arrange
+        text = (
+            "#[test]\n"
+            "pub async fn test_x() {\n"
+            "    let svc = AxonService::open(&repo).unwrap();\n"
+            "}\n"
+        )
+        # Act
+        result = _c5_detect(text, "rust")
+        # Assert
+        assert result is not None, (
+            "pub async fn test_x() must be detected as a test function — "
+            "re.search for \\bfn\\s+\\w+ must match qualifier-prefixed fns."
+        )
+
+    def test_pub_fn_no_gate_fires(self):
+        """Regression: same qualifier-prefix issue for `pub fn`.
+        'pub fn test_x() { Database::open(...); }' with #[test] → FIRES."""
+        # Arrange
+        text = (
+            "#[test]\n"
+            "pub fn test_x() {\n"
+            "    let db = Database::open(&p).unwrap();\n"
+            "}\n"
+        )
+        # Act
+        result = _c5_detect(text, "rust")
+        # Assert
+        assert result is not None, (
+            "pub fn test_x() must be detected as a test function → FIRES."
+        )
+
+    def test_fix_b_next_unit_boundary_recognizes_qualified_fn(self):
+        """FIX B structural cap must also recognize qualifier-prefixed fns as
+        next-unit boundaries.  A gated 'async fn first()' immediately followed
+        by an ungated 'pub async fn second()' with a real open: if FIX B uses
+        re.match anchored on fn (missing the async/pub qualifiers), the second
+        unit's fn line is not recognized as a next-unit boundary and the body
+        of any depth-confused first unit could absorb second.  After the fix
+        (re.search), the boundary is correctly recognized → FIRES on the ungated
+        second unit, not on the gated first."""
+        # Arrange — gated first (no real open), ungated second (real open)
+        text = (
+            "#[ignore]\n"
+            "#[test]\n"
+            "async fn first() {\n"
+            "}\n"
+            "\n"
+            "#[test]\n"
+            "pub async fn second() {\n"
+            "    let svc = AxonService::open(&repo).unwrap();\n"
+            "}\n"
+        )
+        # Act
+        result = _c5_detect(text, "rust")
+        # Assert
+        assert result is not None, (
+            "Ungated pub async fn second() with a real open must FIRE — "
+            "FIX B must recognize qualifier-prefixed fns as unit boundaries."
+        )

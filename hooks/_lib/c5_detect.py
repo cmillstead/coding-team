@@ -54,11 +54,11 @@ _RUST_GATE_CFG_FEATURE = re.compile(r"#\[\s*cfg\s*\(\s*feature")
 # The test-attribute itself (harmless — not a gate).
 _RUST_TEST_ATTR = re.compile(r"#\[\s*(?:test|tokio::test|rstest)\b")
 # Ephemeral construction markers.
-# `tempfile` (bare) covers both `tempfile::tempdir(...)` and inline comment
-# tails like `// tempfile` — the latter is an accepted fail-open-safe FN
-# (Codex F4): we do not strip inline comments, so a trailing `// tempfile`
-# suppresses detection rather than forcing a false block. This is intentional:
-# inline-stripping risks corrupting `https://` string literals on the blocking path.
+# `tempfile` (bare) covers `tempfile::tempdir(...)`.  Previously a trailing
+# `// tempfile` comment also suppressed detection (Codex F4 accepted FN) because
+# inline comments were not stripped.  The shared _rust_code_only normalizer (FIX 5)
+# strips `//` tails AFTER stripping string contents, so inline-comment spoofing is
+# no longer possible on the Rust blocking path; the F4 FN is eliminated.
 _RUST_EPHEMERAL = re.compile(
     r"open_memory|tempfile|TempDir::new|tmp\.path\(\)"
     r"|new_for_test|new_in_memory"
@@ -248,6 +248,22 @@ def _rust_test_units(text: str):
     (``#[cfg(test)]``) which _rust_gated treated as an unknown gate and suppressed
     a real violation.  After this fix, only REAL attribute-syntax brackets count.
 
+    FIX A: the body brace-depth walk now uses the stateful cross-line normalizer
+    ``_rust_code_only_line`` which threads ``in_block_comment``, ``in_raw_string``
+    (with hash count), and ``in_normal_string`` across lines.  Previously the
+    per-line ``_rust_code_only`` regex applied DOTALL patterns to each line in
+    isolation, so a multi-line raw string ``r#"\\n{\\n"#`` had its interior ``{``
+    line pass through unstripped, inflating depth and absorbing the next test unit.
+
+    FIX B: conservative structural cap.  Even if the stateful normalizer has a
+    gap, the body walk hard-stops when it encounters a line that starts the NEXT
+    test unit's attribute region (a ``#[test]``/``#[ignore]``/``#[tokio::test]``/
+    ``#[rstest]`` attr line, or a ``fn `` at the same-or-lower indentation as the
+    current test fn), before the brace closes.  If depth is still > 0 at that
+    boundary, we miscounted — the safe resolution is to end the current unit
+    (at worst a fail-open-safe FN), NEVER to merge two units (which would
+    misattribute a gated open to an ungated unit = a false BLOCK).
+
     We use a "pending close debt" tracker going upward through source lines:
     - Going upward, a line with MORE `]`/`)` than `[`/`(` in its CODE (non-comment)
       text signals that there must be an unmatched open bracket ABOVE — we MUST
@@ -262,6 +278,7 @@ def _rust_test_units(text: str):
     i = 0
     while i < n:
         if re.search(r"\bfn\s+\w+", lines[i]):
+            fn_indent = len(lines[i]) - len(lines[i].lstrip())
             j, attrs, saw_test = i - 1, [], False
             # close_debt > 0 means the lines collected so far (below in source
             # order) have more `]`/`)` than `[`/`(` in code (non-comment) text,
@@ -315,15 +332,41 @@ def _rust_test_units(text: str):
                 j -= 1
             if saw_test:
                 depth, started, body, k = 0, False, [], i
+                # FIX A: stateful cross-line normalizer threads string/comment
+                # context across lines so multi-line string/raw-string interiors
+                # are correctly suppressed in brace counting.
+                line_state = _RustLineState()
                 while k < n:
-                    # FIX 5 (site 1): count braces on code-only text so that
-                    # braces inside string literals (e.g. `let s = "{";`) do not
-                    # inflate depth and absorb the following function into this
-                    # body.  Line CLASSIFICATION (started, line membership) still
-                    # uses the original line — only the brace COUNTING uses co.
-                    co = _rust_code_only(lines[k])
+                    raw_line = lines[k]
+
+                    # FIX B: conservative structural cap — stop the body at the
+                    # start of the NEXT test unit's attribute region, even if
+                    # depth still looks > 0 (which would indicate a miscount).
+                    # This makes the unit-merge false-block class structurally
+                    # impossible: a worst-case miscount produces a fail-open-safe
+                    # FN, never a false BLOCK.
+                    # Trigger conditions (only after the body has started so we
+                    # don't immediately stop at the fn line itself):
+                    #   (i)  a line matching a test attribute (#[test], #[ignore],
+                    #        #[tokio::test], #[rstest]) at or before fn_indent
+                    #   (ii) a `fn ` line at indentation <= fn_indent (i.e., a
+                    #        sibling or parent fn, not a nested closure).
+                    if started and k > i:
+                        raw_stripped = raw_line.lstrip()
+                        raw_indent = len(raw_line) - len(raw_stripped)
+                        if _RUST_NEXT_UNIT_ATTR.match(raw_line) and raw_indent <= fn_indent:
+                            # Step back: the body ends BEFORE this attr line.
+                            k -= 1
+                            break
+                        if re.search(r"\bfn\s+\w+", raw_line) and raw_indent <= fn_indent:
+                            k -= 1
+                            break
+
+                    # FIX A (site 1): use stateful normalizer; brace COUNTING
+                    # on code-only text, line CLASSIFICATION on original.
+                    co = _rust_code_only_line(raw_line, line_state)
                     depth += co.count("{") - co.count("}")
-                    body.append(lines[k])
+                    body.append(raw_line)
                     if "{" in co:
                         started = True
                     if started and depth <= 0:
@@ -366,17 +409,21 @@ def _rust_test_units(text: str):
 _RUST_FWD_BLOCK_COMMENT = re.compile(r"/\*.*?\*/", re.DOTALL)
 _RUST_FWD_LINE_COMMENT = re.compile(r"//[^\n]*", re.MULTILINE)
 
+# Pattern for recognizing the start of a new test attribute on a line that
+# belongs to the NEXT unit's attribute block (FIX B structural cap).
+_RUST_NEXT_UNIT_ATTR = re.compile(
+    r"^\s*#\[\s*(?:test|tokio::test|rstest|ignore)\b"
+)
+
 
 def _rust_code_only(text: str) -> str:
     """Return Rust source text with ALL string/char-literal and comment content
     replaced by empty placeholders.
 
-    This is the SHARED normalizer for all Rust delimiter-counting and
-    signature-searching sites:
-    - body brace-depth accounting (``{``/``}`` in ``_rust_test_units``)
-    - close_debt bracket accounting (``[``/``]``/``(``/``)`` in attr walk)
-    - ``_rust_gated`` bracket-span scan (``#[``-attribute scanning)
-    - ``_RUST_OPEN`` signature search
+    Used for multi-line batch normalization (attrs scan, ``_RUST_OPEN`` search,
+    and ``_rust_gated`` bracket-span).  For the body brace-depth walk — which
+    processes lines one at a time and must thread string state across lines —
+    use ``_RustLineState`` + ``_rust_code_only_line`` instead.
 
     NOT a full Rust lexer — best-effort for the common cases.  Over-stripping
     is safe: a placeholder never matches _RUST_OPEN, and empty braces/brackets
@@ -384,13 +431,7 @@ def _rust_code_only(text: str) -> str:
 
     IMPORTANT: line CLASSIFICATION (``_is_attr_region_line``, ``fn`` detection,
     ``_RUST_TEST_ATTR`` search) still operates on the ORIGINAL text — only the
-    counting/searching uses this output.  Do not drop or add newlines.
-
-    The documented Codex F4 inline-comment FN (a real open followed by a
-    ``// tempfile`` tail suppresses ephemeral detection) is preserved: the
-    comment tail is stripped here, so ``tempfile`` in a comment does NOT
-    trigger ``_RUST_EPHEMERAL`` after normalisation.  This IMPROVES precision
-    on the OPEN-scan path but is harmless for the brace-depth path.
+    counting/searching uses this output.
     """
     # 1. Raw strings — must come before normal strings.
     text = _RUST_RAW_STR.sub(lambda m: f'r{m.group(1)}""{m.group(1)}', text)
@@ -403,6 +444,186 @@ def _rust_code_only(text: str) -> str:
     # 5. // line-comment tails.
     text = _RUST_FWD_LINE_COMMENT.sub("", text)
     return text
+
+
+# ---------------------------------------------------------------------------
+# FIX A — stateful cross-line normalizer for the downward body brace walk
+# ---------------------------------------------------------------------------
+# The per-line `_rust_code_only` regex approach does not thread string state
+# across lines.  A multi-line raw string r#"\n{\n"# has its '{' on a separate
+# line that, processed in isolation, looks like plain code — so the brace
+# inflates depth and causes unit-merge false blocks.
+#
+# The stateful normalizer walks each character of a line and carries four
+# pieces of cross-line state into the next line:
+#
+#   in_block_comment (bool)  — inside a /* ... */ block comment
+#   in_raw_string (int)      — 0 = not in raw string; N>0 = currently inside
+#                              an r#"..."# with N '#' hashes (the closing
+#                              delimiter is '"' followed by exactly N '#' chars)
+#   in_normal_string (bool)  — inside a "..." normal string (spans lines)
+#   in_char_literal (bool)   — inside a '.' char literal (single-line only;
+#                              carried for symmetry but closes within a line)
+#
+# Direction: DOWNWARD (forward).  `r#"` OPENS raw string, `"#` (matching
+# hash count) CLOSES it.  `/*` OPENS block comment, `*/` CLOSES it.
+# `"` OPENS/CLOSES normal string (with backslash-escape handling).
+# `//` OPENS line comment (runs to end of line; always closes within the line).
+#
+# This is the INVERSE of the upward walk's semantics — do NOT reuse
+# _strip_comment_text_for_bracket_count here.
+
+class _RustLineState:
+    """Mutable carrier for cross-line lexer state in the downward body walk."""
+    __slots__ = ("in_block_comment", "in_raw_string", "raw_string_hashes",
+                 "in_normal_string")
+
+    def __init__(self) -> None:
+        self.in_block_comment: bool = False
+        self.in_raw_string: bool = False   # True when inside any raw string
+        self.raw_string_hashes: int = 0    # number of '#' in the delimiter
+        self.in_normal_string: bool = False
+
+    def copy(self) -> "_RustLineState":
+        s = _RustLineState()
+        s.in_block_comment = self.in_block_comment
+        s.in_raw_string = self.in_raw_string
+        s.raw_string_hashes = self.raw_string_hashes
+        s.in_normal_string = self.in_normal_string
+        return s
+
+
+def _rust_code_only_line(line: str, state: "_RustLineState") -> str:
+    """Return the code-only portion of one Rust source line, updating ``state``
+    in place to carry cross-line lexer context to the next line.
+
+    Only characters that are NOT inside a string literal or comment contribute
+    to the returned string.  Newlines are not emitted (the caller works line
+    by line).
+
+    State threading (downward / forward direction):
+    - ``state.in_block_comment``: set when ``/*`` is seen outside a string,
+      cleared when ``*/`` is seen.
+    - ``state.in_raw_string`` + ``state.raw_string_hashes``: ``in_raw_string``
+      is set to True when ``r`` followed by N ``#`` chars followed by ``"`` is
+      seen outside other contexts; ``raw_string_hashes`` is set to N (may be 0
+      for bare ``r"..."``); cleared when ``"`` followed by exactly N ``#`` chars
+      is seen inside the raw string.
+    - ``state.in_normal_string``: set when ``"`` is seen outside other contexts,
+      cleared when an unescaped ``"`` closes it (backslash sequences inside the
+      string are consumed as pairs so they don't accidentally close the string).
+
+    Char literals are handled inline (they open and close within a line) — no
+    cross-line state needed for them; they use the existing per-line char-literal
+    regex on the code-only result, so they are not separately threaded here.
+
+    ``//`` line comments are handled inline: when ``//`` is seen outside string/
+    comment context, we stop processing the rest of the line (the comment runs
+    to end-of-line and never crosses to the next line).
+    """
+    out: list[str] = []
+    i = 0
+    n = len(line)
+    while i < n:
+        ch = line[i]
+
+        # ── inside a block comment ────────────────────────────────────────────
+        if state.in_block_comment:
+            if ch == "*" and i + 1 < n and line[i + 1] == "/":
+                state.in_block_comment = False
+                i += 2
+            else:
+                i += 1
+            continue
+
+        # ── inside a raw string ───────────────────────────────────────────────
+        if state.in_raw_string:
+            hashes = state.raw_string_hashes
+            if ch == '"':
+                # Check for the closing delimiter: '"' followed by exactly
+                # `hashes` '#' chars (0 for r"...", 1 for r#"..."#, etc.).
+                end = i + 1
+                count = 0
+                while end < n and line[end] == "#" and count < hashes:
+                    count += 1
+                    end += 1
+                if count == hashes:
+                    state.in_raw_string = False
+                    state.raw_string_hashes = 0
+                    i = end
+                else:
+                    i += 1
+            else:
+                i += 1
+            continue
+
+        # ── inside a normal string ────────────────────────────────────────────
+        if state.in_normal_string:
+            if ch == "\\":
+                i += 2   # consume escape sequence (backslash + escaped char)
+            elif ch == '"':
+                state.in_normal_string = False
+                i += 1
+            else:
+                i += 1
+            continue
+
+        # ── outside all string/comment contexts ───────────────────────────────
+
+        # Line comment: rest of line is a comment, stop.
+        if ch == "/" and i + 1 < n and line[i + 1] == "/":
+            break
+
+        # Block comment opener.
+        if ch == "/" and i + 1 < n and line[i + 1] == "*":
+            state.in_block_comment = True
+            i += 2
+            continue
+
+        # Raw string opener: r followed by zero-or-more '#' followed by '"'.
+        if ch == "r":
+            j = i + 1
+            hash_count = 0
+            while j < n and line[j] == "#":
+                hash_count += 1
+                j += 1
+            if j < n and line[j] == '"':
+                # Valid raw string opener.  hash_count may be 0 (for r"...").
+                state.in_raw_string = True
+                state.raw_string_hashes = hash_count
+                i = j + 1
+                continue
+            # Not a raw string opener — fall through and emit 'r'.
+
+        # Normal string opener.
+        if ch == '"':
+            state.in_normal_string = True
+            i += 1
+            continue
+
+        # Char literal: consumed in one shot here (single-line; no cross-line
+        # state needed). A char literal is `'` + (escape or single char) + `'`.
+        # We match conservatively: only consume if the pattern closes within
+        # this line (i.e. we see closing `'`).  If not, emit the `'` as code.
+        if ch == "'":
+            # Try to match: '\x' (2-char escape) or '.' (single char) followed
+            # by closing `'`.  This is good-enough for real Rust char literals.
+            if i + 2 < n and line[i + 1] == "\\" and i + 3 < n and line[i + 3] == "'":
+                # Escape sequence: '\x' or '\n' etc.
+                out.append("''")
+                i += 4
+                continue
+            elif i + 2 < n and line[i + 2] == "'":
+                out.append("''")
+                i += 3
+                continue
+            # Not a closed char literal — emit raw.
+
+        # Regular code character — emit it.
+        out.append(ch)
+        i += 1
+
+    return "".join(out)
 
 
 def _detect_rust(text: str) -> "C5Finding | None":
