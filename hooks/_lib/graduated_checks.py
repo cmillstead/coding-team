@@ -134,41 +134,57 @@ _PY_TEST_PATH_RE = re.compile(r"(?:^|/)tests?/|(?:^|/)test_[^/]*\.py$|_test\.py$
 
 _C5_REASON = (
     "C5 (test-hermeticity) ADVISORY — this test appears to open a real external "
-    "resource (persistent DB path, real URL, model download, or fixed host:port) "
-    "without an opt-in gate. Make it opt-in (@pytest.mark.integration / "
-    "pytest.importorskip / env gate) or use a temp/in-memory fixture; otherwise it "
-    "runs the slow/nondeterministic real path in the default pytest suite. Advisory "
-    "only — author-time reminder, not a block. See c05-test-hermeticity.md."
+    "resource (persistent DB path, real URL, model download, on-disk index, or fixed "
+    "host:port) without an opt-in gate. Make it opt-in — Rust: #[ignore] / "
+    "#[cfg(feature=...)] / env gate; Python: @pytest.mark.integration / "
+    "pytest.importorskip / env gate — or use a temp/in-memory fixture; otherwise it "
+    "runs the slow/nondeterministic real path in the default suite. Advisory only — "
+    "an author-time reminder, not a block; it does NOT guarantee hermeticity. "
+    "See c05-test-hermeticity.md."
 )
 
 
-# Responsibility: C5 (Python) — author-time advisory; test-file-path-gated FIRST
+# Responsibility: C5 (Python + Rust) — author-time advisory; extension-gated FIRST
 # (precision-first, unlike C1's broad all-content match).
 def check_c5_test_hermeticity(tool_name: str, tool_input: dict) -> CheckResult | None:
-    """C5 (test-hermeticity) ADVISORY — Python only, knowingly non-blocking.
+    """C5 (test-hermeticity) ADVISORY — Python and Rust, knowingly non-blocking.
 
-    Reminder, not a gate. The Python suite is hermetic-by-mandate (real temp
-    fixtures required), so there is no provable blocking recall — FP=0 is reachable
-    only by firing on nothing, and any recall-bearing variant reintroduces FP on
-    mandated tmp_path/tempfile usage (negative-reasoning-bound, the C17 shape).
-    Surfaces a nudge at author-time; the thesis stays owned by Codex review.
-    C5 remains LIVE (not graduated). See c05-test-hermeticity.md."""
+    Reminder, not a gate. Surfaces a nudge at author-time; the thesis stays owned
+    by Codex review. C5 remains LIVE (not graduated). See c05-test-hermeticity.md.
+
+    Language routing:
+    - .py → test-file-path gate FIRST (GATE 1), then _c5_detect(content, "python")
+    - .rs → extension gate only; _c5_detect(content, "rust") enforces test-unit scope
+              internally (#[test]/#[cfg(test)] required) so a plain .rs extension gate
+              is sufficient — non-test .rs files will not fire the detector.
+    - other → None (no advisory)
+    """
     try:
-        # GATE 1 (Codex F3): test-file path FIRST — never fire on docs/non-test source.
+        if tool_name not in ("Write", "Edit"):
+            return None
+
         file_path = tool_input.get("file_path", "")
-        if not file_path or not _PY_TEST_PATH_RE.search(file_path):
+        if not file_path:
+            return None
+
+        if file_path.endswith(".py"):
+            # GATE 1 (Codex F3): test-file path FIRST — never fire on docs/non-test source.
+            if not _PY_TEST_PATH_RE.search(file_path):
+                return None
+            lang = "python"
+        elif file_path.endswith(".rs"):
+            lang = "rust"
+        else:
             return None
 
         if tool_name == "Write":
             content = tool_input.get("content", "")
-        elif tool_name == "Edit":
+        else:  # Edit
             content = tool_input.get("new_string", "")
-        else:
-            return None
         if not content:
             return None
 
-        if _c5_detect(content, "python") is None:
+        if _c5_detect(content, lang) is None:
             return None
         return CheckResult(reason=_C5_REASON, mode="advisory")
     except Exception:  # noqa: BLE001 — GUARANTEED fail-open (Codex F2): an advisory must NEVER crash the Edit|Write hook. A specific tuple omits ValueError and any unforeseen type; except Exception (named, not bare) ensures a detector/input failure degrades to a silent no-op, never an exception that breaks the author's edit.

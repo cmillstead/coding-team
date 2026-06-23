@@ -541,6 +541,69 @@ class TestC5Advisory:
         )
         assert result is None
 
+    # -- Rust advisory cases ------------------------------------------------
+
+    def test_rust_edit_ungated_real_open_fires_advisory(self):
+        """Edit to src/store.rs with bare #[test] + Database::open(&real_path) -> advisory."""
+        content = (
+            "#[cfg(test)]\nmod tests {\n"
+            "    #[test]\n"
+            "    fn t() {\n"
+            "        let db = Database::open(&real_path);\n"
+            "    }\n"
+            "}\n"
+        )
+        result = check_c5_test_hermeticity(
+            "Edit",
+            {"file_path": "src/store.rs", "new_string": content},
+        )
+        assert result is not None
+        assert result.mode == "advisory"
+
+    def test_rust_ignored_gated_open_does_not_fire(self):
+        """#[ignore]-gated Rust test with Database::open -> None (gated, must not fire)."""
+        content = (
+            "#[cfg(test)]\nmod tests {\n"
+            "    #[ignore = \"requires a real index\"]\n"
+            "    #[test]\n"
+            "    fn t() {\n"
+            "        let db = Database::open(&real_path);\n"
+            "    }\n"
+            "}\n"
+        )
+        result = check_c5_test_hermeticity(
+            "Edit",
+            {"file_path": "src/store.rs", "new_string": content},
+        )
+        assert result is None
+
+    def test_non_rs_non_py_extension_does_not_fire(self):
+        """Write to crate/foo.go with open-looking content -> None (unsupported extension)."""
+        content = (
+            "func TestOpen(t *testing.T) {\n"
+            '    db, _ := sql.Open("sqlite3", "/var/lib/data.db")\n'
+            "    defer db.Close()\n"
+            "}\n"
+        )
+        result = check_c5_test_hermeticity(
+            "Write",
+            {"file_path": "crate/foo.go", "content": content},
+        )
+        assert result is None
+
+    def test_rust_non_test_file_does_not_fire(self):
+        """Non-test .rs file (no #[test]) with Database::open in normal code -> None."""
+        content = (
+            "fn connect(path: &str) -> Database {\n"
+            "    Database::open(path)\n"
+            "}\n"
+        )
+        result = check_c5_test_hermeticity(
+            "Edit",
+            {"file_path": "src/db.rs", "new_string": content},
+        )
+        assert result is None
+
     # -- (Codex F2) forced exception -----------------------------------------
     # Sanctioned pytest-fixture use: forces a crash in _c5_detect that real inputs
     # cannot produce; proves except Exception covers ValueError (Codex F2 gap).
