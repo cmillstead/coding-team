@@ -30,6 +30,7 @@ import time
 from pathlib import Path
 
 from _lib import event, git, state, output
+from _lib import compound_allow
 
 # ---------------------------------------------------------------------------
 # Secret patterns
@@ -686,6 +687,64 @@ def check_codex_digest_sync(command: str, target_root: str) -> str | None:
     return msg
 
 
+
+# ---------------------------------------------------------------------------
+# Compound auto-allow gating
+# ---------------------------------------------------------------------------
+
+# git subcommands this hook gates (secret/branch/verify/format). A command that
+# contains ANY of these must flow through the existing block logic and is NEVER a
+# candidate for the compound auto-allow path — that path only fires for compound
+# commands that this hook would otherwise neither block nor allow (so it cannot
+# override a guard).
+_GATED_GIT_SUBCMD = re.compile(r'\bgit\s+(add|commit|push|merge)\b')
+
+
+def _has_gated_git_op(command: str) -> bool:
+    """Return True iff the command contains a git op this hook gates (fail-safe True on error)."""
+    try:
+        return bool(_GATED_GIT_SUBCMD.search(command))
+    except Exception:
+        return True  # on any error, treat as gated → do NOT auto-allow
+
+
+def _emit_compound_allow_if_safe(command: str) -> bool:
+    """Emit a PreToolUse allow decision iff the compound command is provably allowlisted.
+
+    Returns True iff an allow decision was emitted (caller should stop). Returns
+    False (no output) when the command is not a safe-compound candidate, so the
+    hook's silent fall-through (normal permission prompt) is preserved.
+
+    SAFETY: This is the only place git-safety-guard emits an auto-allow. It runs
+    LAST in main(), after every block check, and only for commands that contain no
+    gated git op — so it can never override or weaken a guard block. It self-guards
+    and never raises (a raise here would hit the block-closed top-level handler).
+    """
+    try:
+        if _has_gated_git_op(command):
+            return False
+        if not compound_allow.should_auto_allow(command):
+            return False
+        # Modern PreToolUse auto-approve shape: hookSpecificOutput.permissionDecision.
+        # This is what actually BYPASSES the permission prompt (the legacy
+        # {"decision":"allow"} shape does not reliably auto-approve a Bash prompt).
+        import json as _json
+        print(_json.dumps({
+            "hookSpecificOutput": {
+                "hookEventName": "PreToolUse",
+                "permissionDecision": "allow",
+                "permissionDecisionReason": (
+                    "Compound command: every constituent is on the Bash allowlist "
+                    "and none is deny-listed (auto-approved by git-safety-guard "
+                    "compound-allow fold)."
+                ),
+            }
+        }))
+        return True
+    except Exception:
+        return False
+
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -948,6 +1007,14 @@ def main():
                     "Circumventing a safety hook is a policy violation."
                 )
                 return
+
+    # --- 4. Compound auto-allow (LAST: after every block check) ---
+    # If we reached here without blocking, this command is not one this hook
+    # gates. If it is a compound whose every atom is allowlisted, auto-approve it
+    # so it does not hit a needless permission prompt. Otherwise emit nothing and
+    # fall through to the normal prompt (all prior behavior preserved).
+    _emit_compound_allow_if_safe(command)
+
 
 
 if __name__ == "__main__":

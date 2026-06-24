@@ -590,9 +590,18 @@ def main():
         return
 
     unhealthy = []
+    # Dispatchers fan out to other hooks (each owns its own subprocess +
+    # timeout), so probing them here either recurses (hook-health-check) or
+    # times out spuriously (session-start-dispatcher spawns all six checks,
+    # blowing the 5s structural-probe budget). Their constituents are probed
+    # individually, so skipping the dispatchers loses no coverage.
+    _SKIP_PROBE = {
+        "hook-health-check.py",
+        "session-start-dispatcher.py",
+        "prompt-dispatcher.py",
+    }
     for hook_path in sorted(HOOKS_DIR.glob("*.py")):
-        # Skip self to avoid recursion
-        if hook_path.name == "hook-health-check.py":
+        if hook_path.name in _SKIP_PROBE:
             continue
         error = check_hook(hook_path)
         if error:
