@@ -3,7 +3,7 @@
 Tiebreakers for ambiguous decisions. Referenced by any AI agent working in this codebase.
 
 ## 1. Real Over Mocks
-Use real implementations in tests. NEVER mock what you can run locally. Real tests catch real bugs. Mocks test your assumptions about the dependency, not the dependency itself.
+Use real implementations in tests — see `rules/test-files.md` for the base rule. Only mock when a dependency is physically impossible to run locally: external paid API with no test mode (e.g. Stripe, Bittensor), hardware not in CI (e.g. GPU), or a local LLM / Ollama model not installed locally.
 - **Enforcement**: write-guard's `check_no_mocks()` blocks mock patterns at Edit/Write time (PreToolUse hook, not a git hook)
 - **Escape hatch**: `# mock-ok: <reason>` on the line
 

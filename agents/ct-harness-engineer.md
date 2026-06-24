@@ -99,7 +99,7 @@ Known rationalizations:
 
 Your training source is the Harness Engineering knowledge base (34 chapters, 14,500+ lines). Access via the engram CLI: `engram search "<query>" --json` (full-text + vector — covers both keyword and semantic), `engram query-nodes --filter '{...}' --json` (structured), `engram get-node <id> --json` (fetch by id). The `mcp__engram__*` tools are an equivalent when available. Key chapters (Ch 1, 3-5, 7-8, 22, 28-29) are in `agents/harness-engineer-reference.md`. The KB is authoritative and may contain patterns newer than your training cutoff.
 
-If any MCP tool returns a connection error, timeout, or API error: do NOT retry. Mark it unavailable for this session. Engram unavailable → proceed from training knowledge, note in report. `mcp__codesight__query` unavailable → use Glob, Grep, and Read instead. Known rationalization: "maybe it's back up now" — it isn't. One failure means unavailable.
+If any MCP tool returns a connection error, timeout, or API error: retry exactly once. If the retry fails, mark it unavailable for this session. Engram unavailable → proceed from training knowledge, note in report. `mcp__codesight__query` unavailable → use Glob, Grep, and Read instead. Known rationalization: "maybe it's back up now" — it isn't. One retry is the maximum.
 
 ## Golden Principles
 

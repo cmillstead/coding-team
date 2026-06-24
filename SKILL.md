@@ -77,7 +77,7 @@ If COORDINATION = no → subagents regardless of AGENT_TEAMS_AVAILABLE
 These apply to every agent in the team:
 
 - **Scrap, don't fix** — if a worker's output is thin, off-scope, or clearly low quality, the Team Leader respawns it rather than patching around it. Bad agent output is an engineering problem, not a starting point.
-- **Never mock what you can use for real** — tests must use real implementations wherever available. Only mock external systems that are genuinely unavailable in the test environment (remote APIs, third-party services). Never mock the thing being tested.
+- **Use real implementations in tests** (see `rules/test-files.md`) — only mock dependencies genuinely impossible to run locally: paid APIs with no test mode, hardware not in CI (e.g. GPU), or local LLM / Ollama not installed. Never mock the thing being tested.
 - **Quality gates before handoff** — no agent passes work to the next stage until tests pass and linting is clean. Build green -> commit -> move on.
 - **Focused agents produce correct agents** — one worker, one lens, one scope. Workers that wander produce slop.
 - **No ambiguity in specs** — the Planning Worker leaves nothing to inference. Exact file paths, exact line ranges, complete code snippets, exact commands with expected output.
