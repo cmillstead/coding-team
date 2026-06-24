@@ -337,6 +337,65 @@ def _atom_head_is_safe(atom: str) -> bool:
     return head not in _UNSAFE_BUILTINS
 
 
+def unknown_atoms(command: str, claude_dir: Path | None = None) -> list[str] | None:
+    """Return the genuinely-unrecognized atoms of a compound command, or None.
+
+    Deny-side complement of should_auto_allow(). See the module docstring for the
+    safety contract. Returns:
+      * non-empty list -> compound, clean decompose, allowlist loaded, every atom
+        head-safe and not deny-listed, and >=1 atom not allow-listed. The ONLY
+        case that warrants a hygiene advisory.
+      * []             -> all atoms known (== should_auto_allow True set; returned
+        ONLY from the collect step). No advisory.
+      * None           -> fail OPEN: not compound, refused construct, EMPTY decompose
+        (separator-only garbage like ";;;"), no allowlist, OR any atom deny-listed /
+        unsafe-builtin head / parse failure. Never advises.
+
+    Never raises.
+
+    NOTE (intentional asymmetry — read before the deny-flip): a command containing a
+    backtick returns None here (early fail-open), even when EVERY atom is allowlisted.
+    should_auto_allow() has NO such early-exit — it lets decompose_atoms() flatten the
+    backtick and may return True for the same input. So the "should_auto_allow True
+    <=> unknown_atoms == []" disjoint invariant is DELIBERATELY relaxed for backtick
+    commands (unknown_atoms returns None, not []). This is operationally safe in the
+    warn-only increment (the auto-allow fold fires first and returns before the advisory
+    path), but a future deny-flip MUST NOT treat "unknown_atoms is None" as "unsafe" for
+    backtick input — None here means "fail open / cannot classify", not "blockable".
+    """
+    try:
+        if not is_compound(command):
+            return None
+        # Backtick substitutions are a refused construct for advisory purposes: we
+        # cannot surface them as "unknown atoms" without potentially misidentifying
+        # the inner command as an atom of the outer command. Fail open.
+        if "`" in command:
+            return None
+        atoms = decompose_atoms(command)
+        # None (refused construct) OR [] (separator-only / nothing executable) both
+        # mean "cannot classify as all-known" -> fail OPEN. Per spec, [] is the
+        # all-known signal and must NEVER be returned for garbage input.
+        if not atoms:
+            return None
+        allow, deny = get_bash_rules(claude_dir)
+        if not allow:
+            return None  # no allowlist to classify against -> fall through
+        # First pass: if ANY atom is unsafe-headed or deny-listed we cannot cleanly
+        # call this "known-safe-except-unrecognized" -> fail open (let the existing
+        # deny/prompt path handle it; never mislabel a forbidden atom as "isolate me").
+        for atom in atoms:
+            if not _atom_head_is_safe(atom):
+                return None
+            for pattern in deny:
+                if _matches_glob(atom, pattern):
+                    return None
+        # Second pass: every atom is head-safe and not denied. The genuinely
+        # unrecognized atoms are exactly those not matching an allow glob.
+        return [atom for atom in atoms if not atom_is_allowed(atom, allow, deny)]
+    except Exception:
+        return None
+
+
 def should_auto_allow(command: str, claude_dir: Path | None = None) -> bool:
     """Return True iff this compound command's every atom is provably allowlisted.
 

@@ -745,6 +745,43 @@ def _emit_compound_allow_if_safe(command: str) -> bool:
         return False
 
 
+def _emit_compound_hygiene_advisory_if_unknown(command: str) -> bool:
+    """Emit a keep-prompting + remind advisory iff a compound hides an unrecognized atom.
+
+    Increment 1 (WARN ONLY). Returns True iff an advisory was emitted (caller should
+    stop). Returns False (no output) otherwise, preserving the silent fall-through.
+
+    SAFETY: runs LAST in main(), AFTER every block check and AFTER the all-known
+    auto-allow fold. It skips any command containing a gated git op (mirrors the
+    auto-allow guard) so it can never weaken a guard. It emits the MODERN
+    permissionDecision:"ask" shape (output.ask), which FORCES the normal permission
+    prompt and attaches the hygiene reminder. Per the corrected-spec baseline-safety
+    floor, this can NEVER drop below baseline: an unknown-atom compound already
+    prompts (the fold only auto-approves all-known compounds), and "ask" is the
+    structural inverse of the fold's "allow" -- it never auto-approves and never
+    blocks. It deliberately does NOT use the legacy {"decision":"allow"} shape (whose
+    contract is only "doesn't reliably approve", not a safety proof). Self-guards;
+    never raises (a raise here would hit the block-closed top-level handler).
+    """
+    try:
+        if _has_gated_git_op(command):
+            return False
+        atoms = compound_allow.unknown_atoms(command)
+        if not atoms:
+            return False  # None (fail open) or [] (all known) -> no advisory
+        listed = ", ".join(f"`{a}`" for a in atoms)
+        output.ask(
+            "Command-hygiene: this compound chains an unrecognized command into "
+            f"allowlisted ones: {listed}. Per the reconciled rule, isolate the "
+            "unrecognized command(s) into their own single Bash call so each is "
+            "reviewed individually. (You are being prompted -- not blocked. "
+            "All-allowlisted compounds auto-approve unchanged.)"
+        )
+        return True
+    except Exception:
+        return False
+
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -1008,12 +1045,14 @@ def main():
                 )
                 return
 
-    # --- 4. Compound auto-allow (LAST: after every block check) ---
-    # If we reached here without blocking, this command is not one this hook
-    # gates. If it is a compound whose every atom is allowlisted, auto-approve it
-    # so it does not hit a needless permission prompt. Otherwise emit nothing and
-    # fall through to the normal prompt (all prior behavior preserved).
-    _emit_compound_allow_if_safe(command)
+    # --- 4. Compound auto-allow + hygiene advisory (LAST: after every block check) ---
+    # All-known compound -> MODERN auto-approve (bypass the prompt), and stop.
+    if _emit_compound_allow_if_safe(command):
+        return
+    # Otherwise, if the compound hides an unrecognized atom, emit a NON-BLOCKING
+    # hygiene advisory (Increment 1, warn-only). Disjoint from the auto-allow set,
+    # so the two never both emit. Fail-open / not-compound -> nothing emitted.
+    _emit_compound_hygiene_advisory_if_unknown(command)
 
 
 
