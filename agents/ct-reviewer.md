@@ -150,7 +150,7 @@ Use `mcp__codesight__query` with the appropriate operation:
 | `get-dependencies` | Circular imports |
 | LSP | Type errors in modified files |
 
-If `mcp__codesight__query` errors, do NOT retry — fall back to Grep/Read. Known rationalization: "maybe it's back up now" — it isn't.
+If `mcp__codesight__query` errors, retry exactly once; if it still fails, fall back to Grep/Read. Known rationalization: "maybe it's back up now" — it isn't. One retry is the maximum.
 
 ## When You Cannot Complete the Review
 

@@ -102,7 +102,7 @@ Follow these when issuing shell commands: one command per Bash call; read exit c
 
 ## Code Exploration
 
-Read `cookbook/references/builder-reference.md` for codesight (`mcp__codesight__query`) usage. If `mcp__codesight__query` fails: do NOT retry. Mark unavailable, fall back to Grep/Read.
+Read `cookbook/references/builder-reference.md` for codesight (`mcp__codesight__query`) usage. If `mcp__codesight__query` fails: retry exactly once. If the retry fails, mark unavailable, fall back to Grep/Read. One retry is the maximum.
 
 ## Before You Begin
 

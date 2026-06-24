@@ -108,7 +108,7 @@ When dispatching agents through `/coding-team`, use the least powerful model tha
 
 ## Testing: Real Over Mocks (MANDATORY)
 
-Use real implementations in tests. Do NOT use mocks, patches, fakes, or stubs unless the dependency is **physically impossible** to run locally (e.g., a third-party paid API with no sandbox).
+Use real implementations in tests — see `rules/test-files.md` for the base rule. Do NOT use mocks, patches, fakes, or stubs.
 
 **Allowed real dependencies** (set these up instead of mocking):
 - SQLite: use temp databases
@@ -120,6 +120,8 @@ Use real implementations in tests. Do NOT use mocks, patches, fakes, or stubs un
 **The ONLY acceptable reasons to mock:**
 - External paid API with no test mode (e.g., Stripe production, Bittensor mainnet)
 - Hardware not available in CI (e.g., GPU)
+- Local LLM / Ollama when the model isn't installed locally
+- Any dependency physically impossible to run locally
 
 If you find yourself reaching for `mock`, `patch`, `MagicMock`, `monkeypatch`, `@mock.patch`, or `unittest.mock` — STOP and find the real implementation instead. When in doubt, ask.
 
@@ -188,7 +190,7 @@ coding-team reads `~/.claude/golden-principles.md` during design and planning ph
 ## UI/UX Standards (for coding-team agents)
 
 - **Immediate feedback**: If an action has a delay, always show a loading/progress indicator — never leave the user with no feedback
-- **WCAG 2.1 AA compliance**: Keyboard accessible, color contrast, ARIA labels, focus indicators, semantic HTML, `prefers-reduced-motion` respect
+- **WCAG 2.2 AA compliance**: Keyboard accessible, color contrast, ARIA labels, focus indicators, semantic HTML, `prefers-reduced-motion` respect
 
 ## Hook Deployment
 

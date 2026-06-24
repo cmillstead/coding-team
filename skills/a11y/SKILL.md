@@ -1,6 +1,6 @@
 ---
 name: a11y
-description: "WCAG 2.1 AA source code audit — reviews HTML/templates for semantic markup, ARIA usage, keyboard navigation, contrast, and focus management. For assistive technology testing of a running app, use /agency-testing-accessibility-auditor. For visual design QA, use /design-review. For general UX review, use /scan-product."
+description: "WCAG 2.2 AA source code audit — reviews HTML/templates for semantic markup, ARIA usage, keyboard navigation, contrast, and focus management. For assistive technology testing of a running app, use /agency-testing-accessibility-auditor. For visual design QA, use /design-review. For general UX review, use /scan-product."
 ---
 
 # /a11y — Accessibility Audit
