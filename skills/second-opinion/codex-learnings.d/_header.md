@@ -81,7 +81,7 @@ existing "Check before dispatch" prose — do NOT invent new criteria.
 | `sentinel-semantics` | C2 | a new `validate`/guard rejecting `0`/`empty`/`-1`/`< 1`, OR `is_empty()\|== 0\|reject\|return Err` near a config/interval/threshold field |
 | `ci-config` | C3 | touched `.github/workflows/*.yml\|Makefile\|noxfile\|tox.ini` OR `maturin\|pip install -e\|setup-python\|venv\|activate` |
 | `test-hermeticity` | C5 | a test (`#[test]\|def test_\|it(\|fn test`) that opens a real DB/index/socket/daemon (`open(\|connect\|::open\|RocksDB\|sqlite\|TcpStream\|reqwest\|index`) without a temp/in-memory fixture |
-| `command-grammar` | C10, C14 | a guard/classifier that models CLI flags (`has_flag\|starts_with("-")\|--\|arg ==\|match flag\|allowlist\|deny`) OR an exec-wrapper/interpreter unwrap (`exec\|sudo\|env \|node -e\|sh -c\|-c \|--eval`) |
+| `command-grammar` | C10, C14 | a guard/classifier that models CLI flags (`has_flag\|starts_with\|--\|arg ==\|match flag\|allowlist\|deny`) OR an exec-wrapper/interpreter unwrap (`exec\|sudo\|env \|node -e\|sh -c\|-c \|--eval`) |
 | `select-threading` | C11 | a new alternative score/weight/override threaded via `unwrap_or\|max_by\|sort_by\|partial_cmp\|rerank\|boost` into existing selection |
 | `metric-aggregate` | P31, C11 | an `Option`-returning per-unit metric whose aggregate skips `None` (`filter_map\|flatten\|\.iter().filter(.*is_some\|skip None\|average\|mean`) |
 | `concurrency-lock` | C12 | `lock\|mutex\|acquire\|release\|TTL\|setInterval\|lease\|owner_pid\|kill\(pid\|INSERT OR IGNORE\|DELETE WHERE id` OR a `CREATE TABLE` whose name matches `(lock\|lease\|sync\|consolidation)` |
