@@ -153,3 +153,68 @@ def test_atom_is_allowed_deny_precedence():
 def test_never_raises_on_garbage():
     for cmd in ["", "$(", "`", ";;;", "&& ||", "$()$()", "\\", "{}", "()", "><"]:
         assert compound_allow.should_auto_allow(cmd) is False
+
+
+def test_unknown_atoms_returns_unknown_atom_in_chain(settings_dir):
+    cmd = "echo checking && ~/.opencode/bin/opencode --version"
+    result = compound_allow.unknown_atoms(cmd, claude_dir=settings_dir)
+    assert result is not None
+    assert len(result) == 1
+    assert "opencode --version" in result[0]
+
+def test_unknown_atoms_empty_when_all_known(settings_dir):
+    cmd = "cat file.txt | grep needle"
+    assert compound_allow.unknown_atoms(cmd, claude_dir=settings_dir) == []
+
+def test_unknown_atoms_none_for_single_command(settings_dir):
+    assert compound_allow.unknown_atoms("git status", claude_dir=settings_dir) is None
+
+def test_unknown_atoms_none_on_redirect(settings_dir):
+    assert compound_allow.unknown_atoms("echo x > y.txt", claude_dir=settings_dir) is None
+
+def test_unknown_atoms_none_on_subshell(settings_dir):
+    assert compound_allow.unknown_atoms("(git status && echo done)", claude_dir=settings_dir) is None
+
+def test_unknown_atoms_none_on_brace_group(settings_dir):
+    assert compound_allow.unknown_atoms("{ echo a; echo b; }", claude_dir=settings_dir) is None
+
+def test_unknown_atoms_none_on_nested_substitution(settings_dir):
+    assert compound_allow.unknown_atoms("echo $(echo $(git rev-parse HEAD))", claude_dir=settings_dir) is None
+
+def test_unknown_atoms_none_on_backtick(settings_dir):
+    assert compound_allow.unknown_atoms("echo `git rev-parse HEAD` && echo ok", claude_dir=settings_dir) is None
+
+def test_unknown_atoms_none_on_unbalanced_quotes(settings_dir):
+    assert compound_allow.unknown_atoms('echo "open && git status', claude_dir=settings_dir) is None
+
+def test_unknown_atoms_none_on_find_exec(settings_dir):
+    assert compound_allow.unknown_atoms("find . -name x -exec rm {} ; && echo done", claude_dir=settings_dir) is None
+
+def test_unknown_atoms_none_on_sudo(settings_dir):
+    assert compound_allow.unknown_atoms("sudo apt update && echo done", claude_dir=settings_dir) is None
+
+def test_unknown_atoms_none_when_no_allowlist(tmp_path):
+    (tmp_path / "settings.json").write_text(json.dumps({"permissions": {"allow": []}}))
+    compound_allow._cache.clear()
+    assert compound_allow.unknown_atoms("git status && curl http://x", claude_dir=tmp_path) is None
+
+def test_unknown_atoms_none_when_deny_mixed_with_unknown(settings_dir):
+    cmd = "rm -rf /tmp/x && curl http://example"
+    assert compound_allow.unknown_atoms(cmd, claude_dir=settings_dir) is None
+
+def test_unknown_atoms_separator_only_is_none_not_empty(settings_dir):
+    for cmd in [";;;", "&& ||", "|", ";", "&&"]:
+        result = compound_allow.unknown_atoms(cmd, claude_dir=settings_dir)
+        assert result is None, f"{cmd!r} -> {result!r}, expected None (must not be [])"
+
+def test_unknown_atoms_never_raises_on_garbage():
+    for cmd in ["", "$(", "`", ";;;", "&& ||", "$()$()", "\\", "{}", "()", "><"]:
+        assert compound_allow.unknown_atoms(cmd) is None
+
+def test_unknown_atoms_disjoint_from_auto_allow(settings_dir):
+    known = "git status && echo done"
+    assert compound_allow.should_auto_allow(known, claude_dir=settings_dir) is True
+    assert compound_allow.unknown_atoms(known, claude_dir=settings_dir) == []
+    unk = "echo hi && curl http://example"
+    assert compound_allow.should_auto_allow(unk, claude_dir=settings_dir) is False
+    assert compound_allow.unknown_atoms(unk, claude_dir=settings_dir)
