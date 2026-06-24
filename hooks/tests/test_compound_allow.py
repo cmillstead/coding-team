@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-_LIB = Path("/Users/cevin/.claude/skills/coding-team/hooks")
+_LIB = Path(__file__).resolve().parent.parent
 if str(_LIB) not in sys.path:
     sys.path.insert(0, str(_LIB))
 
@@ -218,3 +218,12 @@ def test_unknown_atoms_disjoint_from_auto_allow(settings_dir):
     unk = "echo hi && curl http://example"
     assert compound_allow.should_auto_allow(unk, claude_dir=settings_dir) is False
     assert compound_allow.unknown_atoms(unk, claude_dir=settings_dir)
+
+
+def test_unknown_atoms_backtick_asymmetry_is_documented(settings_dir):
+    # Intentional deviation (QA Finding 2): a backtick compound whose every atom is
+    # allowlisted yields should_auto_allow True but unknown_atoms None (NOT []). Pin it
+    # so the deny-flip increment cannot silently rely on the [] == all-known equivalence.
+    cmd = "echo `git status` && echo done"
+    assert compound_allow.should_auto_allow(cmd, claude_dir=settings_dir) is True
+    assert compound_allow.unknown_atoms(cmd, claude_dir=settings_dir) is None

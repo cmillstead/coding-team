@@ -352,6 +352,16 @@ def unknown_atoms(command: str, claude_dir: Path | None = None) -> list[str] | N
         unsafe-builtin head / parse failure. Never advises.
 
     Never raises.
+
+    NOTE (intentional asymmetry — read before the deny-flip): a command containing a
+    backtick returns None here (early fail-open), even when EVERY atom is allowlisted.
+    should_auto_allow() has NO such early-exit — it lets decompose_atoms() flatten the
+    backtick and may return True for the same input. So the "should_auto_allow True
+    <=> unknown_atoms == []" disjoint invariant is DELIBERATELY relaxed for backtick
+    commands (unknown_atoms returns None, not []). This is operationally safe in the
+    warn-only increment (the auto-allow fold fires first and returns before the advisory
+    path), but a future deny-flip MUST NOT treat "unknown_atoms is None" as "unsafe" for
+    backtick input — None here means "fail open / cannot classify", not "blockable".
     """
     try:
         if not is_compound(command):
