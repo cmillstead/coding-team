@@ -80,12 +80,14 @@ if [[ -f "$REPO_ROOT/scripts/statusline-command.sh" ]]; then
     deploy "$REPO_ROOT/scripts/statusline-command.sh" "$CLAUDE_DIR/statusline-command.sh"
 fi
 
-# Verify all deployed hooks are registered in settings.json or prompt-dispatcher.py.
-# Since D195, UserPromptSubmit hooks may be invoked via the dispatcher rather than
-# registered directly in settings.json — both registration sites count.
+# Verify all deployed hooks are registered in settings.json or a dispatcher.
+# Since D195, UserPromptSubmit hooks may be invoked via prompt-dispatcher.py and
+# SessionStart hooks via session-start-dispatcher.py rather than registered
+# directly in settings.json — all three registration sites count.
 echo "Verifying hook registration..."
 SETTINGS="$HOME/.claude/settings.json"
 DISPATCHER="$CLAUDE_DIR/hooks/prompt-dispatcher.py"
+SESSION_DISPATCHER="$CLAUDE_DIR/hooks/session-start-dispatcher.py"
 if [ -f "$SETTINGS" ]; then
     UNREGISTERED=0
     for hook in "$CLAUDE_DIR"/hooks/*.py "$CLAUDE_DIR"/hooks/*.sh; do
@@ -99,7 +101,10 @@ if [ -f "$SETTINGS" ]; then
         if [ -f "$DISPATCHER" ] && grep -q "$hookname" "$DISPATCHER"; then
             continue
         fi
-        echo "  WARNING: $hookname deployed but not registered in settings.json or prompt-dispatcher.py"
+        if [ -f "$SESSION_DISPATCHER" ] && grep -q "$hookname" "$SESSION_DISPATCHER"; then
+            continue
+        fi
+        echo "  WARNING: $hookname deployed but not registered in settings.json or a dispatcher"
         UNREGISTERED=$((UNREGISTERED + 1))
     done
     if [ "$UNREGISTERED" -eq 0 ]; then
