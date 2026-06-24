@@ -783,6 +783,31 @@ def _emit_compound_hygiene_advisory_if_unknown(command: str) -> bool:
 
 
 # ---------------------------------------------------------------------------
+# Node / nvm hygiene
+# ---------------------------------------------------------------------------
+
+_NVM_SOURCE_RE = re.compile(
+    r'(?:^|[;&|])\s*(?:source|\.)\s+[^\s;&|]*nvm\.sh', re.IGNORECASE)
+_NVM_CMD_RE = re.compile(r'(?:^|[;&|])\s*nvm(?:\s|$)', re.IGNORECASE)
+
+
+def _is_nvm_bootstrap(command: str) -> bool:
+    """True iff the command sources nvm or invokes `nvm` (e.g. `nvm use`).
+
+    Agents do this reflexively to "set up node", but node (v20.19.6) is already on
+    PATH in every session, and `source` evaluates arbitrary shell code so it can
+    never be auto-approved -- it dead-ends / prompts the user every time. Blocking it
+    (with a redirect to run node directly) is the structural fix for that recurring
+    prompt. Self-guards; never raises (a raise here would hit the block-closed
+    top-level handler).
+    """
+    try:
+        return bool(_NVM_SOURCE_RE.search(command) or _NVM_CMD_RE.search(command))
+    except Exception:
+        return False
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -852,6 +877,19 @@ def main():
 
     command = event.get_command(ev)
     if not command:
+        return
+
+    # --- 0. Node/nvm hygiene: node is already on PATH; block nvm bootstrap (no prompt) ---
+    # Agents reflexively run `source ~/.nvm/nvm.sh && nvm use` to "set up node"; node is
+    # already on PATH and `source` can't be auto-approved, so this would dead-end/prompt.
+    # block() denies WITHOUT prompting and hands the agent the reason -> it runs node directly.
+    if _is_nvm_bootstrap(command):
+        output.block(
+            "Node (v20.19.6) is already on PATH -- run `node`/`npm`/`npx`/`codex` directly.\n"
+            "Do NOT source nvm or run `nvm use`: `source` evaluates arbitrary shell code so it "
+            "cannot be auto-approved (it dead-ends/prompts every time), and no nvm setup is needed.\n"
+            "If `node --version` genuinely fails, report it as BLOCKED instead of sourcing nvm."
+        )
         return
 
     git_subcmd = git.extract_git_command(command)

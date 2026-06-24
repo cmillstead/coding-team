@@ -1622,3 +1622,42 @@ class TestCompoundHygieneAdvisory:
                 assert result.parsed.get("decision") != "block"
                 assert result.parsed.get("hookSpecificOutput", {}).get("permissionDecision") != "ask"
 
+
+class TestNvmBootstrapGuard:
+    """nvm bootstrap is blocked (node is already on PATH); node/npm/npx pass."""
+
+    @pytest.mark.parametrize("command", [
+        "source ~/.nvm/nvm.sh && nvm use 20",
+        ". ~/.nvm/nvm.sh",
+        "nvm use 20.19.6",
+        "nvm install 20 && node -v",
+        "export FOO=1; nvm use",
+        "nvm",
+    ])
+    def test_blocks_nvm_bootstrap(self, command, run_hook, make_event):
+        # Arrange
+        event = make_event("Bash", command=command)
+        # Act
+        result = run_hook("git-safety-guard.py", event)
+        # Assert
+        assert result.parsed is not None
+        assert result.parsed["decision"] == "block"
+        assert "nvm" in result.parsed["reason"].lower()
+
+    @pytest.mark.parametrize("command", [
+        "node --version",
+        "npm install",
+        "npx tsc",
+        "ls ~/.nvm",
+        "cat ~/.nvm/nvm.sh",
+        "which nvm",
+        "echo nvm is great",
+    ])
+    def test_allows_non_bootstrap_node_commands(self, command, run_hook, make_event):
+        # Arrange
+        event = make_event("Bash", command=command)
+        # Act
+        result = run_hook("git-safety-guard.py", event)
+        # Assert: silent allow — no block decision emitted
+        assert result.stdout.strip() == ""
+
