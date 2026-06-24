@@ -177,6 +177,10 @@ Suggest the right skill at natural transition points — don't wait to be asked:
 
 coding-team agents receive `~/.claude/code-style.md` when working on Python, TypeScript, Angular, JavaScript, HTML, or SCSS. Language-specific rules that apply across all projects.
 
+## Command Hygiene
+
+Applies to you AND coding-team agents. Issue shell commands as **one command per Bash call** — the Bash tool already returns exit code and output, so never wrap verification in `set +e` / `$?` / `${PIPESTATUS}` / `| tail` / `/tmp` capture redirects. Compound commands (chaining, redirects, brace/`$?` expansions) defeat the per-command permission allowlist and prompt on every run. Full rule: `~/.claude/command-hygiene.md`.
+
 ## Golden Principles
 
 coding-team reads `~/.claude/golden-principles.md` during design and planning phases for architectural decisions and ambiguity resolution.

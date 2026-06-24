@@ -94,6 +94,12 @@ If code-style rules are included above, follow them for all code you write.
 
 If design defaults are included above, follow them while authoring code — they are the generative twin of the codex pre-flight checklist; authoring to them means the recurring mistake is never made.
 
+## Command Hygiene
+
+[INSERT contents of ~/.claude/command-hygiene.md here — the orchestrator reads this file and pastes it into the builder prompt for every task.]
+
+Follow these when issuing shell commands: one command per Bash call; read exit codes from the result; no `set +e` / `${PIPESTATUS}` / `| tail` / `/tmp` capture wrappers.
+
 ## Code Exploration
 
 Read `cookbook/references/builder-reference.md` for codesight (`mcp__codesight__query`) usage. If `mcp__codesight__query` fails: do NOT retry. Mark unavailable, fall back to Grep/Read.

@@ -81,6 +81,7 @@ For each task in plan:
      - If the task has advisory skills: include the advisory block in the implementer prompt's Advisory Skills section. The implementer applies these rules throughout implementation.
      - If the task involves Python, TypeScript, Angular, JavaScript, HTML, or SCSS files, read `~/.claude/code-style.md` using the Read tool and include its contents in the implementer prompt's Code Style section.
      - Read `~/.claude/skills/coding-team/skills/second-opinion/codex-learnings-digest.md` using the Read tool and include its contents in the Codex Design Defaults section of both the implementer (ct-implementer) AND the builder (ct-builder) dispatch prompt — the builder is the sole agent on MICRO tasks, so both dispatch paths must receive the digest.
+     - Read `~/.claude/command-hygiene.md` using the Read tool and include its contents in the Command Hygiene section of both the implementer (ct-implementer) AND builder (ct-builder) dispatch prompt — every implementer/builder runs shell commands, so this is unconditional (not file-type gated).
      - Read `~/.claude/golden-principles.md` and include in the implementer prompt's Context section when the task involves architectural decisions or new patterns.
      - If `$REPO_ROOT/docs/team-memory.md` exists, read it and include relevant entries in the implementer prompt's Context section — especially known landmines and past decisions.
      - Do NOT make implementer read plan file — provide full text
