@@ -25,6 +25,25 @@ def advisory(reason: str) -> None:
     allow_with_reason(reason)
 
 
+def ask(reason: str) -> None:
+    """Force the normal permission prompt and attach a reason.
+
+    Emits the MODERN PreToolUse `permissionDecision:"ask"` shape. Contract
+    (claude-code-guide, verified): "ask" FORCES the permission prompt — it never
+    auto-approves and never blocks; the reason is shown to the user and surfaced to
+    the model. This is the structural inverse of the fold's "allow": it can never
+    drop below the baseline (an unknown-atom compound already prompts), so it is the
+    correct shape for a keep-prompting + remind advisory.
+    """
+    print(json.dumps({
+        "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "permissionDecision": "ask",
+            "permissionDecisionReason": reason,
+        }
+    }))
+
+
 def update_input(event: dict, partial: dict) -> None:
     """Print an allow decision with merged tool input.
 

@@ -4,8 +4,17 @@ import hashlib
 import json
 import os
 import subprocess
+import sys
 import time
 from pathlib import Path
+
+import pytest
+
+_HOOKS_DIR = Path(__file__).resolve().parent.parent  # tests/ -> hooks/
+if str(_HOOKS_DIR) not in sys.path:
+    sys.path.insert(0, str(_HOOKS_DIR))
+
+from _lib import compound_allow  # noqa: E402
 
 
 def _seed_verification_state(session_id: str, *, test_exit_code=None, lint_exit_code=None):
@@ -1474,4 +1483,142 @@ class TestCodexDigestSyncGate:
             assert result.stdout.strip() == "", f"gate false-failed: {result.stdout!r}"
         finally:
             os.chdir(old)
+
+
+# ---------------------------------------------------------------------------
+# Tests for compound-hygiene warn-mode advisory (Increment 1)
+# ---------------------------------------------------------------------------
+
+class TestCompoundHygieneAdvisory:
+    """Increment 1: keep-prompting + remind advisory for compounds with an unknown atom.
+
+    The hook reads the LIVE ~/.claude allow/deny list (these tests do not control it).
+    To make the positive-fire test DETERMINISTIC regardless of the ambient allowlist,
+    pick a known-allowlisted simple atom from the live settings (fall back to `echo`,
+    near-universally allowlisted) and chain it with a clearly-unrecognized binary.
+    """
+
+    @staticmethod
+    def _known_atom():
+        """Return a simple atom guaranteed to be on the LIVE Bash allowlist, or skip.
+
+        Uses the module-level `compound_allow` (imported portably at the top of this
+        file — NO absolute path). Reads the live rules via get_bash_rules() (same source
+        the hook uses). Prefers `echo checking` if `echo` is allowlisted; else derives a
+        bare command from the first `X *`-style allow glob. Skips (visibly) if nothing
+        usable is found, rather than asserting vacuously."""
+        compound_allow._cache.clear()
+        allow, deny = compound_allow.get_bash_rules()
+        if compound_allow.atom_is_allowed("echo checking", allow, deny):
+            return "echo checking"
+        for glob in sorted(allow):
+            head = glob.split()[0].rstrip("*").strip()
+            if head and "/" not in head and compound_allow.atom_is_allowed(head, allow, deny):
+                return head
+        pytest.skip("no simple known-allowlisted atom found in live settings")
+
+    def test_unknown_atom_compound_emits_ask_naming_atom(self, run_hook, make_event):
+        # POSITIVE, NON-VACUOUS (corrected-spec AC5): the advisory MUST fire. A known
+        # atom chained with a clearly-unrecognized binary -> the hook emits the MODERN
+        # ask shape whose reason names the unknown atom. NOT gated behind parsed-is-not-None.
+        known = self._known_atom()
+        cmd = f"{known} && zzznotarealbinary --version"
+        result = run_hook("git-safety-guard.py", make_event("Bash", command=cmd))
+        assert result.returncode == 0, f"hook crashed: {result.stderr!r}"
+        assert result.parsed is not None, (
+            f"advisory did NOT fire (no JSON emitted) — vacuous-pass guard. stdout={result.stdout!r}"
+        )
+        hso = result.parsed.get("hookSpecificOutput", {})
+        assert hso.get("permissionDecision") == "ask", (
+            f"expected permissionDecision 'ask', got {result.parsed!r}"
+        )
+        assert "zzznotarealbinary" in hso.get("permissionDecisionReason", ""), (
+            f"reason must name the unknown atom: {hso!r}"
+        )
+
+    def test_unknown_atom_compound_not_block_not_legacy_allow(self, run_hook, make_event):
+        # Corrected-spec AC1 + AC2: the unknown-atom case must NOT block and must NOT use
+        # the legacy {"decision":"allow"} shape (which could auto-approve and drop baseline).
+        known = self._known_atom()
+        cmd = f"{known} && zzznotarealbinary --version"
+        result = run_hook("git-safety-guard.py", make_event("Bash", command=cmd))
+        assert result.returncode == 0
+        assert result.parsed is not None
+        # Must NOT block.
+        assert result.parsed.get("decision") != "block"
+        # Must NOT be the legacy allow shape anywhere in stdout.
+        assert '"decision": "allow"' not in result.stdout
+        assert '"decision":"allow"' not in result.stdout
+        assert result.parsed.get("decision") != "allow"
+
+    def test_all_known_compound_still_auto_allows_unchanged(self, run_hook, make_event):
+        # POSITIVE, NON-VACUOUS (Finding B): an all-known compound must still POSITIVELY
+        # hit the MODERN auto-allow fold (permissionDecision:"allow"), NOT the hygiene
+        # "ask". Build the compound from a derived known atom chained with ITSELF, so
+        # every atom is allowlisted regardless of the ambient settings. `_known_atom()`
+        # prefers `echo checking` / a non-git-gated head, so the compound carries no
+        # gated-git op and the fold is not skipped by `_has_gated_git_op`.
+        known = self._known_atom()
+        cmd = f"{known} && {known}"
+        result = run_hook("git-safety-guard.py", make_event("Bash", command=cmd))
+        assert result.returncode == 0, f"hook crashed: {result.stderr!r}"
+        assert result.parsed is not None, (
+            f"auto-allow fold did NOT fire (no JSON emitted) — vacuous-pass guard. "
+            f"stdout={result.stdout!r}"
+        )
+        hso = result.parsed.get("hookSpecificOutput", {})
+        # The fold POSITIVELY fired: auto-approve, NEVER the hygiene "ask".
+        assert hso.get("permissionDecision") == "allow", (
+            f"expected auto-allow 'allow' for an all-known compound, got {result.parsed!r}"
+        )
+        assert hso.get("permissionDecision") != "ask"
+        assert "isolate" not in result.stdout.lower()
+
+    def test_single_command_unaffected(self, run_hook, make_event):
+        result = run_hook("git-safety-guard.py", make_event("Bash", command="git status"))
+        assert result.returncode == 0
+        assert result.stdout.strip() == ""
+
+    def test_gated_git_compound_gets_no_advisory(self, run_hook, make_event, tmp_path):
+        # A compound containing a gated git op (commit) must NEVER receive a hygiene
+        # advisory — it flows through the existing block/branch path. On a feature
+        # branch with a brand-new unknown atom chained in, the ask advisory must NOT fire.
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        _make_repo_on_branch(repo, branch="feature/x")
+        old_cwd = os.getcwd()
+        os.chdir(str(repo))
+        try:
+            cmd = f"cd {repo} && git commit -m 'feat: x' && zzznotarealbinary run"
+            result = run_hook("git-safety-guard.py", make_event("Bash", command=cmd))
+            assert result.returncode == 0
+            # Whatever happens (block via verification path, or silent), it must NOT be
+            # the hygiene ask advisory naming the unknown atom.
+            if result.parsed is not None:
+                hso = result.parsed.get("hookSpecificOutput", {})
+                if hso.get("permissionDecision") == "ask":
+                    assert "zzznotarealbinary" not in hso.get("permissionDecisionReason", ""), (
+                        "gated-git compound must not get a hygiene ask advisory"
+                    )
+        finally:
+            os.chdir(old_cwd)
+
+    def test_redirect_compound_no_advisory_fail_open(self, run_hook, make_event):
+        # A refused construct (redirect) -> unknown_atoms None -> no advisory, no block.
+        cmd = "echo hi > /tmp/zzz_test_out.txt"
+        result = run_hook("git-safety-guard.py", make_event("Bash", command=cmd))
+        assert result.returncode == 0
+        if result.parsed is not None:
+            hso = result.parsed.get("hookSpecificOutput", {})
+            assert result.parsed.get("decision") != "block"
+            assert hso.get("permissionDecision") != "ask"
+            assert "isolate" not in result.stdout.lower()
+
+    def test_advisory_path_never_crashes_on_garbage(self, run_hook, make_event):
+        for cmd in ["$(", "`", ";;;", "&& ||", "echo a && ", "()", "><"]:
+            result = run_hook("git-safety-guard.py", make_event("Bash", command=cmd))
+            assert result.returncode == 0, f"crashed on {cmd!r}: {result.stderr!r}"
+            if result.parsed is not None:
+                assert result.parsed.get("decision") != "block"
+                assert result.parsed.get("hookSpecificOutput", {}).get("permissionDecision") != "ask"
 
