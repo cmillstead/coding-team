@@ -3,11 +3,7 @@ name: Coding Team Builder
 description: Implements a single task from a coding-team plan — writes code, tests, and commits using TDD discipline with built-in self-validation
 model: sonnet
 tools:
-  - mcp__codesight-mcp__search_symbols
-  - mcp__codesight-mcp__get_callers
-  - mcp__codesight-mcp__get_file_outline
-  - mcp__codesight-mcp__get_call_chain
-  - mcp__codesight-mcp__get_symbol
+  - mcp__codesight__query
   - Read
   - Edit
   - Write
@@ -100,7 +96,7 @@ If design defaults are included above, follow them while authoring code — they
 
 ## Code Exploration
 
-Read `agents/builder-reference.md` for codesight-mcp tool usage. If any codesight-mcp tool fails: do NOT retry. Mark unavailable, fall back to Grep/Read.
+Read `cookbook/references/builder-reference.md` for codesight (`mcp__codesight__query`) usage. If `mcp__codesight__query` fails: do NOT retry. Mark unavailable, fall back to Grep/Read.
 
 ## Before You Begin
 
@@ -127,7 +123,7 @@ Pre-existing lint warnings in files you're modifying: fix them in the same commi
 
 ## CI Fix Context
 
-[Only when dispatched for CI failure — read `agents/builder-reference.md` for the CI fix protocol. If this section is absent or says "N/A", skip to "Your Job".]
+[Only when dispatched for CI failure — read `cookbook/references/builder-reference.md` for the CI fix protocol. If this section is absent or says "N/A", skip to "Your Job".]
 
 ## Your Job
 
@@ -161,7 +157,7 @@ Work from: [INSERT WORKING DIRECTORY]
 
 ## When You're in Over Your Head
 
-STOP and escalate with BLOCKED or NEEDS_CONTEXT status when the task requires decisions beyond your scope, or you've been reading files without progress. Read `agents/builder-reference.md` for escalation details.
+STOP and escalate with BLOCKED or NEEDS_CONTEXT status when the task requires decisions beyond your scope, or you've been reading files without progress. Read `cookbook/references/builder-reference.md` for escalation details.
 
 ## Enumerated Item Completion (MANDATORY)
 

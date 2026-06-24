@@ -85,7 +85,7 @@ Write a structured episode using the Write tool to `~/Documents/obsidian-vault/A
 - [[<previous related episode if any>]]
 ````
 
-Write the episode description to be **pattern-rich, not keyword-specific.** The description should capture the underlying pattern so that QMD vector_search can match it to future situations with different surface details. For example:
+Write the episode description to be **pattern-rich, not keyword-specific.** The description should capture the underlying pattern so that engram hybrid search can match it to future situations with different surface details. For example:
 
 - BAD: "Fixed bug in edges.explanation route" (keyword-specific, won't match future schema drift)
 - GOOD: "Code referenced database schema columns that didn't exist yet — discovered when route handler queried a column added in a migration that hadn't been applied" (pattern-rich, matches any schema drift scenario)

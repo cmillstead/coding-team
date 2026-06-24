@@ -122,7 +122,7 @@ Proposes 2-3 approaches with trade-offs: at least one minimal viable approach (s
 
 ### Phase 2: Design team
 
-Before spawning workers, the skill retrieves context from prior sessions: project-local `docs/team-memory.md` (codebase facts and known landmines) and relevant past episodes via QMD `vector_search` (pattern-matched, not keyword-matched). Both are passed as advisory context to all workers.
+Before spawning workers, the skill retrieves context from prior sessions: project-local `docs/team-memory.md` (codebase facts and known landmines) and relevant past episodes via engram hybrid search (pattern-matched, not keyword-matched). Both are passed as advisory context to all workers.
 
 A Team Leader spawns specialist workers to analyze the problem. Workers run in parallel and are composed dynamically based on what the task needs.
 
@@ -192,7 +192,7 @@ Each task gets a **task team**: an implementer (using TDD) plus an audit team of
 
 ### Phase 6: Completion
 
-Full test suite + linter verification, then four options: merge locally, push and create PR (max 3 CI fix attempts, auto-cleanup on failure), keep branch as-is, or discard (requires typing "discard" to confirm). Completion summary persists to `docs/retros/` — either incorporated into the retrospective or saved standalone if the user skips `/retrospective`. A decision log prompt asks the user to record any architectural decisions made during the feature to `memory/decisions/`. A **Memory Nudge** then extracts session learnings: codebase facts → project-local `docs/team-memory.md` (with archive rotation), cross-project patterns → `memory/patterns.md`, and a structured episode → Obsidian vault (pattern-rich for vector_search retrieval in future Phase 2 sessions).
+Full test suite + linter verification, then four options: merge locally, push and create PR (max 3 CI fix attempts, auto-cleanup on failure), keep branch as-is, or discard (requires typing "discard" to confirm). Completion summary persists to `docs/retros/` — either incorporated into the retrospective or saved standalone if the user skips `/retrospective`. A decision log prompt asks the user to record any architectural decisions made during the feature to `memory/decisions/`. A **Memory Nudge** then extracts session learnings: codebase facts → project-local `docs/team-memory.md` (with archive rotation), cross-project patterns → `memory/patterns.md`, and a structured episode → Obsidian vault (pattern-rich for engram hybrid search retrieval in future Phase 2 sessions).
 
 ## Commands
 

@@ -3,14 +3,10 @@ name: Coding Team Harness Engineer
 description: Designs and audits Claude Code harness infrastructure — hooks, rules, settings, constraint promotion, maturity progression. Use for harness audits, hook design, constraint gap analysis, and maturity assessment.
 model: opus
 tools:
-  - mcp__codesight-mcp__get_file_outline
-  - mcp__codesight-mcp__search_symbols
-  - mcp__codesight-mcp__get_callers
-  - mcp__codesight-mcp__get_call_chain
-  - mcp__codesight-mcp__search_references
-  - mcp__qmd__search
-  - mcp__qmd__deep_search
-  - mcp__qmd__get
+  - mcp__codesight__query
+  - mcp__engram__search
+  - mcp__engram__queryNodes
+  - mcp__engram__getNodesById
   - Read
   - Glob
   - Grep
@@ -101,9 +97,9 @@ Known rationalizations:
 
 ## Knowledge Base
 
-Your training source is the Harness Engineering knowledge base (34 chapters, 14,500+ lines). Access via QMD: `mcp__qmd__search` (keyword), `mcp__qmd__deep_search` (semantic), `mcp__qmd__get` (full chapter by path). Key chapters (Ch 1, 3-5, 7-8, 22, 28-29) are in `agents/harness-engineer-reference.md`. The KB is authoritative and may contain patterns newer than your training cutoff.
+Your training source is the Harness Engineering knowledge base (34 chapters, 14,500+ lines). Access via the engram CLI: `engram search "<query>" --json` (full-text + vector — covers both keyword and semantic), `engram query-nodes --filter '{...}' --json` (structured), `engram get-node <id> --json` (fetch by id). The `mcp__engram__*` tools are an equivalent when available. Key chapters (Ch 1, 3-5, 7-8, 22, 28-29) are in `agents/harness-engineer-reference.md`. The KB is authoritative and may contain patterns newer than your training cutoff.
 
-If any MCP tool returns a connection error, timeout, or API error: do NOT retry. Mark it unavailable for this session. QMD unavailable → proceed from training knowledge, note in report. codesight-mcp unavailable → use Glob, Grep, and Read instead. Known rationalization: "maybe it's back up now" — it isn't. One failure means unavailable.
+If any MCP tool returns a connection error, timeout, or API error: do NOT retry. Mark it unavailable for this session. Engram unavailable → proceed from training knowledge, note in report. `mcp__codesight__query` unavailable → use Glob, Grep, and Read instead. Known rationalization: "maybe it's back up now" — it isn't. One failure means unavailable.
 
 ## Golden Principles
 

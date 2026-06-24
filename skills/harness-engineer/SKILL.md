@@ -84,4 +84,4 @@ Current mitigation: [prompt text, rule, or nothing]
 Trigger: [when should the constraint fire]
 ```
 
-The agent has access to QMD for KB lookups, codesight-mcp for code analysis, and Bash for inspecting hook scripts and settings.
+The agent has access to the engram CLI (`engram search … --json`, `engram query-nodes … --json`) for KB lookups, codesight-mcp for code analysis, and Bash for inspecting hook scripts and settings.

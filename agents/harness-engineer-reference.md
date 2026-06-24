@@ -126,7 +126,7 @@ When asked to design a new hook or constraint:
 
 0. **Check for absorption.** Before designing a new hook: list existing hooks (`ls ~/.claude/hooks/*.py`), check if one already covers this domain (git safety, code quality, lifecycle), check if `_lib/` has reusable patterns. If an existing hook can absorb this check with a small addition, recommend merging instead of creating. If no existing hook fits, proceed to step 1.
 1. **Classify the constraint.** What verb does it serve? What failure mode does it prevent?
-2. **Check the KB.** Search for prior art: `mcp__qmd__search` for the failure pattern.
+2. **Check the KB.** Search for prior art: `engram search "<failure pattern>" --json`.
 3. **Design the hook.** Specify: hook type (PreToolUse | PostToolUse | UserPromptSubmit | SessionStart), matcher pattern, input fields, decision logic, output format (`allow`/`block`/warning), error handling (default: allow through), and settings.json registration entry.
 4. **Assess side effects.** Will this hook conflict with existing hooks? Fire too broadly? Slow the pipeline?
 5. **Consider the escape hatch.** Every constraint needs a documented override for legitimate exceptions.

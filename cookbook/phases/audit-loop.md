@@ -5,8 +5,8 @@
 After the completeness check passes and implementer reports DONE or DONE_WITH_CONCERNS:
 
 1. Record HEAD_SHA, collect modified files list (git diff --name-only BASE..HEAD).
-   Also run `mcp__codesight-mcp__get_changes` with `repo_path` set to the working directory, `git_ref: "BASE..HEAD"`, and `include_impact: true` to get a symbol-level diff with downstream impact analysis. Pass BOTH the file list AND the symbol-level changes to each auditor.
-   After recording changes, run `mcp__codesight-mcp__invalidate_cache` for the repo so auditors see fresh symbol data reflecting the implementer's commits.
+   Also run `mcp__codesight__query` with operation `get-changes` and params `{repoPath: "<working directory>", gitRef: "BASE..HEAD", includeImpact: true}` to get a symbol-level diff with downstream impact analysis. Pass BOTH the file list AND the symbol-level changes to each auditor.
+   After recording changes, run `mcp__codesight__query` with operation `invalidate-cache` for the repo so auditors see fresh symbol data reflecting the implementer's commits.
    **Pre-compute for spec reviewer:** Run `git log --oneline BASE..HEAD` and include the output in the spec reviewer's `## Git History` section. The spec reviewer has no Bash tool — it cannot run git commands itself.
 2. Dispatch audit agents IN PARALLEL via Agent tool (spec reviewer and simplify auditor as read-only Explore; harden auditor and harness engineer as general-purpose to allow Bash tool access):
    a. Spec reviewer (see ~/.claude/agents/ct-reviewer.md) — "does it match the spec? was TDD followed?"
@@ -23,7 +23,7 @@ After the completeness check passes and implementer reports DONE or DONE_WITH_CO
    Fresh audit agents each round — don't reuse.
    After the implementer applies audit fixes: re-run tests to verify fixes didn't introduce regressions. This is mandatory.
    **Same-class search (after security fixes):** When an implementer fixes a security finding (injection, auth bypass, unsanitized input, missing validation), dispatch a follow-up search before re-audit:
-   - Use `mcp__codesight-mcp__search_references` or `mcp__codesight-mcp__search_text` to find all analogous call sites
+   - Use `mcp__codesight__query` with operation `search-references` or `search-text` to find all analogous call sites
    - If the fix created a shared utility (sanitizer, validator), verify it's called at ALL expected sites
    - Flag unprotected sites as new findings for the next fix round
    This prevents the Case 23 pattern: fixing 1 of N instances while N-1 remain vulnerable.

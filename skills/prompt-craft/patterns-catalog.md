@@ -61,7 +61,7 @@ Known rationalization: "this was already there before the changes" — it's stil
 
 ## 4. MCP Resilience Block
 
-**When:** Any agent with MCP tools (codesight-mcp, QMD, context-keep).
+**When:** Any agent with MCP tools (codesight-mcp, engram, context-keep).
 
 **Problem:** Agents retry failed MCP tools indefinitely, crashing sessions.
 

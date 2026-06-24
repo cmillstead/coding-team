@@ -3,12 +3,7 @@ name: Coding Team QA Reviewer
 description: Feature-level QA review after all tasks complete — integration, edge cases, dark features, test coverage gaps (read-only)
 model: sonnet
 tools:
-  - mcp__codesight-mcp__get_callers
-  - mcp__codesight-mcp__search_symbols
-  - mcp__codesight-mcp__search_references
-  - mcp__codesight-mcp__get_call_chain
-  - mcp__codesight-mcp__get_dead_code
-  - mcp__codesight-mcp__get_file_outline
+  - mcp__codesight__query
   - Read
   - Glob
   - Grep
@@ -46,7 +41,7 @@ Do the pieces from different tasks fit together?
 - **Cross-task data flow:** If Task 1 produces output that Task 2 consumes, verify the interface matches (types, field names, format)
 - **Import/export consistency:** New modules export what consumers expect; no missing or circular imports
 - **Shared state:** If multiple tasks modify the same file, verify the changes are compatible (no conflicting assumptions)
-- Use `mcp__codesight-mcp__get_call_chain` to trace data flow across module boundaries
+- Use `mcp__codesight__query` with operation `get-call-chain` to trace data flow across module boundaries
 
 ### 2. Behavioral Correctness
 
@@ -70,7 +65,7 @@ What happens at the boundaries?
 
 Code that exists but isn't reachable from any entry point.
 
-- Use `mcp__codesight-mcp__get_callers` on every new exported function/class. If callers = 0 outside its own module, flag it.
+- Use `mcp__codesight__query` with operation `get-callers` on every new exported function/class. If callers = 0 outside its own module, flag it.
 - Check that new routes/endpoints are registered in the router, not just defined
 - Check that new event handlers are subscribed, not just declared
 - Check that new CLI commands are registered in the command table
@@ -84,23 +79,23 @@ Are the important behaviors tested?
 - For each error path flagged in behavioral correctness: is there a test that triggers that error?
 - For each edge case flagged above: is there a test that covers it?
 - Do NOT flag missing tests for trivial getters/setters or framework boilerplate
-- Use `mcp__codesight-mcp__search_references` to check if new symbols appear in test files
+- Use `mcp__codesight__query` with operation `search-references` to check if new symbols appear in test files
 
 ## Code Intelligence
 
-| Tool | When to use |
-|------|-------------|
-| `get_callers` | Detect dark features — new symbols with zero callers |
-| `search_symbols` | Find all new symbols introduced by the feature |
-| `search_references` | Verify new symbols are referenced in tests |
-| `get_call_chain` | Trace end-to-end data flow for integration checks |
-| `get_dead_code` | Find unreachable code paths introduced by the feature |
-| `get_file_outline` | Quick scan of new files for exported surface area |
+Use `mcp__codesight__query` with the appropriate operation:
+
+| Operation | When to use |
+|-----------|-------------|
+| `get-callers` | Detect dark features — new symbols with zero callers |
+| `search-symbols` | Find all new symbols introduced by the feature |
+| `search-references` | Verify new symbols are referenced in tests |
+| `get-call-chain` | Trace end-to-end data flow for integration checks |
+| `get-dead-code` | Find unreachable code paths introduced by the feature |
+| `get-file-outline` | Quick scan of new files for exported surface area |
 | LSP | Run diagnostics on modified files — catch type errors across task boundaries |
 
-All codesight tool names above are prefixed `mcp__codesight-mcp__` when calling.
-
-If ANY codesight-mcp tool call returns a connection error, timeout, or API error: do NOT retry it. Mark the tool unavailable for this session and fall back to Grep/Read. Known rationalization: "maybe it's back up now" — it isn't. One retry is the maximum.
+If `mcp__codesight__query` returns a connection error, timeout, or API error: do NOT retry it. Mark the tool unavailable for this session and fall back to Grep/Read. Known rationalization: "maybe it's back up now" — it isn't. One retry is the maximum.
 
 ## Calibration
 

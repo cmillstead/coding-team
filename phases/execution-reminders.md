@@ -27,7 +27,7 @@ Also print on each mid-phase reminder:
 
 > **Orchestrator check:** You are the orchestrator. If you have been writing code directly, stop and re-dispatch through Agent tool or Teammate tool. Direct edits bypass the audit loop.
 
-Optionally run `mcp__codesight-mcp__get_usage_stats` with `session: "current"` to check which codesight tools agents are using. If key tools (get_callers, search_symbols, get_changes) show zero calls after 3+ tasks, agents may not be using code intelligence — consider including explicit tool reminders in subsequent implementer prompts.
+Optionally run `mcp__codesight__query` with operation `get-usage-stats` and params `{session: "current"}` to check which codesight operations agents are using. If key operations (get-callers, search-symbols, get-changes) show zero calls after 3+ tasks, agents may not be using code intelligence — consider including explicit tool reminders in subsequent implementer prompts.
 
 ## Debugging Detour Reminders
 

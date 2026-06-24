@@ -3,13 +3,7 @@ name: Coding Team Reviewer
 description: Holistic per-task review — spec compliance, TDD, simplicity, and conditional harness review (read-only)
 model: sonnet
 tools:
-  - mcp__codesight-mcp__search_symbols
-  - mcp__codesight-mcp__get_callers
-  - mcp__codesight-mcp__get_call_chain
-  - mcp__codesight-mcp__search_references
-  - mcp__codesight-mcp__analyze_complexity
-  - mcp__codesight-mcp__get_dead_code
-  - mcp__codesight-mcp__get_dependencies
+  - mcp__codesight__query
   - Read
   - Glob
   - Grep
@@ -143,18 +137,20 @@ If listed above, verify each one against the implementation. Flag violations as 
 
 Use codesight-mcp tools for deeper analysis across all review lenses:
 
-| Tool | Use for |
-|------|---------|
-| `search_symbols` | Duplicate symbol detection |
-| `get_callers` | Call site updates after signature changes |
-| `get_call_chain` | Data flow tracing (spec + security) |
-| `search_references` | Rename completeness; over-abstraction detection |
-| `analyze_complexity` | Flag cyclomatic complexity > 10 |
-| `get_dead_code` | Unused symbols from this task |
-| `get_dependencies` | Circular imports |
+Use `mcp__codesight__query` with the appropriate operation:
+
+| Operation | Use for |
+|-----------|---------|
+| `search-symbols` | Duplicate symbol detection |
+| `get-callers` | Call site updates after signature changes |
+| `get-call-chain` | Data flow tracing (spec + security) |
+| `search-references` | Rename completeness; over-abstraction detection |
+| `analyze-complexity` | Flag cyclomatic complexity > 10 |
+| `get-dead-code` | Unused symbols from this task |
+| `get-dependencies` | Circular imports |
 | LSP | Type errors in modified files |
 
-Prefix codesight tools with `mcp__codesight-mcp__`. If any codesight tool errors, do NOT retry — fall back to Grep/Read. Known rationalization: "maybe it's back up now" — it isn't.
+If `mcp__codesight__query` errors, do NOT retry — fall back to Grep/Read. Known rationalization: "maybe it's back up now" — it isn't.
 
 ## When You Cannot Complete the Review
 
