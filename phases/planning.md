@@ -55,19 +55,19 @@ Use these tools to understand the codebase structure before decomposing tasks:
 
 | Tool | When to use |
 |---|---|
-| `mcp__codesight-mcp__get_file_tree` | Understand repo layout, identify where new code should live |
-| `mcp__codesight-mcp__get_repo_outline` | See key symbols across the codebase before planning changes |
-| `mcp__codesight-mcp__analyze_complexity` | Check files the plan will modify — split files with cyclomatic complexity above 15 |
-| `mcp__codesight-mcp__search_symbols` | Find existing utilities that sub-tasks could reuse instead of rebuilding |
-| `mcp__codesight-mcp__get_dependencies` | Check for circular dependency risks in files the plan will modify |
-| `mcp__codesight-mcp__get_type_hierarchy` | Understand full class hierarchy before planning changes to base classes |
-| `mcp__codesight-mcp__get_key_symbols` | Identify architecturally significant symbols — focuses planning on high-impact areas |
-| `mcp__codesight-mcp__get_diagram` | Generate architecture diagrams — include in the plan for implementers |
+| `mcp__codesight__query` (operation `get-file-tree`) | Understand repo layout, identify where new code should live |
+| `mcp__codesight__query` (operation `get-repo-outline`) | See key symbols across the codebase before planning changes |
+| `mcp__codesight__query` (operation `analyze-complexity`) | Check files the plan will modify — split files with cyclomatic complexity above 15 |
+| `mcp__codesight__query` (operation `search-symbols`) | Find existing utilities that sub-tasks could reuse instead of rebuilding |
+| `mcp__codesight__query` (operation `get-dependencies`) | Check for circular dependency risks in files the plan will modify |
+| `mcp__codesight__query` (operation `get-type-hierarchy`) | Understand full class hierarchy before planning changes to base classes |
+| `mcp__codesight__query` (operation `get-key-symbols`) | Identify architecturally significant symbols — focuses planning on high-impact areas |
+| `mcp__codesight__query` (operation `get-diagram`) | Generate architecture diagrams — include in the plan for implementers |
 | `mcp__plugin_github_github__search_issues` | Find related issues — prior discussion contains requirements or edge cases not in the spec |
 | `mcp__plugin_github_github__search_pull_requests` | Check if similar work was previously attempted — learn from prior approaches |
 | `mcp__context-keep__search_memories` | Find relevant prior architectural decisions — avoid contradicting established patterns |
 
-If a codesight-mcp call fails, fall back to Grep/Read for that query. If codesight-mcp tools are not available (MCP server not running), fall back to Glob and Grep tools. Do NOT skip codebase analysis — use whichever tools are available.
+If a `mcp__codesight__query` call fails, fall back to Grep/Read for that query. If the codesight MCP server is not running, fall back to Glob and Grep tools. Do NOT skip codebase analysis — use whichever tools are available.
 
 ## Pre-Flight: Count Inputs (MANDATORY before dispatching planning worker)
 

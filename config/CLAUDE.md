@@ -63,7 +63,6 @@ engram sql "SELECT count(*) FROM nodes" --json   # Raw SQLite query
 Before starting work on a code task or when prior context would help, check available memory systems for prior knowledge:
 
 - **Engram**: Use for structured knowledge — nodes, edges, relationships. `search` for keyword lookup, `query-nodes` for filtered queries, `get-context` for session context. See Engram section above for full CLI reference.
-- **QMD vault**: Use `search` and `vector_search` tools for document search across decisions, patterns, prior work. Indexes `~/src/**/*.md`
 - **ContextKeep**: Use `list_all_memories` and `retrieve_memory` for simple key-value decisions (when configured, skip if unavailable)
 - **Git**: `git log --oneline -- <file>` and `git blame` are authoritative for code history
 

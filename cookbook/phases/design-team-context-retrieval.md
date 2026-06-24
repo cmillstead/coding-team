@@ -18,19 +18,16 @@ Check if `$REPO_ROOT/docs/team-memory.md` exists using the Read tool:
 
 ### Episode retrieval
 
-Use QMD `vector_search` tool (NOT `search`) to find relevant past episodes. Vector search matches by meaning — a query about "adding a REST endpoint" will find episodes about schema drift, auth patterns, or API design even if those episodes never mention "REST."
+Use the engram CLI to find relevant past episodes — `engram search "<query>" --json` (full-text + vector matches by meaning — a query about "adding a REST endpoint" will find episodes about schema drift, auth patterns, or API design even if those episodes never mention "REST.").
 
 ```
-vector_search({
-  query: "<1-2 sentence description of what this task is trying to accomplish and what areas of the codebase it touches>",
-  collection: "conversations",
-  limit: 3,
-  minScore: 0.4
-})
+engram search "<1-2 sentence description of what this task is trying to accomplish and what areas of the codebase it touches>" --json
 ```
+
+Take the top ~3 results from the JSON.
 
 If episodes are found:
-- Read the top 1-2 results using the Read tool (skip if minScore threshold filters them all out)
+- Read the top 1-2 results (skip if scores are too low). Search results carry title/description; fetch full content via `engram get-node <id> --json` if needed.
 - Extract the "Patterns Discovered" and "What Would Help Next Time" sections
 - Pass these to the Team Leader as an "## Episode Context" section:
 
@@ -44,7 +41,7 @@ If episodes are found:
 - Watch out for: <what would help next time>
 ```
 
-If no episodes found or scores are below threshold: skip and note in status: 'Episode retrieval not available — skipped'. Do NOT fabricate episode context.
+If no episodes found or results are below useful quality: skip and note in status: 'Episode retrieval not available — skipped'. Do NOT fabricate episode context.
 
 ### Golden principles
 

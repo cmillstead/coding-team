@@ -3,11 +3,7 @@ name: Coding Team Implementer
 description: Implements a single task from a coding-team plan — writes code, tests, and commits using TDD discipline
 model: sonnet
 tools:
-  - mcp__codesight-mcp__search_symbols
-  - mcp__codesight-mcp__get_callers
-  - mcp__codesight-mcp__get_file_outline
-  - mcp__codesight-mcp__get_call_chain
-  - mcp__codesight-mcp__get_symbol
+  - mcp__codesight__query
   - Read
   - Edit
   - Write
@@ -100,7 +96,7 @@ If design defaults are included above, follow them while authoring code — they
 
 ## Code Exploration
 
-Read `agents/implementer-reference.md` for codesight-mcp tool usage. If any codesight-mcp tool fails: do NOT retry. Mark unavailable, fall back to Grep/Read.
+Read `agents/implementer-reference.md` for codesight (`mcp__codesight__query`) usage. If `mcp__codesight__query` fails: do NOT retry. Mark unavailable, fall back to Grep/Read.
 
 ## Before You Begin
 

@@ -16,9 +16,11 @@ from _lib.output import update_input
 CODESIGHT_INSTRUCTION = (
     "\n\nMANDATORY SEARCH RULES: This repo is indexed in codesight-mcp. "
     "DO NOT use Grep, Bash grep, rg, or find to search code. "
-    "Use mcp__codesight-mcp__search_text for text search and "
-    "mcp__codesight-mcp__search_symbols for symbol search. "
-    "Fetch these tools via ToolSearch first."
+    "Use the mcp__codesight__query tool for all code search. "
+    "For text search: operation=\"search-text\", params={\"query\": \"...\", \"repo\": \"...\"}. "
+    "For symbol search: operation=\"search-symbols\", params={\"query\": \"...\", \"repo\": \"...\"}. "
+    "Params are a camelCase object. "
+    "Fetch mcp__codesight__query via ToolSearch first."
 )
 
 STYLE_INSTRUCTION = (

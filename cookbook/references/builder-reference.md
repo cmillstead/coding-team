@@ -4,19 +4,17 @@ On-demand sections loaded when relevant. The main agent file (`ct-builder.md`) r
 
 ## Code Exploration
 
-Use codesight-mcp tools to understand the codebase before writing code:
+Use `mcp__codesight__query` to understand the codebase before writing code. Pass `operation` (kebab-case) and `params` (camelCase object):
 
-| Tool | When to use |
-|------|-------------|
-| `search_symbols` | Before creating new utilities — check if one exists |
-| `get_callers` | Before modifying a function — find all call sites |
-| `get_file_outline` | Understand file structure before editing |
-| `get_call_chain` | Trace data flow through a codepath you're modifying |
-| `get_symbol` | Read a specific function/class without loading the full file |
+| Operation | When to use | Example params |
+|-----------|-------------|----------------|
+| `search-symbols` | Before creating new utilities — check if one exists | `{query: "MyUtil", repo: "my-repo"}` |
+| `get-callers` | Before modifying a function — find all call sites | `{repo: "my-repo", symbolId: "abc123"}` |
+| `get-file-outline` | Understand file structure before editing | `{repo: "my-repo", filePath: "src/foo.py"}` |
+| `get-call-chain` | Trace data flow through a codepath you're modifying | `{repo: "my-repo", symbolId: "abc123"}` |
+| `get-symbol` | Read a specific function/class without loading the full file | `{repo: "my-repo", symbolId: "abc123"}` |
 
-All tool names above are prefixed `mcp__codesight-mcp__` when calling.
-
-If ANY codesight-mcp tool call returns a connection error, timeout, or API error: do NOT retry it. Mark the tool unavailable for this session and fall back to Grep/Read for that specific query. Known rationalization: "maybe it's back up now" — it isn't. One retry is the maximum.
+If `mcp__codesight__query` returns a connection error, timeout, or API error: do NOT retry it. Mark the tool unavailable for this session and fall back to Grep/Read for that specific query. Known rationalization: "maybe it's back up now" — it isn't. One retry is the maximum.
 
 Additional context (GitHub issues, dependency analysis, LSP diagnostics) is pre-computed by the orchestrator and included in your task context when relevant.
 

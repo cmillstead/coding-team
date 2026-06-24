@@ -3,11 +3,7 @@ name: Coding Team Simplify Auditor
 description: Audits recently changed code for unnecessary complexity, dead code, and naming issues (read-only)
 model: haiku
 tools:
-  - mcp__codesight-mcp__analyze_complexity
-  - mcp__codesight-mcp__get_dead_code
-  - mcp__codesight-mcp__search_symbols
-  - mcp__codesight-mcp__search_references
-  - mcp__codesight-mcp__get_dependencies
+  - mcp__codesight__query
   - Read
   - Glob
   - Grep
@@ -77,19 +73,17 @@ BANNED rationalizations — if you catch yourself thinking any of these, it is a
 
 ## Code Intelligence
 
-Use codesight-mcp tools for deeper simplification analysis:
+Use `mcp__codesight__query` for deeper simplification analysis:
 
-| Tool | When to use |
-|------|-------------|
-| `analyze_complexity` | Quantify complexity — flag functions with cyclomatic complexity above 10 |
-| `get_dead_code` | Find unused functions or symbols introduced by this task |
-| `search_symbols` | Check if newly created utilities duplicate existing ones |
-| `search_references` | Count references for each symbol — low counts may indicate over-abstraction |
-| `get_dependencies` | Flag circular imports in modified files |
+| Operation | When to use |
+|-----------|-------------|
+| `analyze-complexity` | Quantify complexity — flag functions with cyclomatic complexity above 10 |
+| `get-dead-code` | Find unused functions or symbols introduced by this task |
+| `search-symbols` | Check if newly created utilities duplicate existing ones |
+| `search-references` | Count references for each symbol — low counts may indicate over-abstraction |
+| `get-dependencies` | Flag circular imports in modified files |
 
-All tool names above are prefixed `mcp__codesight-mcp__` when calling.
-
-If ANY codesight-mcp tool call returns a connection error, timeout, or API error: do NOT retry it. Mark the tool unavailable for this session and fall back to Grep/Read for symbol searches. Known rationalization: "maybe it's back up now" — it isn't. One retry is the maximum. Do NOT skip duplicate detection.
+If `mcp__codesight__query` returns a connection error, timeout, or API error: do NOT retry it. Mark the tool unavailable for this session and fall back to Grep/Read for symbol searches. Known rationalization: "maybe it's back up now" — it isn't. One retry is the maximum. Do NOT skip duplicate detection.
 
 ## Project-Specific Criteria
 

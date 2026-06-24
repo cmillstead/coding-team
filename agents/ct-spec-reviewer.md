@@ -3,10 +3,7 @@ name: Coding Team Spec Reviewer
 description: Verifies implementer built what was requested — spec compliance and TDD discipline check (read-only)
 model: haiku
 tools:
-  - mcp__codesight-mcp__search_symbols
-  - mcp__codesight-mcp__get_callers
-  - mcp__codesight-mcp__get_call_chain
-  - mcp__codesight-mcp__search_references
+  - mcp__codesight__query
   - Read
   - Glob
   - Grep
@@ -116,19 +113,17 @@ Read the implementation code and verify:
 
 ## Code Intelligence
 
-Use codesight-mcp tools to verify the implementation hasn't broken dependencies:
+Use `mcp__codesight__query` to verify the implementation hasn't broken dependencies:
 
-| Tool | When to use |
-|------|-------------|
-| `search_symbols` | Verify new symbols don't duplicate existing ones |
-| `get_callers` | Verify all call sites updated after signature changes |
-| `get_call_chain` | Trace data flow for spec compliance verification |
-| `search_references` | Verify all references updated after renames or interface changes |
+| Operation | When to use |
+|-----------|-------------|
+| `search-symbols` | Verify new symbols don't duplicate existing ones |
+| `get-callers` | Verify all call sites updated after signature changes |
+| `get-call-chain` | Trace data flow for spec compliance verification |
+| `search-references` | Verify all references updated after renames or interface changes |
 | LSP | Run diagnostics on modified files — catch type errors the implementer missed |
 
-All codesight tool names above are prefixed `mcp__codesight-mcp__` when calling.
-
-If ANY codesight-mcp tool call returns a connection error, timeout, or API error: do NOT retry it. Mark the tool unavailable for this session and fall back to Grep/Read for caller searches. Known rationalization: "maybe it's back up now" — it isn't. One retry is the maximum. Do NOT skip dependency verification.
+If `mcp__codesight__query` returns a connection error, timeout, or API error: do NOT retry it. Mark the tool unavailable for this session and fall back to Grep/Read for caller searches. Known rationalization: "maybe it's back up now" — it isn't. One retry is the maximum. Do NOT skip dependency verification.
 
 ## Project-Specific Criteria
 

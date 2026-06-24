@@ -103,7 +103,7 @@ class TestGetExternalHookPaths:
             "hooks": {
                 "PreToolUse": [
                     {
-                        "matcher": "mcp__codesight-mcp__.*",
+                        "matcher": "mcp__codesight__query",
                         "hooks": [
                             {"type": "command", "command": "python3 ~/.config/codesight-mcp/pre-notify.py"}
                         ]
@@ -111,7 +111,7 @@ class TestGetExternalHookPaths:
                 ],
                 "PostToolUse": [
                     {
-                        "matcher": "mcp__codesight-mcp__.*",
+                        "matcher": "mcp__codesight__query",
                         "hooks": [
                             {"type": "command", "command": "python3 ~/.config/codesight-mcp/notify.py"}
                         ]
