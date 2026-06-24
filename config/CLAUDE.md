@@ -70,6 +70,7 @@ Before starting work on a code task or when prior context would help, check avai
 
 - Commit style: `feat:`, `fix:`, `test:`, `docs:`
 - Don't summarize what you just did at the end of responses — I can read the diff. Exception: when a skill or pipeline phase REQUIRES a structured completion report (e.g., the implementer's DONE report, a phase-completion summary), produce it — the report is the deliverable, not a redundant recap.
+- Mandatory user-declared interaction rules (number either/or choices `1`/`2`; don't default to hooks — consolidate) live always-on in `rules/interaction-mandatory.md`. New mandatory rules append there, not as new hooks.
 
 ## Context Management
 
