@@ -54,7 +54,10 @@ Run this engine ONCE per change:
 2. **Derive signals once.** Set `mode` = `diff` (a diff) or `plan` (plan prose). For each `provable`
    category, run its grep battery over the diff hunks (DIFF) or plan prose (PLAN) with the Bash tool.
    A signal FIRES if ANY pattern matches; record it with evidence. Batteries are broad on purpose —
-   an over-match costs a cheap `✓`; an under-match risks a silent skip.
+   an over-match costs a cheap `✓`; an under-match risks a silent skip. Run each category's grep as
+   its OWN Bash call with a literal path — do NOT chain the battery into one compound command or use
+   `$VAR` expansion (per `~/.claude/command-hygiene.md`); a compound/`$VAR`/quoted-pattern block trips
+   the permission prompt on every run.
 3. **Classify every live entry into exactly TWO buckets** (enumerate the live file — do NOT assume a
    fixed count). An entry is **dismissed** for EXACTLY ONE of two reasons; everything else is
    **applicable**:
