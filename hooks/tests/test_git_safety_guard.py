@@ -1622,3 +1622,45 @@ class TestCompoundHygieneAdvisory:
                 assert result.parsed.get("decision") != "block"
                 assert result.parsed.get("hookSpecificOutput", {}).get("permissionDecision") != "ask"
 
+
+class TestNvmBootstrapGuard:
+    """nvm bootstrap is blocked (sourcing nvm dead-ends/prompts); node/npm/npx pass."""
+
+    @pytest.mark.parametrize("command", [
+        "source ~/.nvm/nvm.sh && nvm use 20",
+        ". ~/.nvm/nvm.sh",
+        "nvm use 20.19.6",
+        "nvm install 20 && node -v",
+        "export FOO=1; nvm use",
+        "nvm",
+    ])
+    def test_blocks_nvm_bootstrap(self, command, run_hook, make_event):
+        # Arrange
+        event = make_event("Bash", command=command)
+        # Act
+        result = run_hook("git-safety-guard.py", event)
+        # Assert
+        assert result.parsed is not None
+        assert result.parsed["decision"] == "block"
+        assert "nvm" in result.parsed["reason"].lower()
+
+    @pytest.mark.parametrize("command", [
+        "node --version",
+        "npm install",
+        "npx tsc",
+        "ls ~/.nvm",
+        "cat ~/.nvm/nvm.sh",
+        "which nvm",
+        "echo nvm is great",
+    ])
+    def test_allows_non_bootstrap_node_commands(self, command, run_hook, make_event):
+        # Arrange
+        event = make_event("Bash", command=command)
+        # Act
+        result = run_hook("git-safety-guard.py", event)
+        # Assert: hook must not crash AND must produce no block output.
+        # returncode == 0 is load-bearing: a crashed hook also produces empty stdout
+        # (the crash exits non-zero), so checking only stdout.strip() == "" is vacuous.
+        assert result.returncode == 0, f"hook crashed on {command!r}: stderr={result.stderr!r}"
+        assert result.stdout.strip() == ""
+

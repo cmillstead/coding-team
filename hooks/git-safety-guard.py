@@ -783,6 +783,31 @@ def _emit_compound_hygiene_advisory_if_unknown(command: str) -> bool:
 
 
 # ---------------------------------------------------------------------------
+# Node / nvm hygiene
+# ---------------------------------------------------------------------------
+
+_NVM_SOURCE_RE = re.compile(
+    r'(?:^|[;&|])\s*(?:source|\.)\s+[^\s;&|]*nvm\.sh', re.IGNORECASE)
+_NVM_CMD_RE = re.compile(r'(?:^|[;&|])\s*nvm(?:\s|$)', re.IGNORECASE)
+
+
+def _is_nvm_bootstrap(command: str) -> bool:
+    """True iff the command sources nvm or invokes `nvm` (e.g. `nvm use`).
+
+    Agents do this reflexively to "set up node", but node (v20.19.6) is already on
+    PATH in every session, and `source` evaluates arbitrary shell code so it can
+    never be auto-approved -- it dead-ends / prompts the user every time. Blocking it
+    (with a redirect to run node directly) is the structural fix for that recurring
+    prompt. Self-guards; never raises (a raise here would hit the block-closed
+    top-level handler).
+    """
+    try:
+        return bool(_NVM_SOURCE_RE.search(command) or _NVM_CMD_RE.search(command))
+    except Exception:
+        return False
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -854,28 +879,50 @@ def main():
     if not command:
         return
 
+    # --- 0. Node/nvm hygiene: node is already on PATH; block nvm bootstrap (no prompt) ---
+    # Agents reflexively run `source ~/.nvm/nvm.sh && nvm use` to "set up node"; node is
+    # already on PATH and `source` can't be auto-approved, so this would dead-end/prompt.
+    # block() denies WITHOUT prompting and hands the agent the reason -> it runs node directly.
+    if _is_nvm_bootstrap(command):
+        output.block(
+            "Do NOT `source ~/.nvm/nvm.sh` or run `nvm use` -- `source` evaluates arbitrary "
+            "shell code so it cannot be auto-approved (it dead-ends or prompts every time).\n"
+            "Non-login shells (including Claude Code tool calls) do not source nvm automatically, "
+            "so `node`/`npm`/`npx`/`codex` may not be on PATH.\n"
+            "Use the absolute path instead: /Users/cevin/.nvm/versions/node/v20.19.6/bin/node\n"
+            "(or the matching npm/npx/codex in that directory).\n"
+            "If the absolute path also fails, report BLOCKED -- do not attempt to source nvm."
+        )
+        return
+
     git_subcmd = git.extract_git_command(command)
 
     # --- Track verification commands in PreToolUse too (fallback if PostToolUse misses) ---
+    # Wrapped fail-open: if state.py or /tmp raises any exception (restricted sandbox,
+    # unexpected exception type), swallow it and continue — verification tracking is
+    # best-effort; a crash here must never deny the command being intercepted.
     if is_verification(command):
-        state_file = state.get_state_file("claude-verification")
-        st = state.load_state(state_file, {"verifications": [], "last_updated": time.time()})
-        if state.is_stale(st):
-            st = {"verifications": [], "last_updated": time.time()}
-        # Only add if not already tracked by PostToolUse (check last entry)
-        recent = st.get("verifications", [])
-        already_tracked = (
-            recent and recent[-1].get("command") == command
-            and time.time() - recent[-1]["time"] < 5
-        )
-        if not already_tracked:
-            st["verifications"].append({
-                "command": command,
-                "time": time.time(),
-                "exit_code": None,  # Unknown until PostToolUse
-            })
-            st["verifications"] = st["verifications"][-20:]
-            state.save_state(state_file, st)
+        try:
+            state_file = state.get_state_file("claude-verification")
+            st = state.load_state(state_file, {"verifications": [], "last_updated": time.time()})
+            if state.is_stale(st):
+                st = {"verifications": [], "last_updated": time.time()}
+            # Only add if not already tracked by PostToolUse (check last entry)
+            recent = st.get("verifications", [])
+            already_tracked = (
+                recent and recent[-1].get("command") == command
+                and time.time() - recent[-1]["time"] < 5
+            )
+            if not already_tracked:
+                st["verifications"].append({
+                    "command": command,
+                    "time": time.time(),
+                    "exit_code": None,  # Unknown until PostToolUse
+                })
+                st["verifications"] = st["verifications"][-20:]
+                state.save_state(state_file, st)
+        except Exception:
+            pass  # fail-open: treat as no state recorded; never propagate
 
     # --- 1. Secret check (git add) ---
     if git_subcmd == "add":
