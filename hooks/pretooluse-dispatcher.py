@@ -15,11 +15,14 @@ Why subprocess (not runpy like prompt-dispatcher):
     subprocess.
 
 Blocking contract (CRITICAL):
-  write-guard.py and git-safety-guard.py communicate their block decisions via stdout
-  JSON ({"decision":"block","reason":"..."}). This dispatcher captures their subprocess
-  stdout verbatim and writes it to real stdout before exiting with the same exit code.
-  No rewriting or re-serialization occurs — the output is byte-identical to running the
-  guard directly.
+  Handlers can signal a BLOCK via two mechanisms:
+    (a) stdout JSON {"decision":"block","reason":"..."} + exit code 0
+    (b) stderr message + exit code 2
+
+  For both mechanisms, this dispatcher captures the subprocess output verbatim and
+  forwards it to real stdout/stderr before exiting with the same exit code.
+  No rewriting or re-serialization occurs — the output is byte-identical to running
+  the handler directly.
 
 Routing:
   - Agent     → codesight-hooks.py (prompt injection via updatedInput)
@@ -27,11 +30,11 @@ Routing:
   - Bash       → git-safety-guard.py (blocking guard — verbatim passthrough), then
                   rtk hook claude (only if git-safety-guard produced no output)
 
-First-output-wins contract:
-  The first handler that produces stdout sets the hook response. Subsequent handlers
-  for the same tool call are skipped once any handler has written to stdout. This
-  mirrors CC's per-hook-entry contract: the first matching entry that responds owns
-  the decision.
+First-response-wins contract:
+  The first handler that produces output (stdout or non-zero exit code) sets the hook
+  response. Subsequent handlers for the same tool call are skipped once any handler
+  has responded. This mirrors CC's per-hook-entry contract: the first matching entry
+  that responds owns the decision.
 
 Escape hatches:
   CT_PRETOOLUSE_DISPATCHER_DISABLE=1  → exit 0 immediately, no output.
@@ -69,11 +72,11 @@ def _run_handler(
     payload: str,
     *,
     timeout: int = 30,
-) -> tuple[str, int]:
-    """Run cmd with payload on stdin. Return (raw_stdout, returncode).
+) -> tuple[str, str, int]:
+    """Run cmd with payload on stdin. Return (raw_stdout, raw_stderr, returncode).
 
     Fully isolated: timeout, FileNotFoundError, OSError, and all other
-    exceptions yield ("", 0) so the dispatcher continues. Never raises.
+    exceptions yield ("", "", 0) so the dispatcher continues. Never raises.
     """
     name = Path(cmd[-1]).name
     try:
@@ -84,36 +87,41 @@ def _run_handler(
             text=True,
             timeout=timeout,
         )
-        return result.stdout, result.returncode
+        return result.stdout, result.stderr, result.returncode
     except subprocess.TimeoutExpired:
         print(
             f"pretooluse-dispatcher: timeout {name} after {timeout}s",
             file=sys.stderr,
         )
-        return "", 0
+        return "", "", 0
     except (FileNotFoundError, PermissionError, OSError) as exc:
         print(
             f"pretooluse-dispatcher: cannot run {name}: {exc!r}",
             file=sys.stderr,
         )
-        return "", 0
+        return "", "", 0
     except Exception as exc:  # noqa: BLE001 — catch-all by design; isolation guarantee
         print(
             f"pretooluse-dispatcher: error in {name}: {exc!r}",
             file=sys.stderr,
         )
-        return "", 0
+        return "", "", 0
 
 
-def _passthrough(stdout: str, returncode: int) -> None:
-    """Write stdout verbatim to real stdout and exit with returncode.
+def _passthrough(stdout: str, stderr: str, returncode: int) -> None:
+    """Write stdout to real stdout, stderr to real stderr, and exit with returncode.
 
     This is the blocking-guard contract: the output is byte-identical to
     running the guard directly — no JSON re-serialization, no wrapping.
+    Handles both mechanism (a): stdout JSON + exit 0, and mechanism (b):
+    stderr message + exit 2.
     """
     if stdout:
         sys.stdout.write(stdout)
         sys.stdout.flush()
+    if stderr:
+        sys.stderr.write(stderr)
+        sys.stderr.flush()
     sys.exit(returncode)
 
 
@@ -139,24 +147,25 @@ def main() -> None:
         # Codesight prompt injection: injects CODESIGHT_INSTRUCTION into the
         # Agent prompt via the updatedInput shape.
         if not _is_skipped(CODESIGHT_HOOKS, skip):
-            stdout, rc = _run_handler([sys.executable, CODESIGHT_HOOKS], payload)
-            if stdout.strip():
-                _passthrough(stdout, rc)
+            stdout, stderr, rc = _run_handler([sys.executable, CODESIGHT_HOOKS], payload)
+            if stdout.strip() or rc != 0:
+                _passthrough(stdout, stderr, rc)
 
     elif tool_name in ("Edit", "Write"):
         # Write guard (blocking): pass stdout verbatim and exit if it produced output.
         if not _is_skipped(WRITE_GUARD, skip):
-            stdout, rc = _run_handler([sys.executable, WRITE_GUARD], payload)
-            if stdout.strip():
-                _passthrough(stdout, rc)
+            stdout, stderr, rc = _run_handler([sys.executable, WRITE_GUARD], payload)
+            if stdout.strip() or rc != 0:
+                _passthrough(stdout, stderr, rc)
 
     elif tool_name == "Bash":
         # Git safety guard (blocking) — runs first.
-        # If it produces any output (block/advisory), pass through and stop.
+        # If it produces any output (block/advisory) or exits non-zero, pass through
+        # and stop.
         if not _is_skipped(GIT_SAFETY_GUARD, skip):
-            stdout, rc = _run_handler([sys.executable, GIT_SAFETY_GUARD], payload)
-            if stdout.strip():
-                _passthrough(stdout, rc)
+            stdout, stderr, rc = _run_handler([sys.executable, GIT_SAFETY_GUARD], payload)
+            if stdout.strip() or rc != 0:
+                _passthrough(stdout, stderr, rc)
 
         # rtk hook claude — only runs if git-safety-guard was silent (no output).
         # rtk is a single matcher entry that previously ran independently as a
@@ -164,12 +173,12 @@ def main() -> None:
         if not _is_skipped("rtk", skip):
             rtk_bin = shutil.which("rtk")
             if rtk_bin:
-                stdout, rc = _run_handler(
+                stdout, stderr, rc = _run_handler(
                     [rtk_bin, "hook", "claude"], payload, timeout=10
                 )
                 # Pass through rtk output and its exit code (rtk may exit non-zero).
                 if stdout.strip() or rc != 0:
-                    _passthrough(stdout, rc)
+                    _passthrough(stdout, stderr, rc)
             else:
                 print(
                     "pretooluse-dispatcher: rtk not found on PATH; skipping",

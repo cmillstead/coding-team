@@ -86,7 +86,7 @@ class TestRunHandler:
     def test_silent_script_returns_empty_stdout(self, tmp_path):
         script = tmp_path / "silent.py"
         script.write_text("import sys\nsys.exit(0)\n")
-        stdout, rc = _ptd._run_handler([sys.executable, str(script)], "{}")
+        stdout, stderr, rc = _ptd._run_handler([sys.executable, str(script)], "{}")
         assert stdout == ""
         assert rc == 0
 
@@ -95,13 +95,13 @@ class TestRunHandler:
         script.write_text(
             'import json\nprint(json.dumps({"decision":"block","reason":"test"}))\n'
         )
-        stdout, rc = _ptd._run_handler([sys.executable, str(script)], "{}")
+        stdout, stderr, rc = _ptd._run_handler([sys.executable, str(script)], "{}")
         assert '"decision"' in stdout
 
     def test_crashing_script_returns_empty_stdout(self, tmp_path):
         crash = tmp_path / "crash.py"
         crash.write_text("raise RuntimeError('boom')\n")
-        stdout, rc = _ptd._run_handler([sys.executable, str(crash)], "{}")
+        stdout, stderr, rc = _ptd._run_handler([sys.executable, str(crash)], "{}")
         assert stdout == ""
         # rc reflects the subprocess exit code (non-zero on crash);
         # isolation is at routing level: empty stdout means dispatcher skips.
@@ -109,18 +109,74 @@ class TestRunHandler:
     def test_timeout_returns_empty(self, tmp_path):
         slow = tmp_path / "slow.py"
         slow.write_text("import time\ntime.sleep(10)\n")
-        stdout, rc = _ptd._run_handler(
+        stdout, stderr, rc = _ptd._run_handler(
             [sys.executable, str(slow)], "{}", timeout=1
         )
         assert stdout == ""
         assert rc == 0
 
     def test_missing_interpreter_returns_empty(self):
-        stdout, rc = _ptd._run_handler(
+        stdout, stderr, rc = _ptd._run_handler(
             ["/no/such/interp", "/no/such/script.py"], "{}"
         )
         assert stdout == ""
         assert rc == 0
+
+    def test_stderr_is_captured(self, tmp_path):
+        """Handler stderr is captured and returned as the second element."""
+        script = tmp_path / "stderr_writer.py"
+        script.write_text(
+            'import sys\nsys.stderr.write("blocked via stderr")\nsys.exit(2)\n'
+        )
+        stdout, stderr, rc = _ptd._run_handler([sys.executable, str(script)], "{}")
+        assert stdout == ""
+        assert "blocked via stderr" in stderr
+        assert rc == 2
+
+    def test_exit2_returncode_captured(self, tmp_path):
+        """Handler exiting with code 2 returns rc=2."""
+        script = tmp_path / "exit2.py"
+        script.write_text("import sys\nsys.exit(2)\n")
+        stdout, stderr, rc = _ptd._run_handler([sys.executable, str(script)], "{}")
+        assert rc == 2
+
+
+class TestPassthrough:
+    """Unit tests for _passthrough: stdout, stderr forwarding and exit code."""
+
+    def test_exits_with_given_returncode(self, capsys):
+        with pytest.raises(SystemExit) as exc_info:
+            _ptd._passthrough("", "", 2)
+        assert exc_info.value.code == 2
+
+    def test_stdout_written_verbatim(self, capsys):
+        payload = '{"decision":"block","reason":"BLOCKED"}\n'
+        with pytest.raises(SystemExit):
+            _ptd._passthrough(payload, "", 0)
+        captured = capsys.readouterr()
+        assert captured.out == payload
+
+    def test_stderr_written_verbatim(self, capsys):
+        with pytest.raises(SystemExit) as exc_info:
+            _ptd._passthrough("", "blocked via exit 2\n", 2)
+        assert exc_info.value.code == 2
+        captured = capsys.readouterr()
+        assert "blocked via exit 2" in captured.err
+
+    def test_empty_stderr_produces_no_stderr_output(self, capsys):
+        payload = '{"decision":"block","reason":"BLOCKED"}\n'
+        with pytest.raises(SystemExit):
+            _ptd._passthrough(payload, "", 0)
+        captured = capsys.readouterr()
+        assert captured.err == ""
+
+    def test_both_stdout_and_stderr_forwarded(self, capsys):
+        with pytest.raises(SystemExit) as exc_info:
+            _ptd._passthrough("stdout-content\n", "stderr-content\n", 2)
+        assert exc_info.value.code == 2
+        captured = capsys.readouterr()
+        assert "stdout-content" in captured.out
+        assert "stderr-content" in captured.err
 
 
 # ---------------------------------------------------------------------------

@@ -21,14 +21,14 @@ Why subprocess (not runpy):
 Output merging contract (multiple-handler case):
   When multiple handlers match one tool_name (currently Bash: loop-detection +
   lint-warning-enforcer; Write|Edit: codesight-hooks + builder-self-check):
-    1. Run ALL applicable handlers regardless of individual results.
-    2. Classify each handler's stdout:
-         "block"    → {"decision":"block","reason":"..."}
-         "advisory" → {"decision":"allow","reason":"..."}
-         ""         → silent (no stdout or non-JSON)
-    3. First BLOCK wins: emit the block reason and exit immediately.
-    4. ADVISORIES are merged: emit one combined advisory with all reasons joined by
-       double-newline (same result as seeing both advisories separately).
+    1. Run handlers in registration order.
+    2. Exit-code 2 block (mechanism b): if a handler exits 2, write its stderr to
+       real stderr and sys.exit(2) immediately — first such handler wins and no
+       further handlers run. Preserves the exit-2-via-stderr shape verbatim.
+    3. Stdout JSON block (mechanism a): {"decision":"block","reason":"..."} →
+       collect all blocks, emit merged block JSON (exit 0). All handlers still run.
+    4. ADVISORIES: {"decision":"allow","reason":"..."} → merge all reasons joined
+       by double-newline into one advisory (exit 0). All handlers still run.
     5. If all handlers are silent: exit 0 (no output).
 
 Escape hatches:
@@ -68,11 +68,11 @@ def _run_handler(
     payload: str,
     *,
     timeout: int = 30,
-) -> tuple[str, int]:
-    """Run cmd with payload on stdin. Return (raw_stdout, returncode).
+) -> tuple[str, str, int]:
+    """Run cmd with payload on stdin. Return (raw_stdout, raw_stderr, returncode).
 
     Fully isolated: timeout, FileNotFoundError, OSError, and all other
-    exceptions yield ("", 0) so the dispatcher continues. Never raises.
+    exceptions yield ("", "", 0) so the dispatcher continues. Never raises.
     """
     name = Path(cmd[-1]).name
     try:
@@ -83,25 +83,25 @@ def _run_handler(
             text=True,
             timeout=timeout,
         )
-        return result.stdout, result.returncode
+        return result.stdout, result.stderr, result.returncode
     except subprocess.TimeoutExpired:
         print(
             f"posttooluse-dispatcher: timeout {name} after {timeout}s",
             file=sys.stderr,
         )
-        return "", 0
+        return "", "", 0
     except (FileNotFoundError, PermissionError, OSError) as exc:
         print(
             f"posttooluse-dispatcher: cannot run {name}: {exc!r}",
             file=sys.stderr,
         )
-        return "", 0
+        return "", "", 0
     except Exception as exc:  # noqa: BLE001 — catch-all by design; isolation guarantee
         print(
             f"posttooluse-dispatcher: error in {name}: {exc!r}",
             file=sys.stderr,
         )
-        return "", 0
+        return "", "", 0
 
 
 def _classify_output(raw_stdout: str) -> tuple[str, str]:
@@ -134,8 +134,15 @@ def _run_and_emit(handlers: list[str], payload: str, skip: set[str]) -> None:
     """Run all handlers, merge outputs, emit one unified response.
 
     Execution order: handlers are run in registration order. All run regardless
-    of each other's output (per-check isolation). Blocks take priority over
-    advisories. Multiple advisories are merged into one.
+    of each other's output (per-check isolation), unless an exit-2 block is
+    encountered (which exits immediately — first such handler in run order wins).
+
+    Priority:
+      1. Exit-code 2 (mechanism b): write handler stderr to real stderr, sys.exit(2).
+         First exit-2 handler wins; remaining handlers are not run.
+      2. Stdout JSON block (mechanism a): emit merged block JSON, exit 0.
+      3. Advisories: merge into one allow JSON, exit 0.
+      4. All silent: exit 0.
     """
     blocks: list[str] = []
     advisories: list[str] = []
@@ -143,7 +150,13 @@ def _run_and_emit(handlers: list[str], payload: str, skip: set[str]) -> None:
     for script in handlers:
         if _is_skipped(script, skip):
             continue
-        stdout, _rc = _run_handler([sys.executable, script], payload)
+        stdout, stderr, rc = _run_handler([sys.executable, script], payload)
+        if rc == 2:
+            # Exit-2 block: propagate verbatim — first such handler wins.
+            if stderr:
+                sys.stderr.write(stderr)
+                sys.stderr.flush()
+            sys.exit(2)
         kind, content = _classify_output(stdout)
         if kind == "block":
             blocks.append(content)
