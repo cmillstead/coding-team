@@ -227,3 +227,144 @@ def test_unknown_atoms_backtick_asymmetry_is_documented(settings_dir):
     cmd = "echo `git status` && echo done"
     assert compound_allow.should_auto_allow(cmd, claude_dir=settings_dir) is True
     assert compound_allow.unknown_atoms(cmd, claude_dir=settings_dir) is None
+
+
+# ---------------------------------------------------------------------------
+# Tests for is_multi_statement
+# ---------------------------------------------------------------------------
+
+class TestIsMultiStatement:
+    def test_pipe(self):
+        assert compound_allow.is_multi_statement("ls | wc -l") is True
+
+    def test_and_and(self):
+        assert compound_allow.is_multi_statement("a && b") is True
+
+    def test_semicolon(self):
+        assert compound_allow.is_multi_statement("cmd1; cmd2") is True
+
+    def test_for_loop_via_semicolon(self):
+        # The `;` before `do` triggers the structural signal — no keyword heuristic needed
+        assert compound_allow.is_multi_statement("for f in *; do x; done") is True
+
+    def test_command_substitution(self):
+        assert compound_allow.is_multi_statement("echo $(date)") is True
+
+    def test_heredoc(self):
+        assert compound_allow.is_multi_statement("cat << EOF") is True
+
+    def test_subshell_grouping(self):
+        assert compound_allow.is_multi_statement("( cd x && y )") is True
+
+    def test_background_ampersand(self):
+        assert compound_allow.is_multi_statement("x &") is True
+
+    def test_brace_group(self):
+        assert compound_allow.is_multi_statement("{ a; b; }") is True
+
+    def test_literal_newline(self):
+        assert compound_allow.is_multi_statement("cmd1\ncmd2") is True
+
+    def test_plain_command_false(self):
+        assert compound_allow.is_multi_statement("wc -l file") is False
+
+    def test_git_status_false(self):
+        assert compound_allow.is_multi_statement("git status") is False
+
+    def test_quoted_pipe_false(self):
+        # The pipe is inside a quoted string — must not be flagged
+        assert compound_allow.is_multi_statement('grep "a|b" file') is False
+
+    def test_printf_false(self):
+        assert compound_allow.is_multi_statement("printf '%s' x") is False
+
+    def test_bare_if_as_arg_false(self):
+        # `if` as a bare word argument — no `;` or newline present
+        assert compound_allow.is_multi_statement("grep if file") is False
+
+    def test_bare_for_as_arg_false(self):
+        assert compound_allow.is_multi_statement("find . -name for") is False
+
+    def test_trailing_comment_false(self):
+        # `&&` and `b` are stripped by comment removal — must not be flagged
+        assert compound_allow.is_multi_statement("echo ok # a && b") is False
+
+
+# ---------------------------------------------------------------------------
+# Tests for is_blessed_value_capture
+# ---------------------------------------------------------------------------
+
+class TestIsBlessedValueCapture:
+    def test_simple_ls(self):
+        assert compound_allow.is_blessed_value_capture("VAR=$(ls)") is True
+
+    def test_git_rev_parse(self):
+        assert compound_allow.is_blessed_value_capture("REPO=$(git rev-parse --show-toplevel)") is True
+
+    def test_inner_multi_false(self):
+        # Inner command is itself multi-statement — not blessed
+        assert compound_allow.is_blessed_value_capture("VAR=$(ls | wc -l)") is False
+
+    def test_trailing_after_capture_false(self):
+        # Trailing `&& rm x` means the whole string is not a pure assignment
+        assert compound_allow.is_blessed_value_capture("VAR=$(git status) && rm x") is False
+
+    def test_plain_echo_false(self):
+        assert compound_allow.is_blessed_value_capture("echo hi") is False
+
+
+# ---------------------------------------------------------------------------
+# Tests for blessed_inner_is_allowlisted
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def settings_dir_with_interpreters(tmp_path):
+    """Settings dir that allowlists git, bash, python3, and node (to test interpreter hole-closure)."""
+    settings = {
+        "permissions": {
+            "allow": [
+                "Bash(git *)",
+                "Bash(echo *)",
+                "Bash(bash *)",
+                "Bash(python3 *)",
+                "Bash(node *)",
+            ],
+            "deny": [],
+        }
+    }
+    (tmp_path / "settings.json").write_text(json.dumps(settings))
+    compound_allow._cache.clear()
+    return tmp_path
+
+
+class TestBlessedInnerIsAllowlisted:
+    def test_git_rev_parse_allowed(self, settings_dir):
+        # REPO=$(git rev-parse --show-toplevel) — git * is allowlisted
+        assert compound_allow.blessed_inner_is_allowlisted(
+            "REPO=$(git rev-parse --show-toplevel)", claude_dir=settings_dir
+        ) is True
+
+    def test_unlisted_tool_false(self, settings_dir):
+        # unlisted-tool is not in the allow list
+        assert compound_allow.blessed_inner_is_allowlisted(
+            "X=$(unlisted-tool)", claude_dir=settings_dir
+        ) is False
+
+    def test_interpreter_bash_false_even_if_allowlisted(self, settings_dir_with_interpreters):
+        # CRITICAL: bash is an unsafe interpreter head — must NEVER auto-allow
+        # even when `bash *` appears in the allowlist
+        assert compound_allow.blessed_inner_is_allowlisted(
+            "X=$(bash -lc 'a && b')", claude_dir=settings_dir_with_interpreters
+        ) is False
+
+    def test_interpreter_python3_false_even_if_allowlisted(self, settings_dir_with_interpreters):
+        # python3 is an unsafe interpreter head — must NEVER auto-allow
+        assert compound_allow.blessed_inner_is_allowlisted(
+            "X=$(python3 -c '...')", claude_dir=settings_dir_with_interpreters
+        ) is False
+
+    def test_interpreter_node_false_even_if_allowlisted(self, settings_dir_with_interpreters):
+        # node is an unsafe interpreter head — must NEVER auto-allow
+        assert compound_allow.blessed_inner_is_allowlisted(
+            "X=$(node -e '...')", claude_dir=settings_dir_with_interpreters
+        ) is False

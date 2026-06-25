@@ -178,6 +178,17 @@ _UNSAFE_BUILTINS = {
     "eval", "exec", "source", ".", "trap", "command", "builtin", "env",
     "xargs", "find",  # can invoke arbitrary subcommands via -exec / args
     "sudo", "doas",
+    # Arbitrary-code interpreters: a value-capture of an interpreter such as
+    # `$(bash -lc '...')` or `$(python3 -c '...')` can embed ANY shell command
+    # inside a string literal, bypassing all structural analysis. Listing them
+    # here makes _atom_head_is_safe() reject them, which closes the hole on
+    # the blessed_inner_is_allowlisted path even when the interpreter itself
+    # appears in the user's allowlist.
+    "bash", "sh", "zsh", "ksh", "dash", "fish",
+    "python", "python2", "python3",
+    "node", "deno", "bun",
+    "ruby", "perl", "php",
+    "awk", "gawk",
 }
 
 
@@ -425,5 +436,147 @@ def should_auto_allow(command: str, claude_dir: Path | None = None) -> bool:
             if not atom_is_allowed(atom, allow, deny):
                 return False
         return True
+    except Exception:
+        return False
+
+
+# ---------------------------------------------------------------------------
+# Deny-side primitives (ADDITIVE AND DORMANT — no caller yet)
+# ---------------------------------------------------------------------------
+
+# Compiled once: strip a trailing comment (preceded by whitespace or SOL) and
+# everything after it. We apply this AFTER stripping quoted strings.
+_TRAILING_COMMENT = re.compile(r"(?:(?<=\s)|^)#.*$")
+
+# Signals that indicate a multi-statement command even after quote-stripping.
+_MULTI_SIGNALS = (
+    "\n",   # literal newline
+    ";",    # statement separator
+    "&&",   # and-list
+    "||",   # or-list
+    "|",    # pipeline
+    "$(",   # command substitution
+    "`",    # backtick substitution
+    "(",    # subshell / grouping open
+    ")",    # subshell / grouping close
+    "{",    # brace group open
+    "}",    # brace group close
+    "&",    # background execution
+    "<<",   # heredoc
+)
+
+# Regex to strip quoted spans. Single-quoted strings are literal (no escapes);
+# double-quoted strings allow \" escapes inside them. We replace matches with a
+# single space to preserve token boundaries.
+_QUOTED_SPAN = re.compile(r"'[^']*'|\"(?:[^\"\\]|\\.)*\"")
+
+# Pattern for a blessed value-capture: `VAR=$(inner)` with nothing trailing.
+_BLESSED_CAPTURE = re.compile(r"^\s*[A-Za-z_]\w*=\$\((.*)\)\s*$", re.DOTALL)
+
+
+def is_multi_statement(command: str) -> bool:
+    """Return True iff ``command`` contains multi-statement shell constructs.
+
+    Preprocesses the command by:
+      1. Stripping quoted strings (``'...'`` and ``"..."``) so metacharacters
+         inside quotes are not counted.
+      2. Stripping a trailing ``#``-comment (preceded by whitespace or SOL).
+
+    Then returns True if the preprocessed string contains ANY of: a literal
+    newline; ``;``, ``&&``, ``||``, or ``|``; ``$(`` or a backtick; ``(``,
+    ``)``, ``{``, or ``}``; a trailing ``&``; or ``<<`` (heredoc).
+
+    Redirects (``>`` / ``<``) are NOT triggers.
+
+    No loop/control-keyword heuristic — ``for``/``while``/``if`` as bare words
+    are NOT scanned; a shell loop necessarily contains ``;`` or a newline before
+    ``do``/``done``, which the structural signals already catch.
+
+    Self-guards: on any exception returns True (fail toward deny — a false-deny
+    only costs the caller a single-command retry, never a security hole).
+
+    Never raises.
+    """
+    try:
+        # Step 1: strip quoted spans (replace with a space to keep boundaries)
+        preprocessed = _QUOTED_SPAN.sub(" ", command)
+        # Step 2: strip trailing comment
+        preprocessed = _TRAILING_COMMENT.sub("", preprocessed)
+        # Scan for any multi-statement signal
+        for signal in _MULTI_SIGNALS:
+            if signal in preprocessed:
+                return True
+        return False
+    except Exception:
+        return True  # fail toward deny
+
+
+def is_blessed_value_capture(command: str) -> bool:
+    """Return True iff ``command`` is exactly one safe value-capture assignment.
+
+    A blessed value-capture has the form ``VAR=$(inner)`` where:
+      * The WHOLE string (after stripping leading/trailing whitespace) matches
+        ``VAR=$(...)`` with nothing trailing after the closing ``)``).
+      * The captured ``inner`` is itself a SINGLE command: ``is_multi_statement(inner)``
+        returns False.
+      * The inner command contains no nested ``$(`` or backtick.
+
+    Returns False on any ambiguity or exception.
+
+    Never raises.
+    """
+    try:
+        m = _BLESSED_CAPTURE.match(command)
+        if not m:
+            return False
+        inner = m.group(1)
+        # Reject nested substitutions inside the inner command
+        if "$(" in inner or "`" in inner:
+            return False
+        # Inner must be a single statement
+        if is_multi_statement(inner):
+            return False
+        return True
+    except Exception:
+        return False
+
+
+def blessed_inner_is_allowlisted(command: str, claude_dir: Path | None = None) -> bool:
+    """Return True iff ``command`` is a blessed value-capture whose inner command is allowlisted.
+
+    This is the ONLY path that can lead to an auto-allow for a value-capture.
+    It is intentionally conservative — any ambiguity returns False.
+
+    Steps:
+      1. Confirm ``command`` is a blessed value-capture via ``is_blessed_value_capture``.
+      2. Extract the inner command with the same regex.
+      3. Decompose the inner command via ``decompose_atoms``; require exactly ONE atom.
+      4. Verify the atom's head is safe (``_atom_head_is_safe``), which now includes
+         interpreter rejection (``bash``, ``python3``, ``node``, etc.).
+      5. Verify the atom matches an allow entry and no deny entry from the live settings.
+
+    All interpreter heads (``bash``, ``python3``, ``node``, etc.) are in
+    ``_UNSAFE_BUILTINS`` and therefore fail step 4 even when they appear in the
+    allowlist — this closes the arbitrary-code-in-string-literal hole.
+
+    Never raises. Returns False on any exception or ambiguity.
+    """
+    try:
+        if not is_blessed_value_capture(command):
+            return False
+        m = _BLESSED_CAPTURE.match(command)
+        if not m:
+            return False
+        inner = m.group(1)
+        atoms = decompose_atoms(inner)
+        if not atoms or len(atoms) != 1:
+            return False
+        atom = atoms[0]
+        if not _atom_head_is_safe(atom):
+            return False  # rejects interpreters even if allowlisted
+        allow, deny = get_bash_rules(claude_dir)
+        if not allow:
+            return False
+        return atom_is_allowed(atom, allow, deny)
     except Exception:
         return False
