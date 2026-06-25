@@ -159,7 +159,7 @@ _COMPOUND_SIGNALS = re.compile(r"(;|&&|\|\||\|)|(\$\()|(`)|(^\s*[A-Za-z_][A-Za-z
 # are split out, where a genuine subshell `(...)` or background `&` still
 # survives into an atom.
 _UNSAFE_UPFRONT = (
-    ">", "<",        # any redirect (covers >, >>, <, <<, &>, 2>, <(, >( fragments)
+    ">", "<",        # any NON-benign redirect after _strip_benign_redirects runs (covers >, >>, <, <<, &>, 2>, <(, >( fragments)
     "$((",           # arithmetic expansion
     "${",            # parameter expansion with operators — do not reason about it
     "{", "}",        # brace grouping / expansion
@@ -180,6 +180,28 @@ _UNSAFE_BUILTINS = {
     "sudo", "doas",
 }
 
+# Provably-harmless redirect fragments: discard-to-/dev/null and fd dup/close ONLY.
+# Stripped before the _UNSAFE_UPFRONT scan so a command whose ONLY redirects are
+# these forms can still auto-approve. Anything else is left intact -> still refused.
+# /dev/null is a device (cannot write a file or traverse), and the (?![\w/.])
+# lookahead means "/dev/null/../etc/passwd" does NOT match -> its ">" survives -> refused.
+_BENIGN_REDIRECT_RE = re.compile(
+    r"(?:^|(?<=\s))"
+    r"(?:"
+    r"\d*>>?\s*/dev/null(?![\w/.])"   # >/dev/null  2>/dev/null  >>/dev/null
+    r"|&>>?\s*/dev/null(?![\w/.])"    # &>/dev/null  &>>/dev/null
+    r"|\d*<\s*/dev/null(?![\w/.])"    # </dev/null   0</dev/null
+    r"|\d*>&\d+(?!\w)"                # 2>&1  1>&2  >&2
+    r"|\d*>&-(?!\w)"                  # 2>&-  >&-
+    r"|\d*<&\d+(?!\w)"                # 0<&3
+    r")"
+)
+
+
+def _strip_benign_redirects(command: str) -> str:
+    """Remove only provably-harmless redirects (>/dev/null, fd-dups); leave the rest."""
+    return _BENIGN_REDIRECT_RE.sub("", command)
+
 
 # ---------------------------------------------------------------------------
 # Loop compounds (for / while / until)
@@ -195,10 +217,12 @@ _UNSAFE_BUILTINS = {
 #
 # Fail-safe contract (cite P33/C14): this normalization NEVER expands what is
 # auto-approvable beyond "every extracted command is allowlisted". Anything nested,
-# ambiguous, multi-loop, or unparseable returns None (refuse). A redirect anywhere
-# (including the benign `2>/dev/null`) still trips the existing `_UNSAFE_UPFRONT`
-# scan that runs AFTER this rewrite — loops are held to the SAME redirect refusal as
-# flat compounds, never a looser one.
+# ambiguous, multi-loop, or unparseable returns None (refuse). Benign discard/fd-dup
+# redirects (`>/dev/null`, `2>&1`, etc.) are stripped uniformly by
+# `_strip_benign_redirects` for BOTH flat compounds and loop bodies before the
+# `_UNSAFE_UPFRONT` scan; every NON-benign redirect anywhere still trips
+# `_UNSAFE_UPFRONT` and forces refusal — loops are held to the SAME bar as flat
+# compounds, never a looser one.
 
 # Whole-word loop/control-flow keywords. Presence of any loop opener
 # (for/while/until) routes the command through _normalize_loops.
@@ -433,6 +457,7 @@ def decompose_atoms(command: str) -> list[str] | None:
         if normalized is None:
             return None
         command = normalized
+        command = _strip_benign_redirects(command)   # strip >/dev/null, 2>&1, etc. before unsafe scan
 
         # Reject unambiguously-unsafe fragments up front. `(`/`)`/`&` are NOT in
         # this set (see _UNSAFE_UPFRONT) — they belong to the supported `$(...)`

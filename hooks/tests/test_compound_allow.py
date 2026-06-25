@@ -275,12 +275,12 @@ def test_motivating_for_loop_count_files_auto_allows(loop_settings_dir):
     assert compound_allow.should_auto_allow(cmd, claude_dir=loop_settings_dir) is True
 
 
-def test_motivating_for_loop_with_redirect_falls_through(loop_settings_dir):
-    # Motivating case 1 AS WRITTEN: the benign `2>/dev/null` redirect is still
-    # refused by the existing `_UNSAFE_UPFRONT` redirect scan — loops are held to the
-    # SAME redirect refusal as flat compounds, never looser. Falls through to prompt.
+def test_motivating_for_loop_with_redirect_auto_allows(loop_settings_dir):
+    # Motivating case 1 AS WRITTEN: `2>/dev/null` is a benign discard redirect that is
+    # now stripped by `_strip_benign_redirects` before the `_UNSAFE_UPFRONT` scan.
+    # ls/wc/echo are all allowlisted in this fixture → auto-approve.
     cmd = 'for d in agents memory security; do c=$(ls "$d"/*.md 2>/dev/null | wc -l); echo "$d: $c"; done'
-    assert compound_allow.should_auto_allow(cmd, claude_dir=loop_settings_dir) is False
+    assert compound_allow.should_auto_allow(cmd, claude_dir=loop_settings_dir) is True
 
 
 def test_motivating_pipe_into_while_falls_through(loop_settings_dir):
@@ -401,3 +401,103 @@ def test_loop_is_compound(loop_settings_dir):
     # A loop with no other connector still registers as compound so the auto-allow
     # path considers it (rather than being rejected as a plain single command).
     assert compound_allow.is_compound("for d in a b; do echo x; done") is True
+
+
+# ---------------------------------------------------------------------------
+# Benign-redirect tolerance — _strip_benign_redirects + _BENIGN_REDIRECT_RE
+#
+# Provably-harmless redirects (>/dev/null, 2>/dev/null, &>/dev/null, </dev/null,
+# fd-dups 2>&1, >&2, fd-close 2>&-) are stripped before the _UNSAFE_UPFRONT scan
+# so a command whose ONLY redirects are these forms can still auto-approve.
+# Every other redirect (real path, ~, $VAR, /dev/null/.., process sub) must still
+# force refusal. The deny-list check is also unaffected: rm stays refused even with
+# its benign redirect stripped.
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def settings_dir_texttools(tmp_path):
+    """Base fixture augmented with ls, wc for the loop benign-redirect test."""
+    settings = {
+        "permissions": {
+            "allow": [
+                "Bash(git *)",
+                "Bash(echo *)",
+                "Bash(basename *)",
+                "Bash(cat *)",
+                "Bash(pwd)",
+                "Bash(ls *)",
+                "Bash(wc *)",
+            ],
+            "deny": [],
+        }
+    }
+    (tmp_path / "settings.json").write_text(json.dumps(settings))
+    local = {"permissions": {"allow": ["Bash(grep *)"], "deny": ["Bash(rm *)"]}}
+    (tmp_path / "settings.local.json").write_text(json.dumps(local))
+    compound_allow._cache.clear()
+    return tmp_path
+
+
+def test_benign_redirect_stdout_dev_null_auto_allows(settings_dir):
+    # cat, echo allowlisted; >/dev/null is benign and stripped → auto-allow.
+    cmd = "cat file >/dev/null && echo ok"
+    assert compound_allow.should_auto_allow(cmd, claude_dir=settings_dir) is True
+
+
+def test_benign_redirect_stderr_dev_null_and_compound_auto_allows(settings_dir):
+    # grep, echo allowlisted; 2>/dev/null is benign and stripped → auto-allow.
+    cmd = "grep x file 2>/dev/null && echo ok"
+    assert compound_allow.should_auto_allow(cmd, claude_dir=settings_dir) is True
+
+
+def test_benign_redirect_fd_dup_auto_allows(settings_dir):
+    # git, grep allowlisted; 2>&1 fd-dup is benign and stripped → auto-allow.
+    cmd = "git status 2>&1 | grep x"
+    assert compound_allow.should_auto_allow(cmd, claude_dir=settings_dir) is True
+
+
+def test_benign_redirect_loop_with_dev_null_auto_allows(settings_dir_texttools):
+    # ls, wc, echo allowlisted; 2>/dev/null inside subst is benign → auto-allow.
+    cmd = 'for d in a b c; do c=$(ls "$d"/*.md 2>/dev/null | wc -l); echo "$d: $c"; done'
+    assert compound_allow.should_auto_allow(cmd, claude_dir=settings_dir_texttools) is True
+
+
+def test_real_path_redirect_still_refused(settings_dir):
+    # >/tmp/x is a real-path redirect — NOT benign — must still refuse.
+    cmd = "cat secrets > /tmp/x && echo ok"
+    assert compound_allow.should_auto_allow(cmd, claude_dir=settings_dir) is False
+
+
+def test_dev_null_traversal_redirect_still_refused(settings_dir):
+    # /dev/null/.. is NOT /dev/null — the lookahead (?![\w/.]) blocks this form;
+    # the ">" survives into _UNSAFE_UPFRONT and forces refusal.
+    cmd = "cat x > /dev/null/../etc/passwd && echo ok"
+    assert compound_allow.should_auto_allow(cmd, claude_dir=settings_dir) is False
+
+
+def test_tilde_redirect_still_refused(settings_dir):
+    # ~/file is a real path target — must still refuse.
+    cmd = "echo hi > ~/file && echo ok"
+    assert compound_allow.should_auto_allow(cmd, claude_dir=settings_dir) is False
+
+
+def test_var_redirect_still_refused(settings_dir):
+    # $VAR redirect is not a literal /dev/null — must still refuse.
+    cmd = "echo hi > $VAR && echo ok"
+    assert compound_allow.should_auto_allow(cmd, claude_dir=settings_dir) is False
+
+
+def test_denied_atom_still_refused_even_with_benign_redirect(settings_dir):
+    # rm is deny-listed; stripping the benign 2>/dev/null redirect must not change
+    # the outcome — the deny-list check independently forces refusal. This is the key
+    # safety proof: a dangerous atom stays refused regardless of redirect stripping.
+    cmd = "rm -rf x 2>/dev/null && echo ok"
+    assert compound_allow.should_auto_allow(cmd, claude_dir=settings_dir) is False
+
+
+def test_non_benign_redirect_inside_substitution_still_refused(settings_dir):
+    # A real-path redirect inside a command substitution survives stripping and
+    # trips _UNSAFE_UPFRONT after the substitution is flattened → refuse.
+    cmd = "echo $(cat x > realfile)"
+    assert compound_allow.should_auto_allow(cmd, claude_dir=settings_dir) is False
