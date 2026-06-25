@@ -181,10 +181,162 @@ _UNSAFE_BUILTINS = {
 }
 
 
-def is_compound(command: str) -> bool:
-    """Return True iff the command looks compound (connector/pipe/assignment/subst)."""
+# ---------------------------------------------------------------------------
+# Loop compounds (for / while / until)
+# ---------------------------------------------------------------------------
+#
+# A shell LOOP (`for VAR in LIST; do BODY; done`, `while COND; do BODY; done`,
+# `until COND; do BODY; done`) is a compound whose every EXECUTABLE command can be
+# extracted and held to the same all-allowlisted bar as a flat `;`/`&&`/`|` chain.
+# We REWRITE a recognized loop into a flat connector-joined string of just its
+# executable commands, then hand that to the existing decompose/allowlist machinery
+# — so a loop auto-approves IFF every command it would run is allowlisted, and any
+# loop we cannot fully and unambiguously parse falls through (return None).
+#
+# Fail-safe contract (cite P33/C14): this normalization NEVER expands what is
+# auto-approvable beyond "every extracted command is allowlisted". Anything nested,
+# ambiguous, multi-loop, or unparseable returns None (refuse). A redirect anywhere
+# (including the benign `2>/dev/null`) still trips the existing `_UNSAFE_UPFRONT`
+# scan that runs AFTER this rewrite — loops are held to the SAME redirect refusal as
+# flat compounds, never a looser one.
+
+# Whole-word loop/control-flow keywords. Presence of any loop opener
+# (for/while/until) routes the command through _normalize_loops.
+_LOOP_OPENERS = ("for", "while", "until")
+
+# Control-flow keywords stripped from the rewritten command. `for`/`in`/`while`/
+# `until` are consumed structurally by the parser below; `do`/`done`/`then`/`fi`/
+# `if`/`elif`/`else` may appear as standalone tokens inside a body and are removed
+# token-wise so they never reach the allowlist as a bogus atom.
+_CONTROL_KEYWORDS = frozenset(
+    ("for", "in", "do", "done", "while", "until", "then", "fi", "if", "elif", "else")
+)
+
+# A for-loop: `for VAR in LIST; do BODY; done` (also `... in LIST do ...` w/o the
+# semicolon). Non-greedy LIST/BODY; trailing `;` optional. DOTALL is irrelevant
+# (newlines are refused up front) but harmless.
+_FOR_RE = re.compile(
+    r"^\s*for\s+([A-Za-z_][A-Za-z0-9_]*)\s+in\s+(.*?)(?:;\s*|\s+)do\s+(.*?)\s*;?\s*done\s*;?\s*$",
+    re.DOTALL,
+)
+
+# A while/until loop: `while COND; do BODY; done`. COND keeps its connectors (it is
+# itself a command / pipeline) and is fed back through the flat decomposer.
+_WHILE_RE = re.compile(
+    r"^\s*(?:while|until)\s+(.*?)(?:;\s*|\s+)do\s+(.*?)\s*;?\s*done\s*;?\s*$",
+    re.DOTALL,
+)
+
+# Standalone `$(...)` / backtick substitutions inside a for-loop LIST. Only these
+# RUN a command; bare LIST words are data (filenames, literals) and are dropped.
+_SUBST_IN_LIST = re.compile(r"\$\([^()]*\)|`[^`]*`")
+
+# Git mutation subcommands this hook gates elsewhere. A loop running any of them is
+# refused by the auto-allow path itself (not just the hook's outer guard) so the
+# compound_allow layer is independently fail-safe for git-write inside a loop.
+_GATED_GIT_IN_LOOP = re.compile(r"\bgit\s+(?:add|commit|push|merge)\b")
+
+
+def has_loop(command: str) -> bool:
+    """Return True iff the command contains a loop opener keyword (whole word)."""
     try:
-        return bool(_COMPOUND_SIGNALS.search(command))
+        for kw in _LOOP_OPENERS:
+            if re.search(rf"\b{kw}\b", command):
+                return True
+        return False
+    except Exception:
+        return False
+
+
+def _loop_is_unambiguous(command: str) -> bool:
+    """Return True iff the command has exactly one loop (single do + single done).
+
+    Multiple `do`/`done` (nested or sequential loops) or an opener-count mismatch is
+    ambiguous to our single-pass parser — refuse it (fail-safe).
+    """
+    try:
+        do_count = len(re.findall(r"\bdo\b", command))
+        done_count = len(re.findall(r"\bdone\b", command))
+        opener_count = sum(len(re.findall(rf"\b{kw}\b", command)) for kw in _LOOP_OPENERS)
+        return do_count == 1 and done_count == 1 and opener_count == 1
+    except Exception:
+        return False
+
+
+def _normalize_loops(command: str) -> str | None:
+    """Rewrite a single recognized loop into a flat connector-joined command string.
+
+    Returns:
+      * the ORIGINAL command unchanged if it contains no loop opener (the common
+        non-loop path — the existing flat decomposer handles it);
+      * a flat ``cmd ; cmd ; ...`` string of the loop's executable commands when the
+        loop is recognized and unambiguous (the iteration-list substitutions, the
+        while/until condition, and the body — loop keywords and the for-variable
+        stripped);
+      * None when the command contains a loop opener but is nested / ambiguous /
+        unparseable, so the caller refuses (falls through to the prompt).
+
+    The returned string still flows through the existing `_UNSAFE_UPFRONT` scan,
+    substitution flattening, connector split, and per-atom allowlist checks — this
+    function ONLY discards loop scaffolding; it never relaxes any downstream check.
+
+    Never raises.
+    """
+    try:
+        if not has_loop(command):
+            return command
+        if not _loop_is_unambiguous(command):
+            return None
+        # A loop running a gated git mutation is refused here so the auto-allow path
+        # is independently fail-safe (the hook's outer guard would also catch it, but
+        # the compound_allow layer must not depend on that). `git status`/`git log`
+        # etc. are unaffected — only add/commit/push/merge.
+        if _GATED_GIT_IN_LOOP.search(command):
+            return None
+
+        m = _FOR_RE.match(command)
+        if m is not None:
+            _var, list_text, body = m.group(1), m.group(2), m.group(3)
+            # The iteration LIST is data EXCEPT for command substitutions, which
+            # actually run a command and must be held to the allowlist. Extract the
+            # substitutions; drop the bare words.
+            list_cmds = _SUBST_IN_LIST.findall(list_text)
+            # Refuse if a substitution opener survives extraction — an unbalanced or
+            # nested `$(` / backtick in the LIST that we did not fully account for
+            # means we cannot enumerate every command it runs. Fail-safe.
+            residual = _SUBST_IN_LIST.sub("", list_text)
+            if "$(" in residual or "`" in residual:
+                return None
+            pieces = list_cmds + [body]
+            flat = " ; ".join(p.strip() for p in pieces if p.strip())
+        else:
+            mw = _WHILE_RE.match(command)
+            if mw is None:
+                return None  # has a loop opener but matched no supported form → refuse
+            cond, body = mw.group(1), mw.group(2)
+            # The condition is itself a command/pipeline; keep it whole. The body is
+            # commands. Join with `;` so the flat decomposer splits both.
+            flat = " ; ".join(p.strip() for p in (cond, body) if p.strip())
+
+        # Strip any residual standalone control-flow keyword tokens (e.g. an inner
+        # `if`/`then`/`fi`) so they never reach the allowlist as a bogus atom. Bare
+        # word boundaries only — never touches keywords embedded in other tokens.
+        for kw in _CONTROL_KEYWORDS:
+            flat = re.sub(rf"\b{kw}\b", " ; ", flat)
+
+        # A loop with no extractable executable command (e.g. `for x in a b; do done`
+        # — body empty) is not a meaningful auto-allow candidate; refuse.
+        if not flat.strip(" ;"):
+            return None
+        return flat
+    except Exception:
+        return None
+
+
+def is_compound(command: str) -> bool:
+    """Return True iff the command looks compound (connector/pipe/assignment/subst/loop)."""
+    try:
+        return bool(_COMPOUND_SIGNALS.search(command)) or has_loop(command)
     except Exception:
         return False
 
@@ -270,6 +422,18 @@ def decompose_atoms(command: str) -> list[str] | None:
     Never raises.
     """
     try:
+        # Loop normalization runs FIRST: a recognized `for`/`while`/`until` loop is
+        # rewritten into a flat connector-joined string of its executable commands
+        # (loop scaffolding discarded); a non-loop command passes through unchanged;
+        # an ambiguous/nested/unparseable loop returns None → refuse. Everything
+        # below (unsafe-fragment scan, substitution flatten, per-atom checks,
+        # allowlist) then applies to the rewritten string UNCHANGED — loops are held
+        # to the exact same bar as flat compounds, never a looser one.
+        normalized = _normalize_loops(command)
+        if normalized is None:
+            return None
+        command = normalized
+
         # Reject unambiguously-unsafe fragments up front. `(`/`)`/`&` are NOT in
         # this set (see _UNSAFE_UPFRONT) — they belong to the supported `$(...)`
         # substitution and `&&`/`||` connectors and are caught per-atom below.
