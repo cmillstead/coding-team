@@ -501,3 +501,77 @@ def test_non_benign_redirect_inside_substitution_still_refused(settings_dir):
     # trips _UNSAFE_UPFRONT after the substitution is flattened → refuse.
     cmd = "echo $(cat x > realfile)"
     assert compound_allow.should_auto_allow(cmd, claude_dir=settings_dir) is False
+
+
+# ---------------------------------------------------------------------------
+# Cross-model review holes (regression tests added 2026-06-24)
+#
+# Three cases that the old (?![\w/.]) lookahead incorrectly stripped, allowing
+# commands that should be refused to pass the _UNSAFE_UPFRONT ">"/&lt;" scan.
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def settings_dir_with_git_grep(tmp_path):
+    """Extended fixture with git + grep for the positive regression cases."""
+    settings = {
+        "permissions": {
+            "allow": [
+                "Bash(git *)",
+                "Bash(echo *)",
+                "Bash(basename *)",
+                "Bash(cat *)",
+                "Bash(pwd)",
+                "Bash(grep *)",
+            ],
+            "deny": [],
+        }
+    }
+    (tmp_path / "settings.json").write_text(json.dumps(settings))
+    compound_allow._cache.clear()
+    return tmp_path
+
+
+def test_dev_null_with_trailing_dollar_var_refused(settings_dir):
+    # Hole 1: old (?![\w/.]) lookahead permits `$`, so `>/dev/null$X` was stripped
+    # though the real redirect target is the shell-expandable word `/dev/null$X`.
+    # The new (?=\s|$|[;&|)]) positive lookahead requires /dev/null to be the
+    # complete redirect word → the ">" survives → refused.
+    cmd = "echo hi >/dev/null$X && echo ok"
+    assert compound_allow.should_auto_allow(cmd, claude_dir=settings_dir) is False
+
+
+def test_arbitrary_fd_dup_write_refused(settings_dir):
+    # Hole 2: old `\d*>&\d+` accepted ANY digit, so `>&9` was stripped though fd 9
+    # may be an inherited writable file or socket. New pattern restricts target to
+    # [0-2] (standard streams only) → `>&9` is not stripped → ">" survives → refused.
+    cmd = "echo hi >&9 && echo ok"
+    assert compound_allow.should_auto_allow(cmd, claude_dir=settings_dir) is False
+
+
+def test_arbitrary_fd_dup_read_refused(settings_dir):
+    # Hole 3: same issue on the read side — `<&3` reads from an arbitrary inherited
+    # fd. New pattern restricts source to [0-2] → `<&3` is not stripped → "<"
+    # survives → refused.
+    cmd = "cat <&3 && echo ok"
+    assert compound_allow.should_auto_allow(cmd, claude_dir=settings_dir) is False
+
+
+# Positive regressions — these MUST still auto-allow after the fix.
+
+def test_dev_null_discard_still_auto_allows(settings_dir):
+    # >/dev/null with nothing following (end of word) must still be stripped → auto-allow.
+    cmd = "cat file >/dev/null && echo ok"
+    assert compound_allow.should_auto_allow(cmd, claude_dir=settings_dir) is True
+
+
+def test_stderr_to_stdout_fd_dup_still_auto_allows(settings_dir_with_git_grep):
+    # 2>&1 is a standard-stream dup → still stripped → auto-allow.
+    cmd = "git status 2>&1 | grep x"
+    assert compound_allow.should_auto_allow(cmd, claude_dir=settings_dir_with_git_grep) is True
+
+
+def test_stdout_to_stderr_fd_dup_still_auto_allows(settings_dir):
+    # >&2 is a standard-stream dup → still stripped → auto-allow.
+    cmd = "echo a >&2 && echo ok"
+    assert compound_allow.should_auto_allow(cmd, claude_dir=settings_dir) is True

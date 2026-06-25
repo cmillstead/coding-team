@@ -180,20 +180,28 @@ _UNSAFE_BUILTINS = {
     "sudo", "doas",
 }
 
-# Provably-harmless redirect fragments: discard-to-/dev/null and fd dup/close ONLY.
-# Stripped before the _UNSAFE_UPFRONT scan so a command whose ONLY redirects are
-# these forms can still auto-approve. Anything else is left intact -> still refused.
-# /dev/null is a device (cannot write a file or traverse), and the (?![\w/.])
-# lookahead means "/dev/null/../etc/passwd" does NOT match -> its ">" survives -> refused.
+# Provably-harmless redirect fragments: discard-to-/dev/null and fd dup/close among
+# the STANDARD streams (0,1,2) ONLY. Stripped before the _UNSAFE_UPFRONT scan so a
+# command whose ONLY redirects are these forms can still auto-approve. Anything else
+# is left intact -> still refused.
+#   * /dev/null discard: the (?=\s|$|[;&|)]) lookahead requires /dev/null to be the
+#     COMPLETE redirect word — a trailing $, /, ., or any other char (e.g.
+#     ">/dev/null$X", ">/dev/null/../etc/passwd") fails the lookahead, so ">" survives
+#     and the command is refused. /dev/null is a device: it cannot write a file or
+#     traverse.
+#   * fd dup/close: target fd restricted to [0-2] (and source to [0-2]). ">&1",
+#     "2>&1", "0<&2", "2>&-" are provably harmless (standard streams only). An
+#     arbitrary inherited fd like ">&9" or "<&3" is NOT provably safe (fd may be an
+#     inherited writable/readable file or socket) -> not stripped -> refused.
 _BENIGN_REDIRECT_RE = re.compile(
     r"(?:^|(?<=\s))"
     r"(?:"
-    r"\d*>>?\s*/dev/null(?![\w/.])"   # >/dev/null  2>/dev/null  >>/dev/null
-    r"|&>>?\s*/dev/null(?![\w/.])"    # &>/dev/null  &>>/dev/null
-    r"|\d*<\s*/dev/null(?![\w/.])"    # </dev/null   0</dev/null
-    r"|\d*>&\d+(?!\w)"                # 2>&1  1>&2  >&2
-    r"|\d*>&-(?!\w)"                  # 2>&-  >&-
-    r"|\d*<&\d+(?!\w)"                # 0<&3
+    r"\d*>>?\s*/dev/null(?=\s|$|[;&|)])"   # >/dev/null  2>/dev/null  >>/dev/null
+    r"|&>>?\s*/dev/null(?=\s|$|[;&|)])"    # &>/dev/null  &>>/dev/null
+    r"|\d*<\s*/dev/null(?=\s|$|[;&|)])"    # </dev/null   0</dev/null
+    r"|[0-2]?>&[0-2](?!\w)"                # 2>&1  1>&2  >&2  (standard streams only)
+    r"|[0-2]?>&-(?!\w)"                    # 2>&-  >&-  (fd close — harmless)
+    r"|[0-2]?<&[0-2](?!\w)"               # 0<&2  (standard streams only)
     r")"
 )
 
