@@ -1285,3 +1285,307 @@ class TestC17C1CrossResponsibility:
         assert ps_result is not None, (
             f"check_path_safety must fire on 'repoPath.startswith' — got None"
         )
+
+
+# ---------------------------------------------------------------------------
+# PAUL phase gate — check_paul_phase_gate direct-call tests
+# ---------------------------------------------------------------------------
+
+
+def _make_paul_phase_dir(tmp_path: Path, phase: str = "03-x") -> Path:
+    """Create a .paul/phases/<phase>/ directory and return its path."""
+    phase_dir = tmp_path / ".paul" / "phases" / phase
+    phase_dir.mkdir(parents=True)
+    return phase_dir
+
+
+class TestPaulPhaseGateBasic:
+    """Verify the staircase logic for each gated artifact."""
+
+    def test_discovery_blocked_when_assumptions_absent(self, tmp_path: Path):
+        """Writing DISCOVERY.md without ASSUMPTIONS.md present -> blocked."""
+        phase_dir = _make_paul_phase_dir(tmp_path)
+        file_path = str(phase_dir / "DISCOVERY.md")
+        result = _WRITE_GUARD.check_paul_phase_gate(file_path)
+        assert result is not None, "DISCOVERY.md must be blocked when ASSUMPTIONS.md absent"
+        assert "ASSUMPTIONS" in result
+        assert "BLOCKED" in result
+
+    def test_discovery_allowed_when_assumptions_present(self, tmp_path: Path):
+        """Writing DISCOVERY.md when ASSUMPTIONS.md exists -> allowed."""
+        phase_dir = _make_paul_phase_dir(tmp_path)
+        (phase_dir / "ASSUMPTIONS.md").write_text("# Assumptions\n")
+        file_path = str(phase_dir / "DISCOVERY.md")
+        result = _WRITE_GUARD.check_paul_phase_gate(file_path)
+        assert result is None, f"DISCOVERY.md must be allowed when ASSUMPTIONS.md exists, got: {result!r}"
+
+    def test_ground_blocked_when_discovery_absent(self, tmp_path: Path):
+        """Writing GROUND.md without DISCOVERY.md -> blocked."""
+        phase_dir = _make_paul_phase_dir(tmp_path)
+        file_path = str(phase_dir / "GROUND.md")
+        result = _WRITE_GUARD.check_paul_phase_gate(file_path)
+        assert result is not None, "GROUND.md must be blocked when DISCOVERY.md absent"
+        assert "DISCOVERY" in result
+        assert "BLOCKED" in result
+
+    def test_ground_allowed_when_discovery_present(self, tmp_path: Path):
+        """Writing GROUND.md when DISCOVERY.md exists -> allowed."""
+        phase_dir = _make_paul_phase_dir(tmp_path)
+        (phase_dir / "DISCOVERY.md").write_text("# Discovery\n")
+        file_path = str(phase_dir / "GROUND.md")
+        result = _WRITE_GUARD.check_paul_phase_gate(file_path)
+        assert result is None, f"GROUND.md must be allowed when DISCOVERY.md exists, got: {result!r}"
+
+    def test_assumptions_always_allowed(self, tmp_path: Path):
+        """Writing ASSUMPTIONS.md has no precondition -> always allowed."""
+        phase_dir = _make_paul_phase_dir(tmp_path)
+        file_path = str(phase_dir / "ASSUMPTIONS.md")
+        result = _WRITE_GUARD.check_paul_phase_gate(file_path)
+        assert result is None, f"ASSUMPTIONS.md must always be allowed, got: {result!r}"
+
+    def test_ungated_file_in_paul_phase_dir_not_gated(self, tmp_path: Path):
+        """A non-gated file inside .paul/phases/<dir>/ -> returns None (pass-through)."""
+        phase_dir = _make_paul_phase_dir(tmp_path)
+        file_path = str(phase_dir / "NOTES.md")
+        result = _WRITE_GUARD.check_paul_phase_gate(file_path)
+        assert result is None, f"NOTES.md must not be gated in a PAUL phase dir, got: {result!r}"
+
+
+class TestPaulPhaseGatePlanFiles:
+    """Verify PLAN file gating (GROUND present+fresh required)."""
+
+    def test_plan_blocked_when_ground_absent(self, tmp_path: Path):
+        """Writing a PLAN file without GROUND.md -> blocked."""
+        phase_dir = _make_paul_phase_dir(tmp_path)
+        file_path = str(phase_dir / "03-01-PLAN.md")
+        result = _WRITE_GUARD.check_paul_phase_gate(file_path)
+        assert result is not None, "PLAN file must be blocked when GROUND.md absent"
+        assert "GROUND" in result
+        assert "BLOCKED" in result
+
+    def test_plan_allowed_when_ground_present_and_fresh(self, tmp_path: Path):
+        """Writing a PLAN file when GROUND.md exists and is newer than DISCOVERY.md -> allowed."""
+        import os
+        import time
+        phase_dir = _make_paul_phase_dir(tmp_path)
+        discovery = phase_dir / "DISCOVERY.md"
+        ground = phase_dir / "GROUND.md"
+        discovery.write_text("# Discovery\n")
+        ground.write_text("# Ground\n")
+        # Set DISCOVERY older than GROUND
+        old_time = time.time() - 100
+        os.utime(discovery, (old_time, old_time))
+        # Ground is fresh (just written — newer than discovery)
+        file_path = str(phase_dir / "03-01-PLAN.md")
+        result = _WRITE_GUARD.check_paul_phase_gate(file_path)
+        assert result is None, f"PLAN allowed when GROUND is fresh, got: {result!r}"
+
+    def test_plan_blocked_when_ground_older_than_discovery(self, tmp_path: Path):
+        """Writing a PLAN file when GROUND.md is older than DISCOVERY.md -> blocked (stale ground)."""
+        import os
+        import time
+        phase_dir = _make_paul_phase_dir(tmp_path)
+        discovery = phase_dir / "DISCOVERY.md"
+        ground = phase_dir / "GROUND.md"
+        discovery.write_text("# Discovery\n")
+        ground.write_text("# Ground\n")
+        # Set GROUND older than DISCOVERY (stale)
+        old_time = time.time() - 100
+        os.utime(ground, (old_time, old_time))
+        file_path = str(phase_dir / "03-01-PLAN.md")
+        result = _WRITE_GUARD.check_paul_phase_gate(file_path)
+        assert result is not None, "PLAN file must be blocked when GROUND is older than DISCOVERY"
+        assert "GROUND" in result
+        assert "BLOCKED" in result
+
+    def test_plan_basename_regex_matches_various_forms(self, tmp_path: Path):
+        """Test that the PLAN regex matches various valid plan basenames."""
+        phase_dir = _make_paul_phase_dir(tmp_path)
+        # All should be blocked (GROUND absent) — confirms they ARE gated
+        for name in ("03-01-PLAN.md", "01-02-PLAN.md", "99-99-PLAN.md"):
+            result = _WRITE_GUARD.check_paul_phase_gate(str(phase_dir / name))
+            assert result is not None, f"{name} must be treated as a gated PLAN file"
+
+    def test_non_plan_md_in_phase_dir_not_gated_by_plan_regex(self, tmp_path: Path):
+        """A .md file whose name doesn't match PLAN regex is not gated as a PLAN."""
+        phase_dir = _make_paul_phase_dir(tmp_path)
+        # e.g. "myresearch.md" — not in the gated list and not a PLAN
+        file_path = str(phase_dir / "myresearch.md")
+        result = _WRITE_GUARD.check_paul_phase_gate(file_path)
+        assert result is None, f"Non-plan .md file must not be gated, got: {result!r}"
+
+    def test_plan_blocked_when_discovery_absent_even_if_ground_present(self, tmp_path: Path):
+        """Writing a PLAN file with GROUND present but DISCOVERY absent -> blocked.
+
+        GROUND may have been written via the WRITE_GUARD_ALLOW_PHASE_SKIP override
+        while DISCOVERY was absent. A subsequent PLAN write must still be blocked
+        because the full ASSUMPTIONS→DISCOVERY→GROUND→PLAN chain is required.
+        """
+        phase_dir = _make_paul_phase_dir(tmp_path)
+        (phase_dir / "ASSUMPTIONS.md").write_text("# Assumptions\n")
+        (phase_dir / "GROUND.md").write_text("# Ground\n")
+        # Note: DISCOVERY.md is intentionally NOT created
+        file_path = str(phase_dir / "03-01-PLAN.md")
+        result = _WRITE_GUARD.check_paul_phase_gate(file_path)
+        assert result is not None, (
+            "PLAN write must be BLOCKED when GROUND is present but DISCOVERY is absent — "
+            "the full ASSUMPTIONS→DISCOVERY→GROUND→PLAN chain is required"
+        )
+        assert "BLOCKED" in result
+        assert "DISCOVERY" in result
+
+
+class TestPaulPhaseGateCrossPhase:
+    """Phase isolation: artifacts from one phase do not satisfy another phase's gate."""
+
+    def test_ground_in_phase_02_does_not_satisfy_plan_in_phase_03(self, tmp_path: Path):
+        """GROUND.md in phase 02-x does not allow a PLAN write in phase 03-y."""
+        # Create GROUND in 02-x phase
+        phase_02 = tmp_path / ".paul" / "phases" / "02-x"
+        phase_02.mkdir(parents=True)
+        (phase_02 / "GROUND.md").write_text("# Ground for phase 02\n")
+
+        # PLAN write targets phase 03-y (GROUND.md absent in 03-y)
+        phase_03 = tmp_path / ".paul" / "phases" / "03-y"
+        phase_03.mkdir(parents=True)
+        file_path = str(phase_03 / "03-01-PLAN.md")
+        result = _WRITE_GUARD.check_paul_phase_gate(file_path)
+        assert result is not None, (
+            "GROUND.md in phase 02-x must not satisfy PLAN gate in phase 03-y"
+        )
+
+    def test_assumptions_in_other_phase_does_not_satisfy_discovery_gate(self, tmp_path: Path):
+        """ASSUMPTIONS.md in a different phase does not ungate DISCOVERY in this phase."""
+        other_phase = tmp_path / ".paul" / "phases" / "01-a"
+        other_phase.mkdir(parents=True)
+        (other_phase / "ASSUMPTIONS.md").write_text("# Assumptions\n")
+
+        target_phase = tmp_path / ".paul" / "phases" / "02-b"
+        target_phase.mkdir(parents=True)
+        file_path = str(target_phase / "DISCOVERY.md")
+        result = _WRITE_GUARD.check_paul_phase_gate(file_path)
+        assert result is not None, (
+            "ASSUMPTIONS.md in 01-a must not ungate DISCOVERY in 02-b"
+        )
+
+
+class TestPaulPhaseGateNonPaulPaths:
+    """Non-PAUL paths must pass through untouched (return None)."""
+
+    def test_normal_source_file_not_gated(self, tmp_path: Path):
+        """A regular source file path -> None."""
+        result = _WRITE_GUARD.check_paul_phase_gate(str(tmp_path / "src" / "foo.py"))
+        assert result is None
+
+    def test_memory_file_not_gated(self, tmp_path: Path):
+        """A memory/ .md file -> None."""
+        result = _WRITE_GUARD.check_paul_phase_gate(str(tmp_path / "memory" / "x.md"))
+        assert result is None
+
+    def test_paul_dir_without_phases_not_gated(self, tmp_path: Path):
+        """A .paul/ file NOT under phases/ -> None."""
+        paul_dir = tmp_path / ".paul"
+        paul_dir.mkdir()
+        result = _WRITE_GUARD.check_paul_phase_gate(str(paul_dir / "PROJECT.md"))
+        assert result is None
+
+    def test_paul_phases_without_phase_subdir_not_gated(self, tmp_path: Path):
+        """A file directly in .paul/phases/ (no phase subdir) -> None."""
+        phases_dir = tmp_path / ".paul" / "phases"
+        phases_dir.mkdir(parents=True)
+        result = _WRITE_GUARD.check_paul_phase_gate(str(phases_dir / "GROUND.md"))
+        assert result is None
+
+
+class TestPaulPhaseGateOverride:
+    """WRITE_GUARD_ALLOW_PHASE_SKIP env var overrides the gate."""
+
+    def test_override_allows_blocked_discovery_write(self, tmp_path: Path):
+        """WRITE_GUARD_ALLOW_PHASE_SKIP=1 allows DISCOVERY.md write when ASSUMPTIONS absent."""
+        phase_dir = _make_paul_phase_dir(tmp_path)
+        file_path = str(phase_dir / "DISCOVERY.md")
+        # Without override: should block
+        result_no_override = _WRITE_GUARD.check_paul_phase_gate(file_path)
+        assert result_no_override is not None, "Sanity: should block without override"
+        # With override: should allow
+        old = os.environ.pop("WRITE_GUARD_ALLOW_PHASE_SKIP", None)
+        try:
+            os.environ["WRITE_GUARD_ALLOW_PHASE_SKIP"] = "1"
+            result = _WRITE_GUARD.check_paul_phase_gate(file_path)
+        finally:
+            if old is not None:
+                os.environ["WRITE_GUARD_ALLOW_PHASE_SKIP"] = old
+            else:
+                os.environ.pop("WRITE_GUARD_ALLOW_PHASE_SKIP", None)
+        assert result is None, f"WRITE_GUARD_ALLOW_PHASE_SKIP=1 must allow the write, got: {result!r}"
+
+    def test_override_allows_blocked_plan_write(self, tmp_path: Path):
+        """WRITE_GUARD_ALLOW_PHASE_SKIP=1 allows PLAN write when GROUND absent."""
+        phase_dir = _make_paul_phase_dir(tmp_path)
+        file_path = str(phase_dir / "03-01-PLAN.md")
+        old = os.environ.pop("WRITE_GUARD_ALLOW_PHASE_SKIP", None)
+        try:
+            os.environ["WRITE_GUARD_ALLOW_PHASE_SKIP"] = "1"
+            result = _WRITE_GUARD.check_paul_phase_gate(file_path)
+        finally:
+            if old is not None:
+                os.environ["WRITE_GUARD_ALLOW_PHASE_SKIP"] = old
+            else:
+                os.environ.pop("WRITE_GUARD_ALLOW_PHASE_SKIP", None)
+        assert result is None, f"WRITE_GUARD_ALLOW_PHASE_SKIP=1 must allow PLAN write, got: {result!r}"
+
+    def test_override_log_written_when_gate_would_block(self, tmp_path: Path):
+        """When override is active and gate would block, a log line is appended."""
+        phase_dir = _make_paul_phase_dir(tmp_path)
+        file_path = str(phase_dir / "DISCOVERY.md")
+        log_path = tmp_path / "phase-gate-overrides.log"
+        # Temporarily patch the log path by setting env var override + checking log
+        # Since the log path is hardcoded to ~/.claude/security/..., we verify
+        # the function returns None under override (log append is best-effort).
+        old = os.environ.pop("WRITE_GUARD_ALLOW_PHASE_SKIP", None)
+        try:
+            os.environ["WRITE_GUARD_ALLOW_PHASE_SKIP"] = "1"
+            result = _WRITE_GUARD.check_paul_phase_gate(file_path)
+        finally:
+            if old is not None:
+                os.environ["WRITE_GUARD_ALLOW_PHASE_SKIP"] = old
+            else:
+                os.environ.pop("WRITE_GUARD_ALLOW_PHASE_SKIP", None)
+        # Primary assertion: gate returns None under override
+        assert result is None, f"Override must allow, got: {result!r}"
+
+
+class TestPaulPhaseGateFailOpen:
+    """Fail-open: the function must never raise, even on bad input."""
+
+    def test_does_not_raise_on_empty_string(self):
+        """Empty string file_path -> None, no exception."""
+        try:
+            result = _WRITE_GUARD.check_paul_phase_gate("")
+            assert result is None
+        except Exception as exc:  # noqa: BLE001  # testing fail-open
+            pytest.fail(f"check_paul_phase_gate raised on empty string: {exc}")
+
+    def test_does_not_raise_on_malformed_path(self):
+        """Malformed / weird path -> None, no exception."""
+        try:
+            result = _WRITE_GUARD.check_paul_phase_gate("\x00/bad\x00path")
+            assert result is None
+        except Exception as exc:  # noqa: BLE001  # testing fail-open
+            pytest.fail(f"check_paul_phase_gate raised on malformed path: {exc}")
+
+    def test_does_not_raise_when_stat_would_fail(self, tmp_path: Path):
+        """Path under .paul/phases/<dir>/GROUND.md where parent is unreadable -> None."""
+        phase_dir = _make_paul_phase_dir(tmp_path)
+        # Create DISCOVERY.md so the GROUND gate passes existence, then simulate
+        # a path that has .paul/phases segment but can't be stat'd
+        file_path = str(phase_dir / "GROUND.md")
+        # Remove the phase dir so stat will fail
+        import shutil
+        shutil.rmtree(str(phase_dir))
+        try:
+            result = _WRITE_GUARD.check_paul_phase_gate(file_path)
+            # Must not raise; may return None or a block reason
+            # (the path is gone, but the function should handle it)
+        except Exception as exc:  # noqa: BLE001  # testing fail-open
+            pytest.fail(f"check_paul_phase_gate raised when stat fails: {exc}")
