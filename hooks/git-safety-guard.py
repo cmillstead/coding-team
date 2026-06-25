@@ -694,9 +694,8 @@ def check_codex_digest_sync(command: str, target_root: str) -> str | None:
 
 # git subcommands this hook gates (secret/branch/verify/format). A command that
 # contains ANY of these must flow through the existing block logic and is NEVER a
-# candidate for the compound auto-allow path — that path only fires for compound
-# commands that this hook would otherwise neither block nor allow (so it cannot
-# override a guard).
+# candidate for the compound deny/bless path — that path only fires for compound
+# commands that do not carry a gated git op (so it cannot override a guard).
 _GATED_GIT_SUBCMD = re.compile(r'\bgit\s+(add|commit|push|merge)\b')
 
 
@@ -708,74 +707,37 @@ def _has_gated_git_op(command: str) -> bool:
         return True  # on any error, treat as gated → do NOT auto-allow
 
 
-def _emit_compound_allow_if_safe(command: str) -> bool:
-    """Emit a PreToolUse allow decision iff the compound command is provably allowlisted.
+def _deny_compound_unless_blessed(command: str) -> bool:
+    """Deny multi-statement compounds; let value-captures fall through to a prompt.
 
-    Returns True iff an allow decision was emitted (caller should stop). Returns
-    False (no output) when the command is not a safe-compound candidate, so the
-    hook's silent fall-through (normal permission prompt) is preserved.
+    Returns True iff a block decision was emitted (caller stops). Returns False
+    to fall through to CC's normal permission handling (allowlist prompt or pass).
 
-    SAFETY: This is the only place git-safety-guard emits an auto-allow. It runs
-    LAST in main(), after every block check, and only for commands that contain no
-    gated git op — so it can never override or weaken a guard block. It self-guards
-    and never raises (a raise here would hit the block-closed top-level handler).
+    Routing:
+      - Gated git ops (add/commit/push/merge): returns False immediately —
+        owned by the secret/branch/verify checks earlier in main().
+      - Single command (not multi-statement): returns False — CC's normal
+        allowlist handles it.
+      - Blessed value-capture ``VAR=$(single-inner)``: returns False — falls
+        through to the normal CC permission PROMPT (not auto-allowed, not blocked).
+      - Any other multi-statement compound: emits a block with an actionable
+        message and returns True.
+
+    Self-guards: on exception returns False (fall through to the normal prompt),
+    never block-closed.
     """
     try:
         if _has_gated_git_op(command):
-            return False
-        if not compound_allow.should_auto_allow(command):
-            return False
-        # Modern PreToolUse auto-approve shape: hookSpecificOutput.permissionDecision.
-        # This is what actually BYPASSES the permission prompt (the legacy
-        # {"decision":"allow"} shape does not reliably auto-approve a Bash prompt).
-        import json as _json
-        print(_json.dumps({
-            "hookSpecificOutput": {
-                "hookEventName": "PreToolUse",
-                "permissionDecision": "allow",
-                "permissionDecisionReason": (
-                    "Compound command: every constituent is on the Bash allowlist "
-                    "and none is deny-listed (auto-approved by git-safety-guard "
-                    "compound-allow fold)."
-                ),
-            }
-        }))
-        return True
-    except Exception:
-        return False
-
-
-def _emit_compound_hygiene_advisory_if_unknown(command: str) -> bool:
-    """Emit a keep-prompting + remind advisory iff a compound hides an unrecognized atom.
-
-    Increment 1 (WARN ONLY). Returns True iff an advisory was emitted (caller should
-    stop). Returns False (no output) otherwise, preserving the silent fall-through.
-
-    SAFETY: runs LAST in main(), AFTER every block check and AFTER the all-known
-    auto-allow fold. It skips any command containing a gated git op (mirrors the
-    auto-allow guard) so it can never weaken a guard. It emits the MODERN
-    permissionDecision:"ask" shape (output.ask), which FORCES the normal permission
-    prompt and attaches the hygiene reminder. Per the corrected-spec baseline-safety
-    floor, this can NEVER drop below baseline: an unknown-atom compound already
-    prompts (the fold only auto-approves all-known compounds), and "ask" is the
-    structural inverse of the fold's "allow" -- it never auto-approves and never
-    blocks. It deliberately does NOT use the legacy {"decision":"allow"} shape (whose
-    contract is only "doesn't reliably approve", not a safety proof). Self-guards;
-    never raises (a raise here would hit the block-closed top-level handler).
-    """
-    try:
-        if _has_gated_git_op(command):
-            return False
-        atoms = compound_allow.unknown_atoms(command)
-        if not atoms:
-            return False  # None (fail open) or [] (all known) -> no advisory
-        listed = ", ".join(f"`{a}`" for a in atoms)
-        output.ask(
-            "Command-hygiene: this compound chains an unrecognized command into "
-            f"allowlisted ones: {listed}. Per the reconciled rule, isolate the "
-            "unrecognized command(s) into their own single Bash call so each is "
-            "reviewed individually. (You are being prompted -- not blocked. "
-            "All-allowlisted compounds auto-approve unchanged.)"
+            return False  # git ops are owned by the secret/branch/verify checks
+        if not compound_allow.is_multi_statement(command):
+            return False  # single command — CC's normal allowlist applies
+        if compound_allow.is_blessed_value_capture(command):
+            return False  # value-capture -> normal permission PROMPT (not blocked, not auto-allowed)
+        # multi-statement and not a blessed value-capture -> BLOCK
+        output.block(
+            "One command per Bash call. Split this into separate calls — run each "
+            "command on its own and read its output before the next. (Compounds can't "
+            "match the allowlist and prompt every time.)"
         )
         return True
     except Exception:
@@ -1092,14 +1054,12 @@ def main():
                 )
                 return
 
-    # --- 4. Compound auto-allow + hygiene advisory (LAST: after every block check) ---
-    # All-known compound -> MODERN auto-approve (bypass the prompt), and stop.
-    if _emit_compound_allow_if_safe(command):
+    # --- 4. Compound deny / value-capture fall-through (LAST: after every block check) ---
+    # Multi-statement and not a gated git op -> BLOCK (deny posture).
+    # Exception: a blessed VAR=$(single-inner) value-capture -> falls through to CC prompt.
+    # Single commands fall through to CC's normal allowlist (no output from here).
+    if _deny_compound_unless_blessed(command):
         return
-    # Otherwise, if the compound hides an unrecognized atom, emit a NON-BLOCKING
-    # hygiene advisory (Increment 1, warn-only). Disjoint from the auto-allow set,
-    # so the two never both emit. Fail-open / not-compound -> nothing emitted.
-    _emit_compound_hygiene_advisory_if_unknown(command)
 
 
 

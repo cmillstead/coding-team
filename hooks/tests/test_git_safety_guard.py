@@ -14,8 +14,6 @@ _HOOKS_DIR = Path(__file__).resolve().parent.parent  # tests/ -> hooks/
 if str(_HOOKS_DIR) not in sys.path:
     sys.path.insert(0, str(_HOOKS_DIR))
 
-from _lib import compound_allow  # noqa: E402
-
 
 def _seed_verification_state(session_id: str, *, test_exit_code=None, lint_exit_code=None):
     """Seed verification state so commit format checks are reached.
@@ -1490,99 +1488,67 @@ class TestCodexDigestSyncGate:
 # ---------------------------------------------------------------------------
 
 class TestCompoundHygieneAdvisory:
-    """Increment 1: keep-prompting + remind advisory for compounds with an unknown atom.
+    """Updated for A2 deny posture: multi-statement compounds are BLOCKED, not warned.
 
-    The hook reads the LIVE ~/.claude allow/deny list (these tests do not control it).
-    To make the positive-fire test DETERMINISTIC regardless of the ambient allowlist,
-    pick a known-allowlisted simple atom from the live settings (fall back to `echo`,
-    near-universally allowlisted) and chain it with a clearly-unrecognized binary.
+    This class previously tested the Increment 1 warn-only advisory
+    (_emit_compound_hygiene_advisory_if_unknown). With the deny posture,
+    all multi-statement compounds are BLOCKED unless they are a blessed
+    VAR=$(allowlisted-single) value-capture. The advisory path is replaced by
+    a hard block with an actionable message.
     """
 
     @staticmethod
     def _known_atom():
-        """Return a simple atom guaranteed to be on the LIVE Bash allowlist, or skip.
+        """Return a simple single-statement atom for use in compound tests.
 
-        Uses the module-level `compound_allow` (imported portably at the top of this
-        file — NO absolute path). Reads the live rules via get_bash_rules() (same source
-        the hook uses). Prefers `echo checking` if `echo` is allowlisted; else derives a
-        bare command from the first `X *`-style allow glob. Skips (visibly) if nothing
-        usable is found, rather than asserting vacuously."""
-        compound_allow._cache.clear()
-        allow, deny = compound_allow.get_bash_rules()
-        if compound_allow.atom_is_allowed("echo checking", allow, deny):
-            return "echo checking"
-        for glob in sorted(allow):
-            head = glob.split()[0].rstrip("*").strip()
-            if head and "/" not in head and compound_allow.atom_is_allowed(head, allow, deny):
-                return head
-        pytest.skip("no simple known-allowlisted atom found in live settings")
+        These tests need a command that, when used in a compound (e.g. `cmd && other`),
+        triggers the deny path. Any single atom works — the hook blocks ALL non-blessed
+        multi-statement compounds regardless of allowlist membership.
+        """
+        return "echo checking"
 
-    def test_unknown_atom_compound_emits_ask_naming_atom(self, run_hook, make_event):
-        # POSITIVE, NON-VACUOUS (corrected-spec AC5): the advisory MUST fire. A known
-        # atom chained with a clearly-unrecognized binary -> the hook emits the MODERN
-        # ask shape whose reason names the unknown atom. NOT gated behind parsed-is-not-None.
+    def test_unknown_atom_compound_now_blocks(self, run_hook, make_event):
+        # A2 deny posture: a known atom chained with an unknown binary → BLOCK.
+        # The old warn-only path emitted permissionDecision:"ask"; the new path
+        # emits a hard block with an actionable message.
         known = self._known_atom()
         cmd = f"{known} && zzznotarealbinary --version"
         result = run_hook("git-safety-guard.py", make_event("Bash", command=cmd))
         assert result.returncode == 0, f"hook crashed: {result.stderr!r}"
         assert result.parsed is not None, (
-            f"advisory did NOT fire (no JSON emitted) — vacuous-pass guard. stdout={result.stdout!r}"
+            f"block did NOT fire (no JSON emitted). stdout={result.stdout!r}"
         )
-        hso = result.parsed.get("hookSpecificOutput", {})
-        assert hso.get("permissionDecision") == "ask", (
-            f"expected permissionDecision 'ask', got {result.parsed!r}"
+        assert result.parsed.get("decision") == "block", (
+            f"expected block for unknown-atom compound, got {result.parsed!r}"
         )
-        assert "zzznotarealbinary" in hso.get("permissionDecisionReason", ""), (
-            f"reason must name the unknown atom: {hso!r}"
+        assert "One command per Bash call" in result.parsed.get("reason", ""), (
+            f"block reason must be actionable: {result.parsed!r}"
         )
 
-    def test_unknown_atom_compound_not_block_not_legacy_allow(self, run_hook, make_event):
-        # Corrected-spec AC1 + AC2: the unknown-atom case must NOT block and must NOT use
-        # the legacy {"decision":"allow"} shape (which could auto-approve and drop baseline).
-        known = self._known_atom()
-        cmd = f"{known} && zzznotarealbinary --version"
-        result = run_hook("git-safety-guard.py", make_event("Bash", command=cmd))
-        assert result.returncode == 0
-        assert result.parsed is not None
-        # Must NOT block.
-        assert result.parsed.get("decision") != "block"
-        # Must NOT be the legacy allow shape anywhere in stdout.
-        assert '"decision": "allow"' not in result.stdout
-        assert '"decision":"allow"' not in result.stdout
-        assert result.parsed.get("decision") != "allow"
-
-    def test_all_known_compound_still_auto_allows_unchanged(self, run_hook, make_event):
-        # POSITIVE, NON-VACUOUS (Finding B): an all-known compound must still POSITIVELY
-        # hit the MODERN auto-allow fold (permissionDecision:"allow"), NOT the hygiene
-        # "ask". Build the compound from a derived known atom chained with ITSELF, so
-        # every atom is allowlisted regardless of the ambient settings. `_known_atom()`
-        # prefers `echo checking` / a non-git-gated head, so the compound carries no
-        # gated-git op and the fold is not skipped by `_has_gated_git_op`.
+    def test_non_gated_compound_always_blocks_regardless_of_allowlist(self, run_hook, make_event):
+        # A2: even an all-allowlisted compound (not a blessed value-capture) is BLOCKED.
+        # The old auto-allow fold (_emit_compound_allow_if_safe) is gone.
         known = self._known_atom()
         cmd = f"{known} && {known}"
         result = run_hook("git-safety-guard.py", make_event("Bash", command=cmd))
         assert result.returncode == 0, f"hook crashed: {result.stderr!r}"
         assert result.parsed is not None, (
-            f"auto-allow fold did NOT fire (no JSON emitted) — vacuous-pass guard. "
-            f"stdout={result.stdout!r}"
+            f"block did NOT fire for all-known compound. stdout={result.stdout!r}"
         )
-        hso = result.parsed.get("hookSpecificOutput", {})
-        # The fold POSITIVELY fired: auto-approve, NEVER the hygiene "ask".
-        assert hso.get("permissionDecision") == "allow", (
-            f"expected auto-allow 'allow' for an all-known compound, got {result.parsed!r}"
+        assert result.parsed.get("decision") == "block", (
+            f"expected block for non-blessed compound, got {result.parsed!r}"
         )
-        assert hso.get("permissionDecision") != "ask"
-        assert "isolate" not in result.stdout.lower()
+        assert "One command per Bash call" in result.parsed.get("reason", "")
 
     def test_single_command_unaffected(self, run_hook, make_event):
         result = run_hook("git-safety-guard.py", make_event("Bash", command="git status"))
         assert result.returncode == 0
         assert result.stdout.strip() == ""
 
-    def test_gated_git_compound_gets_no_advisory(self, run_hook, make_event, tmp_path):
-        # A compound containing a gated git op (commit) must NEVER receive a hygiene
-        # advisory — it flows through the existing block/branch path. On a feature
-        # branch with a brand-new unknown atom chained in, the ask advisory must NOT fire.
+    def test_gated_git_compound_routed_to_branch_verify_not_deny_path(self, run_hook, make_event, tmp_path):
+        # A compound containing a gated git op (commit) goes to the branch/verify path.
+        # The deny path skips it (_has_gated_git_op → True). On a feature branch the
+        # deny block "One command per Bash call" must NOT appear.
         repo = tmp_path / "repo"
         repo.mkdir()
         _make_repo_on_branch(repo, branch="feature/x")
@@ -1592,35 +1558,285 @@ class TestCompoundHygieneAdvisory:
             cmd = f"cd {repo} && git commit -m 'feat: x' && zzznotarealbinary run"
             result = run_hook("git-safety-guard.py", make_event("Bash", command=cmd))
             assert result.returncode == 0
-            # Whatever happens (block via verification path, or silent), it must NOT be
-            # the hygiene ask advisory naming the unknown atom.
-            if result.parsed is not None:
-                hso = result.parsed.get("hookSpecificOutput", {})
-                if hso.get("permissionDecision") == "ask":
-                    assert "zzznotarealbinary" not in hso.get("permissionDecisionReason", ""), (
-                        "gated-git compound must not get a hygiene ask advisory"
-                    )
+            # Must NOT emit the deny-path "One command per Bash call" block.
+            assert "One command per Bash call" not in result.stdout, (
+                f"Deny path must not fire on gated-git compound: {result.stdout!r}"
+            )
         finally:
             os.chdir(old_cwd)
 
-    def test_redirect_compound_no_advisory_fail_open(self, run_hook, make_event):
-        # A refused construct (redirect) -> unknown_atoms None -> no advisory, no block.
+    def test_redirect_is_not_multi_statement_fails_open(self, run_hook, make_event):
+        # Redirects (> / <) are NOT in _MULTI_SIGNALS; is_multi_statement returns False.
+        # The deny path falls through for redirects — fail-open behavior preserved.
         cmd = "echo hi > /tmp/zzz_test_out.txt"
         result = run_hook("git-safety-guard.py", make_event("Bash", command=cmd))
         assert result.returncode == 0
+        # A redirect is NOT flagged as multi-statement; deny path falls through.
         if result.parsed is not None:
-            hso = result.parsed.get("hookSpecificOutput", {})
-            assert result.parsed.get("decision") != "block"
-            assert hso.get("permissionDecision") != "ask"
-            assert "isolate" not in result.stdout.lower()
+            assert "One command per Bash call" not in result.parsed.get("reason", ""), (
+                f"Deny path must not fire on redirect: {result.parsed!r}"
+            )
 
-    def test_advisory_path_never_crashes_on_garbage(self, run_hook, make_event):
+    def test_deny_path_never_crashes_on_garbage(self, run_hook, make_event):
+        # Self-guard: _deny_compound_unless_blessed catches all exceptions → False.
+        # Garbage that is multi-statement may block; garbage that triggers an exception
+        # falls through. Either way the hook must not crash (returncode == 0).
         for cmd in ["$(", "`", ";;;", "&& ||", "echo a && ", "()", "><"]:
             result = run_hook("git-safety-guard.py", make_event("Bash", command=cmd))
             assert result.returncode == 0, f"crashed on {cmd!r}: {result.stderr!r}"
-            if result.parsed is not None:
-                assert result.parsed.get("decision") != "block"
-                assert result.parsed.get("hookSpecificOutput", {}).get("permissionDecision") != "ask"
+
+
+# ---------------------------------------------------------------------------
+# Tests for _deny_compound_unless_blessed (A2: deny posture for compounds)
+# ---------------------------------------------------------------------------
+
+class TestDenyCompoundUnlessBlessed:
+    """Tests for _deny_compound_unless_blessed — the new §4 deny path.
+
+    Phase 1 (dormant): tests invoke the function directly via _load_hook_module()
+    so they validate the function's logic before it is wired into main().
+    Phase 2 integration tests (run_hook) become meaningful after the §4 wiring.
+    """
+
+    def _fn(self):
+        """Return the _deny_compound_unless_blessed function."""
+        return _load_hook_module()._deny_compound_unless_blessed
+
+    # --- Non-git multi-statement → block emitted ---
+
+    def test_pipe_is_blocked(self, run_hook, make_event):
+        """ls | wc -l is multi-statement and non-git → block after wiring."""
+        fn = self._fn()
+        # Non-vacuous: assert the function returns True (decision emitted) for a pipe.
+        # We capture stdout to check it emits a block.
+        import io
+        import contextlib
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            result = fn("ls | wc -l")
+        assert result is True
+        output_text = buf.getvalue()
+        parsed = json.loads(output_text)
+        assert parsed["decision"] == "block"
+        assert "One command per Bash call" in parsed["reason"]
+
+    def test_and_and_is_blocked(self, run_hook, make_event):
+        """a && b is multi-statement and non-git → block."""
+        fn = self._fn()
+        import io
+        import contextlib
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            result = fn("a && b")
+        assert result is True
+        parsed = json.loads(buf.getvalue())
+        assert parsed["decision"] == "block"
+        assert "One command per Bash call" in parsed["reason"]
+
+    def test_for_loop_is_blocked(self, run_hook, make_event):
+        """for f in *; do x; done is multi-statement and non-git → block."""
+        fn = self._fn()
+        import io
+        import contextlib
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            result = fn("for f in *; do x; done")
+        assert result is True
+        parsed = json.loads(buf.getvalue())
+        assert parsed["decision"] == "block"
+        assert "One command per Bash call" in parsed["reason"]
+
+    # --- Blessed value-capture → falls through to prompt (no block, no auto-allow) ---
+
+    def test_blessed_capture_falls_through(self, run_hook, make_event):
+        """REPO=$(git rev-parse --show-toplevel) — blessed shape → no decision emitted (prompt)."""
+        fn = self._fn()
+        import io
+        import contextlib
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            result = fn("REPO=$(git rev-parse --show-toplevel)")
+        # Returns False (no decision emitted) — falls through to CC prompt
+        assert result is False, "Blessed value-capture must fall through (return False, no auto-allow)"
+        output_text = buf.getvalue().strip()
+        assert output_text == "", f"No output expected for blessed fall-through, got: {output_text!r}"
+
+    # --- Blessed but inner NOT allowlisted → NEITHER block NOR allow ---
+
+    def test_blessed_unlisted_inner_falls_through(self):
+        """X=$(some-unlisted-tool) — blessed shape but inner not allowlisted → no decision."""
+        fn = self._fn()
+        import io
+        import contextlib
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            result = fn("X=$(zzznotarealtool123)")
+        # Returns False (no decision emitted)
+        assert result is False, "Blessed but unlisted inner must fall through (return False)"
+        # Non-vacuous: assert BOTH no block AND no allow in output
+        output_text = buf.getvalue().strip()
+        assert output_text == "", f"No output expected for fall-through, got: {output_text!r}"
+
+    # --- Blessed captures of any kind → fall through to prompt ---
+
+    def test_bash_capture_falls_through(self):
+        """X=$(bash --version) — blessed shape (no compound inner) → falls through to prompt."""
+        fn = self._fn()
+        import io
+        import contextlib
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            result = fn("X=$(bash --version)")
+        # Returns False (no decision emitted) — falls through to CC prompt
+        assert result is False, "Blessed value-capture must fall through (return False)"
+        output_text = buf.getvalue().strip()
+        assert output_text == "", f"No output expected for fall-through, got: {output_text!r}"
+
+    # --- Single command → no output ---
+
+    def test_single_git_status_falls_through(self):
+        """git status is NOT multi-statement → function returns False immediately."""
+        fn = self._fn()
+        import io
+        import contextlib
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            result = fn("git status")
+        assert result is False
+        assert buf.getvalue().strip() == ""
+
+    def test_single_wc_falls_through(self):
+        """wc -l file is NOT multi-statement → function returns False immediately."""
+        fn = self._fn()
+        import io
+        import contextlib
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            result = fn("wc -l file")
+        assert result is False
+        assert buf.getvalue().strip() == ""
+
+    # --- Gated-git compound → deny path does NOT fire ---
+
+    def test_gated_git_compound_skipped(self):
+        """cd /repo && git commit -m 'feat: x' → _has_gated_git_op True → returns False."""
+        fn = self._fn()
+        import io
+        import contextlib
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            result = fn("cd /repo && git commit -m 'feat: x'")
+        assert result is False, "Gated-git compound must return False (deny path does not fire)"
+        output_text = buf.getvalue().strip()
+        # Non-vacuous: confirm NO "One command per Bash call" block from the deny path
+        assert "One command per Bash call" not in output_text
+
+    # --- Exception safety ---
+
+    def test_never_raises_on_garbage(self):
+        """Self-guard: any exception returns False (fall through, never block-closed)."""
+        fn = self._fn()
+        for cmd in ["", "$(", "`", ";;;", "&& ||"]:
+            result = fn(cmd)
+            assert isinstance(result, bool), f"Expected bool for {cmd!r}, got {type(result)}"
+
+    # --- Integration tests via run_hook (pass after §4 wiring) ---
+
+    def test_pipe_blocked_via_hook(self, run_hook, make_event):
+        """Integration: ls | wc -l → hook emits block after §4 is wired."""
+        result = run_hook("git-safety-guard.py", make_event("Bash", command="ls | wc -l"))
+        assert result.returncode == 0
+        assert result.parsed is not None, f"Expected block JSON, got: {result.stdout!r}"
+        assert result.parsed.get("decision") == "block"
+        assert "One command per Bash call" in result.parsed.get("reason", "")
+
+    def test_and_and_blocked_via_hook(self, run_hook, make_event):
+        """Integration: a && b → hook emits block after §4 is wired."""
+        result = run_hook("git-safety-guard.py", make_event("Bash", command="a && b"))
+        assert result.returncode == 0
+        assert result.parsed is not None, f"Expected block JSON, got: {result.stdout!r}"
+        assert result.parsed.get("decision") == "block"
+        assert "One command per Bash call" in result.parsed.get("reason", "")
+
+    def test_for_loop_blocked_via_hook(self, run_hook, make_event):
+        """Integration: for f in *; do x; done → hook emits block after §4 is wired."""
+        result = run_hook("git-safety-guard.py", make_event("Bash", command="for f in *; do x; done"))
+        assert result.returncode == 0
+        assert result.parsed is not None, f"Expected block JSON, got: {result.stdout!r}"
+        assert result.parsed.get("decision") == "block"
+        assert "One command per Bash call" in result.parsed.get("reason", "")
+
+    def test_blessed_capture_falls_through_via_hook(self, run_hook, make_event):
+        """Integration: REPO=$(git rev-parse --show-toplevel) → no decision (falls through to prompt)."""
+        result = run_hook(
+            "git-safety-guard.py",
+            make_event("Bash", command="REPO=$(git rev-parse --show-toplevel)"),
+        )
+        assert result.returncode == 0
+        # No block, no auto-allow — silent fall-through to CC permission prompt
+        assert result.stdout.strip() == "", (
+            f"Blessed value-capture must produce no output (prompt, not auto-allow), "
+            f"got: {result.stdout!r}"
+        )
+
+    def test_unlisted_blessed_capture_no_block_no_allow_via_hook(self, run_hook, make_event):
+        """Integration: X=$(zzznotarealtool) → neither block nor allow after §4 is wired."""
+        result = run_hook(
+            "git-safety-guard.py",
+            make_event("Bash", command="X=$(zzznotarealtool123456)"),
+        )
+        assert result.returncode == 0
+        # Non-vacuous: assert BOTH absent — no block and no allow decision
+        if result.parsed is not None:
+            assert result.parsed.get("decision") != "block", (
+                f"Fall-through must not produce a block, got: {result.parsed!r}"
+            )
+            hso = result.parsed.get("hookSpecificOutput", {})
+            assert hso.get("permissionDecision") != "allow", (
+                f"Fall-through must not produce an allow, got: {result.parsed!r}"
+            )
+
+    def test_bash_capture_falls_through_via_hook(self, run_hook, make_event):
+        """Integration: X=$(bash --version) → falls through (blessed shape, no compound inner).
+
+        X=$(bash --version) is a blessed value-capture (single-statement inner).
+        The hook produces no output — it falls through to the CC permission prompt.
+        Neither a block nor an auto-allow is emitted.
+        """
+        result = run_hook(
+            "git-safety-guard.py",
+            make_event("Bash", command="X=$(bash --version)"),
+        )
+        assert result.returncode == 0
+        # No block, no auto-allow — falls through to CC prompt
+        assert result.stdout.strip() == "", (
+            f"Blessed value-capture must produce no output (prompt), got: {result.stdout!r}"
+        )
+
+    def test_single_command_no_output_via_hook(self, run_hook, make_event):
+        """Integration: git status → no output (single command, not multi-statement)."""
+        result = run_hook("git-safety-guard.py", make_event("Bash", command="git status"))
+        assert result.returncode == 0
+        assert result.stdout.strip() == ""
+
+    def test_gated_git_compound_no_deny_path_block_via_hook(self, run_hook, make_event, tmp_path):
+        """Integration: cd /repo && git commit → deny path does NOT fire; no 'One command per Bash call'."""
+        # Use a feature-branch repo so the branch guard does not block
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        _make_repo_on_branch(repo, branch="feature/test-deny-path")
+        old_cwd = os.getcwd()
+        os.chdir(str(repo))
+        try:
+            cmd = f"cd {repo} && git commit -m 'feat: x'"
+            result = run_hook("git-safety-guard.py", make_event("Bash", command=cmd))
+            assert result.returncode == 0
+            # The deny path must NOT emit the "One command per Bash call" block
+            assert "One command per Bash call" not in result.stdout, (
+                f"Deny path fired on gated-git compound: {result.stdout!r}"
+            )
+        finally:
+            os.chdir(old_cwd)
 
 
 class TestNvmBootstrapGuard:

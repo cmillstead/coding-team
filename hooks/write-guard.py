@@ -551,6 +551,152 @@ def check_skill_line_cap(tool_name: str, tool_input: dict) -> str | None:
 
 
 # ---------------------------------------------------------------------------
+# PAUL phase gate
+# ---------------------------------------------------------------------------
+PHASE_SKIP_OVERRIDE_ENV = "WRITE_GUARD_ALLOW_PHASE_SKIP"
+_PHASE_GATE_LOG = Path("~/.claude/security/phase-gate-overrides.log").expanduser()
+
+# Regex matching a PLAN artifact basename like "03-01-PLAN.md"
+_PLAN_BASENAME_RE = re.compile(r"^\d+-\d+-PLAN\.md$")
+
+
+def _phase_skip_overridden() -> bool:
+    """True if the operator has explicitly acknowledged a PAUL phase-gate skip."""
+    value = os.environ.get(PHASE_SKIP_OVERRIDE_ENV, "")
+    return value.strip().lower() in ("1", "true", "yes", "on")
+
+
+def _log_phase_gate_override(file_path: str, missing_upstream: str) -> None:
+    """Best-effort: append one override log line.  Never raises."""
+    try:
+        import datetime
+        _PHASE_GATE_LOG.parent.mkdir(parents=True, exist_ok=True)
+        ts = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        with _PHASE_GATE_LOG.open("a") as fh:
+            fh.write(f"{ts}\t{file_path}\t{missing_upstream}\n")
+    except Exception:  # noqa: BLE001 — best-effort logging, never raise
+        pass
+
+
+def _is_paul_phase_artifact(path: Path) -> tuple[Path, str] | None:
+    """Return (phase_dir, basename) if path is inside .paul/phases/<dir>/, else None.
+
+    Detection uses Path.parts segment matching, never substring comparison.
+    The structure must be: .../.paul/phases/<phase-dir>/<file>
+    The phase_dir returned is the direct parent of <file>.
+    """
+    parts = path.parts
+    # Need at least: ... / .paul / phases / <phase-dir> / <file>
+    # so len(parts) >= 4 and we find .paul then phases in the right positions
+    for i, part in enumerate(parts):
+        if part == ".paul":
+            # Next must be "phases", then a phase sub-dir, then a file
+            if i + 3 < len(parts) and parts[i + 1] == "phases":
+                # parts[i+2] is the phase dir name, parts[i+3] is the filename
+                # The file must be a DIRECT child of the phase dir (no deeper)
+                if i + 3 == len(parts) - 1:
+                    phase_dir = Path(*parts[:i + 3])
+                    return phase_dir, parts[i + 3]
+    return None
+
+
+def check_paul_phase_gate(file_path: str) -> str | None:
+    """Check PAUL phase pre-planning staircase.  Returns block reason or None.
+
+    Enforces artifact ordering within a single .paul/phases/<dir>/ phase:
+      ASSUMPTIONS → DISCOVERY → GROUND → PLAN files
+
+    Fail-open: any IO/stat/parse error returns None (never raises).
+    This is critical — write-guard's top-level handler blocks-CLOSED on
+    uncaught exceptions, so a raise here would wedge ALL Edit/Write.
+    """
+    try:
+        path = Path(file_path)
+        match = _is_paul_phase_artifact(path)
+        if match is None:
+            return None
+
+        phase_dir, basename = match
+        override = _phase_skip_overridden()
+
+        def _block(reason: str, missing_upstream: str) -> str | None:
+            if override:
+                _log_phase_gate_override(file_path, missing_upstream)
+                return None
+            return reason
+
+        # ASSUMPTIONS — top of chain, always allowed
+        if basename == "ASSUMPTIONS.md":
+            return None
+
+        # DISCOVERY — requires ASSUMPTIONS
+        if basename == "DISCOVERY.md":
+            if not (phase_dir / "ASSUMPTIONS.md").exists():
+                return _block(
+                    f"BLOCKED: PAUL phase '{phase_dir.name}' isn't assumed — "
+                    f"ASSUMPTIONS.md is missing.\n"
+                    f"Run /paul:assumptions first; discovery requires a current assumptions artifact.\n"
+                    f"Deliberate fast-lane skip (Trivial/Small): set {PHASE_SKIP_OVERRIDE_ENV}=1.",
+                    "ASSUMPTIONS.md",
+                )
+            return None
+
+        # GROUND — requires DISCOVERY
+        if basename == "GROUND.md":
+            if not (phase_dir / "DISCOVERY.md").exists():
+                return _block(
+                    f"BLOCKED: PAUL phase '{phase_dir.name}' isn't discovered — "
+                    f"DISCOVERY.md is missing.\n"
+                    f"Run /paul:discover first; grounding requires a current discovery artifact.\n"
+                    f"Deliberate fast-lane skip (Trivial/Small): set {PHASE_SKIP_OVERRIDE_ENV}=1.",
+                    "DISCOVERY.md",
+                )
+            return None
+
+        # PLAN files (e.g. 03-01-PLAN.md) — requires GROUND present and DISCOVERY present and fresh
+        if _PLAN_BASENAME_RE.match(basename):
+            ground = phase_dir / "GROUND.md"
+            if not ground.exists():
+                return _block(
+                    f"BLOCKED: PAUL phase '{phase_dir.name}' isn't grounded — "
+                    f"GROUND.md is missing.\n"
+                    f"Run /paul:ground first; a plan requires a current ground artifact.\n"
+                    f"Deliberate fast-lane skip (Trivial/Small): set {PHASE_SKIP_OVERRIDE_ENV}=1.",
+                    "GROUND.md",
+                )
+            # DISCOVERY must also exist to confirm the full ASSUMPTIONS→DISCOVERY→GROUND→PLAN chain.
+            # GROUND may have been written via the WRITE_GUARD_ALLOW_PHASE_SKIP override while
+            # DISCOVERY was absent; a PLAN write must not be allowed in that case.
+            discovery = phase_dir / "DISCOVERY.md"
+            if not discovery.exists():
+                return _block(
+                    f"BLOCKED: PAUL phase '{phase_dir.name}' is missing DISCOVERY.md — "
+                    f"the full ASSUMPTIONS→DISCOVERY→GROUND→PLAN chain is required.\n"
+                    f"Run /paul:discover first; a plan requires a current discovery artifact.\n"
+                    f"Deliberate fast-lane skip (Trivial/Small): set {PHASE_SKIP_OVERRIDE_ENV}=1.",
+                    "DISCOVERY.md",
+                )
+            # Freshness check: GROUND must be at least as recent as DISCOVERY
+            ground_mtime = ground.stat().st_mtime
+            discovery_mtime = discovery.stat().st_mtime
+            if ground_mtime < discovery_mtime:
+                return _block(
+                    f"BLOCKED: PAUL phase '{phase_dir.name}' has a stale GROUND.md — "
+                    f"GROUND.md is older than DISCOVERY.md.\n"
+                    f"Run /paul:ground first; a plan requires a current ground artifact.\n"
+                    f"Deliberate fast-lane skip (Trivial/Small): set {PHASE_SKIP_OVERRIDE_ENV}=1.",
+                    "GROUND.md (stale — older than DISCOVERY.md)",
+                )
+            return None
+
+        # Any other basename in a .paul/phases/<dir>/ dir — not gated
+        return None
+
+    except Exception:  # noqa: BLE001 — fail-open: NEVER raise from inside this check
+        return None
+
+
+# ---------------------------------------------------------------------------
 # Path safety check constants (Case study #35)
 # ---------------------------------------------------------------------------
 PATH_SAFETY_PATTERNS = [
@@ -625,6 +771,12 @@ def main():
 
     # 1. Phase 5 edit guard (blocking)
     reason = check_phase5(file_path)
+    if reason:
+        _output.block(reason)
+        return
+
+    # 1b. PAUL phase gate (blocking)
+    reason = check_paul_phase_gate(file_path)
     if reason:
         _output.block(reason)
         return
