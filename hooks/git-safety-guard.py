@@ -885,35 +885,44 @@ def main():
     # block() denies WITHOUT prompting and hands the agent the reason -> it runs node directly.
     if _is_nvm_bootstrap(command):
         output.block(
-            "Node (v20.19.6) is already on PATH -- run `node`/`npm`/`npx`/`codex` directly.\n"
-            "Do NOT source nvm or run `nvm use`: `source` evaluates arbitrary shell code so it "
-            "cannot be auto-approved (it dead-ends/prompts every time), and no nvm setup is needed.\n"
-            "If `node --version` genuinely fails, report it as BLOCKED instead of sourcing nvm."
+            "Do NOT `source ~/.nvm/nvm.sh` or run `nvm use` -- `source` evaluates arbitrary "
+            "shell code so it cannot be auto-approved (it dead-ends or prompts every time).\n"
+            "Non-login shells (including Claude Code tool calls) do not source nvm automatically, "
+            "so `node`/`npm`/`npx`/`codex` may not be on PATH.\n"
+            "Use the absolute path instead: /Users/cevin/.nvm/versions/node/v20.19.6/bin/node\n"
+            "(or the matching npm/npx/codex in that directory).\n"
+            "If the absolute path also fails, report BLOCKED -- do not attempt to source nvm."
         )
         return
 
     git_subcmd = git.extract_git_command(command)
 
     # --- Track verification commands in PreToolUse too (fallback if PostToolUse misses) ---
+    # Wrapped fail-open: if state.py or /tmp raises any exception (restricted sandbox,
+    # unexpected exception type), swallow it and continue — verification tracking is
+    # best-effort; a crash here must never deny the command being intercepted.
     if is_verification(command):
-        state_file = state.get_state_file("claude-verification")
-        st = state.load_state(state_file, {"verifications": [], "last_updated": time.time()})
-        if state.is_stale(st):
-            st = {"verifications": [], "last_updated": time.time()}
-        # Only add if not already tracked by PostToolUse (check last entry)
-        recent = st.get("verifications", [])
-        already_tracked = (
-            recent and recent[-1].get("command") == command
-            and time.time() - recent[-1]["time"] < 5
-        )
-        if not already_tracked:
-            st["verifications"].append({
-                "command": command,
-                "time": time.time(),
-                "exit_code": None,  # Unknown until PostToolUse
-            })
-            st["verifications"] = st["verifications"][-20:]
-            state.save_state(state_file, st)
+        try:
+            state_file = state.get_state_file("claude-verification")
+            st = state.load_state(state_file, {"verifications": [], "last_updated": time.time()})
+            if state.is_stale(st):
+                st = {"verifications": [], "last_updated": time.time()}
+            # Only add if not already tracked by PostToolUse (check last entry)
+            recent = st.get("verifications", [])
+            already_tracked = (
+                recent and recent[-1].get("command") == command
+                and time.time() - recent[-1]["time"] < 5
+            )
+            if not already_tracked:
+                st["verifications"].append({
+                    "command": command,
+                    "time": time.time(),
+                    "exit_code": None,  # Unknown until PostToolUse
+                })
+                st["verifications"] = st["verifications"][-20:]
+                state.save_state(state_file, st)
+        except Exception:
+            pass  # fail-open: treat as no state recorded; never propagate
 
     # --- 1. Secret check (git add) ---
     if git_subcmd == "add":

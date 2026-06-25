@@ -1624,7 +1624,7 @@ class TestCompoundHygieneAdvisory:
 
 
 class TestNvmBootstrapGuard:
-    """nvm bootstrap is blocked (node is already on PATH); node/npm/npx pass."""
+    """nvm bootstrap is blocked (sourcing nvm dead-ends/prompts); node/npm/npx pass."""
 
     @pytest.mark.parametrize("command", [
         "source ~/.nvm/nvm.sh && nvm use 20",
@@ -1658,6 +1658,9 @@ class TestNvmBootstrapGuard:
         event = make_event("Bash", command=command)
         # Act
         result = run_hook("git-safety-guard.py", event)
-        # Assert: silent allow — no block decision emitted
+        # Assert: hook must not crash AND must produce no block output.
+        # returncode == 0 is load-bearing: a crashed hook also produces empty stdout
+        # (the crash exits non-zero), so checking only stdout.strip() == "" is vacuous.
+        assert result.returncode == 0, f"hook crashed on {command!r}: stderr={result.stderr!r}"
         assert result.stdout.strip() == ""
 

@@ -14,7 +14,7 @@ Issue shell commands so they run clean and never trip a permission prompt.
   which is also zsh/bash-incompatible: lowercase `pipestatus` is zsh, uppercase 0-indexed `PIPESTATUS`
   is bash; the wrong one silently yields an empty exit code.
 - **`cd` as its own call**, or rely on the tool's working directory.
-- **Never run `nvm`, `nvm use`, or `source ~/.nvm/nvm.sh`.** Node (v20.19.6) is already on your PATH — run `node`/`npm`/`npx`/`codex` directly; no nvm setup is needed. `source` evaluates arbitrary shell code, so it can NOT be auto-approved (it prompts or dead-ends every time, even though `source` is allow-listed). If `node --version` ever genuinely fails, report it as BLOCKED instead of trying to source nvm.
+- **Never run `nvm`, `nvm use`, or `source ~/.nvm/nvm.sh`.** `source` evaluates arbitrary shell code, so it can NOT be auto-approved (it prompts or dead-ends every time, even though `source` is allow-listed). Non-login shells (including Claude Code tool calls) do not source nvm automatically, so `node`/`npm`/`npx`/`codex` may not be on PATH. If they aren't, use the absolute path: `/Users/cevin/.nvm/versions/node/v20.19.6/bin/node` (or the matching `npm`/`npx`/`codex` in that directory). If the absolute path also fails, report BLOCKED — do not attempt to source nvm.
 
 **Why:** a single allow-listed command (`Bash(pnpm *)`) auto-approves — and so does a compound whose
 every atom is allow-listed (the `compound_allow` fold). What still trips a prompt is a compound that
