@@ -575,3 +575,55 @@ def test_stdout_to_stderr_fd_dup_still_auto_allows(settings_dir):
     # >&2 is a standard-stream dup → still stripped → auto-allow.
     cmd = "echo a >&2 && echo ok"
     assert compound_allow.should_auto_allow(cmd, claude_dir=settings_dir) is True
+
+
+# ---------------------------------------------------------------------------
+# Cross-model review hole 4 (2026-06-24): fd-dup/close lookahead must require
+# a complete-word terminator, not merely (?!\w).
+#
+# In bash, `>&word` is an fd-dup ONLY when word is exactly digits or `-`. With
+# a punctuation suffix it becomes a FILE redirect. The old (?!\w) negative
+# lookahead allowed punctuation-suffixed forms (e.g. `>&2/foo`, `>&2.tmp`,
+# `>&2-foo`) to be stripped as if they were harmless fd-dups. The fix replaces
+# (?!\w) with (?=\s|$|[;&|)]) — the same complete-word terminator already used
+# by the /dev/null branches — so only a true bare fd-dup is stripped.
+# ---------------------------------------------------------------------------
+
+
+def test_fd_dup_with_path_suffix_slash_refused(settings_dir):
+    # `>&2/foo` looks like fd-dup-2 but the `/foo` suffix makes it a file write.
+    # Must NOT be stripped → ">" survives → refused.
+    cmd = "echo hi >&2/foo && echo ok"
+    assert compound_allow.should_auto_allow(cmd, claude_dir=settings_dir) is False
+
+
+def test_fd_dup_with_path_suffix_dot_refused(settings_dir):
+    # `>&2.tmp` — `.tmp` suffix → file write, not an fd-dup.
+    cmd = "echo hi >&2.tmp && echo ok"
+    assert compound_allow.should_auto_allow(cmd, claude_dir=settings_dir) is False
+
+
+def test_fd_dup_with_path_suffix_dash_refused(settings_dir):
+    # `>&2-foo` — `-foo` suffix → file write, not an fd-dup (dash is not `-` alone).
+    cmd = "echo hi >&2-foo && echo ok"
+    assert compound_allow.should_auto_allow(cmd, claude_dir=settings_dir) is False
+
+
+def test_read_fd_dup_with_path_suffix_refused(settings_dir):
+    # `<&0/foo` — `/foo` suffix → file read, not an fd-dup.
+    cmd = "cat <&0/foo && echo ok"
+    assert compound_allow.should_auto_allow(cmd, claude_dir=settings_dir) is False
+
+
+# Positive regressions — bare fd-dups must still auto-allow after the lookahead fix.
+
+def test_bare_fd_dup_stderr_to_stdout_still_auto_allows(settings_dir_with_git_grep):
+    # `2>&1` with no suffix → true fd-dup → still stripped → auto-allow.
+    cmd = "git status 2>&1 | grep x"
+    assert compound_allow.should_auto_allow(cmd, claude_dir=settings_dir_with_git_grep) is True
+
+
+def test_bare_fd_dup_stdout_to_stderr_still_auto_allows(settings_dir):
+    # `>&2` with no suffix → true fd-dup → still stripped → auto-allow.
+    cmd = "echo a >&2 && echo ok"
+    assert compound_allow.should_auto_allow(cmd, claude_dir=settings_dir) is True

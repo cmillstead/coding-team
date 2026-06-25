@@ -193,15 +193,19 @@ _UNSAFE_BUILTINS = {
 #     "2>&1", "0<&2", "2>&-" are provably harmless (standard streams only). An
 #     arbitrary inherited fd like ">&9" or "<&3" is NOT provably safe (fd may be an
 #     inherited writable/readable file or socket) -> not stripped -> refused.
+#     The fd branches require a COMPLETE-WORD terminator — the same (?=\s|$|[;&|)])
+#     positive lookahead used by the /dev/null branches. A punctuation or path suffix
+#     like /foo, .tmp, or -foo (e.g. ">&2/foo", ">&2.tmp", ">&2-foo") fails the
+#     lookahead, so the ">" or "<" survives the unsafe scan and the command is refused.
 _BENIGN_REDIRECT_RE = re.compile(
     r"(?:^|(?<=\s))"
     r"(?:"
     r"\d*>>?\s*/dev/null(?=\s|$|[;&|)])"   # >/dev/null  2>/dev/null  >>/dev/null
     r"|&>>?\s*/dev/null(?=\s|$|[;&|)])"    # &>/dev/null  &>>/dev/null
     r"|\d*<\s*/dev/null(?=\s|$|[;&|)])"    # </dev/null   0</dev/null
-    r"|[0-2]?>&[0-2](?!\w)"                # 2>&1  1>&2  >&2  (standard streams only)
-    r"|[0-2]?>&-(?!\w)"                    # 2>&-  >&-  (fd close — harmless)
-    r"|[0-2]?<&[0-2](?!\w)"               # 0<&2  (standard streams only)
+    r"|[0-2]?>&[0-2](?=\s|$|[;&|)])"      # 2>&1  1>&2  >&2  (standard streams only)
+    r"|[0-2]?>&-(?=\s|$|[;&|)])"          # 2>&-  >&-  (fd close — harmless)
+    r"|[0-2]?<&[0-2](?=\s|$|[;&|)])"     # 0<&2  (standard streams only)
     r")"
 )
 
