@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Codesight integration hooks: agent prompt injection + auto-reindex on file writes."""
+"""Codesight integration hooks: agent prompt injection + auto-reindex on file writes + usage logging."""
 
 import os, sys
 sys.path.insert(0, os.path.dirname(__file__))
@@ -9,9 +9,12 @@ import shutil
 import subprocess
 import tempfile
 import time
+from datetime import datetime, timezone
 
-from _lib.event import parse_event, get_tool_name, get_tool_input
+from _lib.event import parse_event, get_tool_name, get_tool_input, get_tool_result
 from _lib.output import update_input
+
+USAGE_LOG = os.path.expanduser("~/.config/codesight-mcp/usage.log")
 
 CODESIGHT_INSTRUCTION = (
     "\n\nMANDATORY SEARCH RULES: This repo is indexed in codesight-mcp. "
@@ -132,6 +135,46 @@ def handle_post_write(event: dict) -> None:
         )
 
 
+def _derive_status(event: dict) -> str:
+    """Derive ok/error from PostToolUse event result. Never raises."""
+    try:
+        # Check raw result dicts across known keys for is_error flag
+        for key in ("tool_response", "tool_result", "tool_output"):
+            raw = event.get(key)
+            if isinstance(raw, dict) and raw.get("is_error"):
+                return "error"
+        # Fall back to inspecting normalized text content
+        result_text = get_tool_result(event)
+        if result_text:
+            lower = result_text.lower()[:500]
+            if "is_error" in lower or ("error" in lower and "traceback" in lower):
+                return "error"
+    except Exception:
+        pass
+    return "ok"
+
+
+def handle_post_query(event: dict) -> None:
+    """Append one TSV line to USAGE_LOG for each codesight query call."""
+    try:
+        tool_input = get_tool_input(event)
+        operation = tool_input.get("operation", "")
+        params = tool_input.get("params") or {}
+        repo = params.get("repo") or params.get("url") or params.get("path") or ""
+        query = params.get("query") or params.get("symbol_id") or ""
+        timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        status = _derive_status(event)
+        line = f"{timestamp}\t{operation}\t{repo}\t{query}\t{status}\n"
+        os.makedirs(os.path.dirname(USAGE_LOG), exist_ok=True)
+        try:
+            with open(USAGE_LOG, "a") as f:
+                f.write(line)
+        except OSError:
+            pass
+    except Exception:
+        pass
+
+
 def main() -> None:
     event = parse_event()
     if not event:
@@ -144,6 +187,8 @@ def main() -> None:
         handle_pre_agent(event)
     elif is_post and tool_name in ("Write", "Edit"):
         handle_post_write(event)
+    elif is_post and tool_name == "mcp__codesight__query":
+        handle_post_query(event)
 
 
 if __name__ == "__main__":
