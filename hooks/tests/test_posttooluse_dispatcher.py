@@ -89,7 +89,7 @@ class TestRunHandler:
     def test_silent_script_returns_empty(self, tmp_path):
         script = tmp_path / "silent.py"
         script.write_text("import sys\nsys.exit(0)\n")
-        stdout, rc = _pod._run_handler([sys.executable, str(script)], "{}")
+        stdout, stderr, rc = _pod._run_handler([sys.executable, str(script)], "{}")
         assert stdout == ""
         assert rc == 0
 
@@ -98,16 +98,27 @@ class TestRunHandler:
         script.write_text(
             'import json\nprint(json.dumps({"decision":"allow","reason":"warn"}))\n'
         )
-        stdout, rc = _pod._run_handler([sys.executable, str(script)], "{}")
+        stdout, stderr, rc = _pod._run_handler([sys.executable, str(script)], "{}")
         assert '"decision"' in stdout
 
     def test_crash_returns_empty_stdout(self, tmp_path):
         crash = tmp_path / "crash.py"
         crash.write_text("raise RuntimeError('boom')\n")
-        stdout, rc = _pod._run_handler([sys.executable, str(crash)], "{}")
+        stdout, stderr, rc = _pod._run_handler([sys.executable, str(crash)], "{}")
         assert stdout == ""
         # rc reflects the subprocess exit code (non-zero on crash);
         # isolation is at routing level: empty stdout means dispatcher skips.
+
+    def test_stderr_captured(self, tmp_path):
+        """Handler stderr is captured and returned as the second element."""
+        script = tmp_path / "stderr_writer.py"
+        script.write_text(
+            'import sys\nsys.stderr.write("blocked via exit 2")\nsys.exit(2)\n'
+        )
+        stdout, stderr, rc = _pod._run_handler([sys.executable, str(script)], "{}")
+        assert stdout == ""
+        assert "blocked via exit 2" in stderr
+        assert rc == 2
 
 
 class TestRunAndEmit:
@@ -170,6 +181,89 @@ class TestRunAndEmit:
         _pod._run_and_emit([str(blocker)], "{}", {"blocker.py"})
         captured = capsys.readouterr()
         assert captured.out == ""
+
+    def test_exit2_block_raises_systemexit_2(self, tmp_path, capsys):
+        """Handler exiting with code 2 causes dispatcher to sys.exit(2)."""
+        exit2 = tmp_path / "exit2.py"
+        exit2.write_text(
+            'import sys\nsys.stderr.write("blocked via exit 2")\nsys.exit(2)\n'
+        )
+        with pytest.raises(SystemExit) as exc_info:
+            _pod._run_and_emit([str(exit2)], "{}", set())
+        assert exc_info.value.code == 2
+
+    def test_exit2_stderr_forwarded(self, tmp_path, capsys):
+        """Handler exit-2 stderr is written to the dispatcher's real stderr."""
+        exit2 = tmp_path / "exit2.py"
+        exit2.write_text(
+            'import sys\nsys.stderr.write("blocked via exit 2\\n")\nsys.exit(2)\n'
+        )
+        with pytest.raises(SystemExit):
+            _pod._run_and_emit([str(exit2)], "{}", set())
+        captured = capsys.readouterr()
+        assert "blocked via exit 2" in captured.err
+
+    def test_exit2_first_handler_wins_remaining_not_run(self, tmp_path, capsys):
+        """First exit-2 handler wins; subsequent handlers are not executed."""
+        exit2 = tmp_path / "exit2.py"
+        exit2.write_text(
+            'import sys\nsys.stderr.write("first block")\nsys.exit(2)\n'
+        )
+        # Second handler would emit a stdout-JSON block if reached.
+        second = tmp_path / "second.py"
+        second.write_text(
+            'import json\nprint(json.dumps({"decision":"block","reason":"SECOND"}))\n'
+        )
+        with pytest.raises(SystemExit) as exc_info:
+            _pod._run_and_emit([str(exit2), str(second)], "{}", set())
+        assert exc_info.value.code == 2
+        captured = capsys.readouterr()
+        assert "first block" in captured.err
+        # The second handler's stdout-JSON must NOT appear
+        assert "SECOND" not in captured.out
+
+    def test_exit2_takes_priority_over_stdout_json_advisory(self, tmp_path, capsys):
+        """Exit-2 handler takes priority when it appears after an advisory."""
+        advisor = tmp_path / "advisor.py"
+        advisor.write_text(
+            'import json\nprint(json.dumps({"decision":"allow","reason":"advisory"}))\n'
+        )
+        exit2 = tmp_path / "exit2.py"
+        exit2.write_text(
+            'import sys\nsys.stderr.write("exit2 block")\nsys.exit(2)\n'
+        )
+        with pytest.raises(SystemExit) as exc_info:
+            _pod._run_and_emit([str(advisor), str(exit2)], "{}", set())
+        assert exc_info.value.code == 2
+
+    def test_stdout_json_block_still_emits_json_exit0(self, tmp_path, capsys):
+        """Stdout-JSON block (mechanism a) still emits JSON and exits 0."""
+        blocker = tmp_path / "blocker.py"
+        blocker.write_text(
+            'import json\nprint(json.dumps({"decision":"block","reason":"BLOCKED"}))\n'
+        )
+        _pod._run_and_emit([str(blocker)], "{}", set())
+        captured = capsys.readouterr()
+        parsed = json.loads(captured.out)
+        assert parsed["decision"] == "block"
+        assert "BLOCKED" in parsed["reason"]
+
+    def test_advisories_still_merge_when_no_exit2(self, tmp_path, capsys):
+        """Multiple advisories still merge when no handler exits 2."""
+        a = tmp_path / "a.py"
+        a.write_text(
+            'import json\nprint(json.dumps({"decision":"allow","reason":"Warning A"}))\n'
+        )
+        b = tmp_path / "b.py"
+        b.write_text(
+            'import json\nprint(json.dumps({"decision":"allow","reason":"Warning B"}))\n'
+        )
+        _pod._run_and_emit([str(a), str(b)], "{}", set())
+        captured = capsys.readouterr()
+        parsed = json.loads(captured.out)
+        assert parsed["decision"] == "allow"
+        assert "Warning A" in parsed["reason"]
+        assert "Warning B" in parsed["reason"]
 
 
 # ---------------------------------------------------------------------------

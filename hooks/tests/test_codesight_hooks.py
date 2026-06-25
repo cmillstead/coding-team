@@ -1,5 +1,14 @@
 """Tests for codesight-hooks.py hook."""
 
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+HOOKS_DIR = Path("/Users/cevin/.claude/skills/coding-team/hooks")
+CODESIGHT_HOOKS = HOOKS_DIR / "codesight-hooks.py"
+
 
 class TestPreToolUseAgentEdgeCases:
     def test_non_string_prompt_no_crash(self, run_hook):
@@ -22,7 +31,7 @@ class TestPreToolUseAgent:
         hook_output = result.parsed.get("hookSpecificOutput", {})
         updated = hook_output.get("updatedInput", {})
         assert "codesight" in updated.get("prompt", "").lower()
-        assert "search_text" in updated.get("prompt", "")
+        assert "mcp__codesight__query" in updated.get("prompt", "")
 
 
 class TestPostToolUseWrite:
@@ -107,3 +116,81 @@ class TestFieldPreservation:
         # Prompt is still augmented with the injection
         assert "MANDATORY SEARCH RULES" in updated["prompt"]
         assert updated["prompt"].startswith("Search for the function definition")
+
+
+class TestHandlePostQuery:
+    """Tests for handle_post_query: mcp__codesight__query PostToolUse → TSV usage log.
+
+    Runs the hook as a subprocess with HOME set to a tmp dir so the usage log
+    resolves under tmp (HOME/.config/codesight-mcp/usage.log), keeping the real
+    usage log unmodified.
+    """
+
+    def _run_hook(self, event: dict, tmp_home: Path) -> subprocess.CompletedProcess:
+        env = {**os.environ, "HOME": str(tmp_home)}
+        return subprocess.run(
+            [sys.executable, str(CODESIGHT_HOOKS)],
+            input=json.dumps(event),
+            capture_output=True,
+            text=True,
+            timeout=10,
+            env=env,
+        )
+
+    def _usage_log(self, tmp_home: Path) -> Path:
+        return tmp_home / ".config" / "codesight-mcp" / "usage.log"
+
+    def _last_tsv_fields(self, tmp_home: Path) -> list[str]:
+        return self._usage_log(tmp_home).read_text().splitlines()[-1].split("\t")
+
+    def test_ok_status_appends_tsv_line(self, tmp_path):
+        """Successful query appends a 5-field TSV line with status=ok."""
+        event = {
+            "tool_name": "mcp__codesight__query",
+            "tool_input": {
+                "operation": "search-symbols",
+                "params": {"repo": "test-repo", "query": "dispatcher"},
+            },
+            "tool_result": {"success": True},
+        }
+        result = self._run_hook(event, tmp_path)
+        assert result.returncode == 0
+        fields = self._last_tsv_fields(tmp_path)
+        assert len(fields) == 5, f"Expected 5 TSV fields, got {len(fields)}: {fields}"
+        assert fields[1] == "search-symbols"
+        assert fields[2] == "test-repo"
+        assert fields[3] == "dispatcher"
+        assert fields[4] == "ok"
+
+    def test_error_status_appends_tsv_line(self, tmp_path):
+        """Query with is_error in tool_result appends a TSV line with status=error."""
+        event = {
+            "tool_name": "mcp__codesight__query",
+            "tool_input": {
+                "operation": "get-symbol",
+                "params": {"repo": "my-repo", "query": "some_func"},
+            },
+            "tool_result": {"is_error": True, "content": "Error: not found"},
+        }
+        result = self._run_hook(event, tmp_path)
+        assert result.returncode == 0
+        fields = self._last_tsv_fields(tmp_path)
+        assert len(fields) == 5, f"Expected 5 TSV fields, got {len(fields)}: {fields}"
+        assert fields[1] == "get-symbol"
+        assert fields[4] == "error"
+
+    def test_symbol_id_fallback_for_query_column(self, tmp_path):
+        """When params has symbol_id but no query, symbol_id is used for the query column."""
+        event = {
+            "tool_name": "mcp__codesight__query",
+            "tool_input": {
+                "operation": "get-symbol",
+                "params": {"repo": "my-repo", "symbol_id": "MyClass.my_method"},
+            },
+            "tool_result": {"success": True},
+        }
+        result = self._run_hook(event, tmp_path)
+        assert result.returncode == 0
+        fields = self._last_tsv_fields(tmp_path)
+        assert len(fields) == 5, f"Expected 5 TSV fields, got {len(fields)}: {fields}"
+        assert fields[3] == "MyClass.my_method"
