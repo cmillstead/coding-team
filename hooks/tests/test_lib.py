@@ -198,8 +198,9 @@ class TestOutputFunctions:
             'from _lib.output import allow; allow()',
         )
         parsed = json.loads(result.stdout)
-        assert parsed["decision"] == "allow"
-        assert "reason" not in parsed
+        assert parsed["hookSpecificOutput"]["hookEventName"] == "PreToolUse"
+        assert parsed["hookSpecificOutput"]["permissionDecision"] == "allow"
+        assert "decision" not in parsed
 
     def test_allow_with_reason_structure(self):
         result = run_python(
@@ -269,9 +270,11 @@ class TestUpdateInput:
         result = run_python(code, stdin_data=json.dumps(event))
         assert result.returncode == 0, result.stderr
         parsed = json.loads(result.stdout)
-        # Fail-open: emits plain allow, NOT hookSpecificOutput
-        assert parsed == {"decision": "allow"}
-        assert "hookSpecificOutput" not in parsed
+        # Fail-open: emits plain allow (modern shape), NOT updatedInput
+        assert parsed["hookSpecificOutput"]["hookEventName"] == "PreToolUse"
+        assert parsed["hookSpecificOutput"]["permissionDecision"] == "allow"
+        assert "updatedInput" not in parsed["hookSpecificOutput"]
+        assert "decision" not in parsed
 
 
 # ---------------------------------------------------------------------------

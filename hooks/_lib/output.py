@@ -12,7 +12,8 @@ def block(reason: str) -> None:
 
 def allow() -> None:
     """Print an allow decision."""
-    print(json.dumps({"decision": "allow"}))
+    print(json.dumps({"hookSpecificOutput": {
+        "hookEventName": "PreToolUse", "permissionDecision": "allow"}}))
 
 
 def allow_with_reason(reason: str) -> None:
