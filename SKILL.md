@@ -58,7 +58,7 @@ If COORDINATION = no → subagents regardless of AGENT_TEAMS_AVAILABLE
 
 | User's situation | Entry point |
 |---|---|
-| Task modifies CC instruction files (`phases/*.md`, `agents/*.md`, `prompts/*.md`, `skills/*/SKILL.md`, `SKILL.md`, `CLAUDE.md`, `memory/*.md`) AND user has no spec or a vague request | **Phase 2** — route through design team with Prompt/Skill Specialist |
+| Task modifies CC instruction files (`phases/*.md`, `agents/*.md`, `skills/*/SKILL.md`, `SKILL.md`, `CLAUDE.md`, `memory/*.md`) AND user has no spec or a vague request | **Phase 2** — route through design team with Prompt/Skill Specialist |
 | Task modifies CC instruction files AND user has a complete spec with explicit file paths and content | **Phase 4** with PROMPT_CRAFT_ADVISORY on every task that touches instruction files |
 | CC behavioral issue ("CC keeps doing X", "CC ignores my instructions", "CC uses wrong tool") | `/prompt-craft diagnose` skill — not `/debug`. Behavioral issues are instruction problems, not code bugs. |
 | New feature idea, vague request | **Phase 1** — start dialogue |
@@ -176,7 +176,7 @@ During execution, the orchestrator routes edits by **impact surface**, not line 
 
 | File pattern | Route |
 |---|---|
-| `agents/*.md`, `phases/*.md`, `prompts/*.md`, `skills/**/*.md`, `CLAUDE.md` | Agent tool — PROMPT_CRAFT_ADVISORY |
+| `agents/*.md`, `phases/*.md`, `skills/**/*.md`, `CLAUDE.md` | Agent tool — PROMPT_CRAFT_ADVISORY |
 | `hooks/*`, `docs/plans/*.md` | Agent tool — dispatch to implementer |
 | `memory/*.md`, `~/Documents/obsidian-vault/**`, `/tmp/*` | Orchestrator edits directly |
 | Source code, ≤20 lines, 1 file | Orchestrator may edit directly |

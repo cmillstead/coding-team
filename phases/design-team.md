@@ -6,8 +6,8 @@
 
 **If AGENT_TEAMS_AVAILABLE = true:**
 
-1. Create team:
-   `Teammate({ operation: "spawnTeam", team_name: "design-<feature>" })`
+1. Create team by spawning the Team Leader via the Agent tool with a `team_name`:
+   `Agent({ name: "team-leader", team_name: "design-<feature>", ... })` (no separate "Teammate" tool — the team is formed by shared `team_name`)
 
 2. Spawn a Team Leader teammate with: project summary, user's idea, approved approach, all relevant context from Phase 1, team memory (if found), and episode context (if found).
 

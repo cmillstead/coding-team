@@ -32,7 +32,7 @@ A task has a risk signal if it DOES any of:
 - **Public-contract effect:** changes any exported/public signature, API route or endpoint, CLI flag, wire/JSON/protobuf format, or other consumer-visible contract — in ANY file, regardless of name. (CLAUDE.md "Ask First: Changing public API contracts".)
 - **Schema/data effect:** any DDL, schema, migration, or index change — regardless of directory. *Hints:* `migrations/, schema, alembic/, prisma/`.
 - **Dependency effect:** any dependency add or version bump — regardless of manifest name. *Hints:* `package.json, pyproject.toml, Cargo.toml, go.mod, Gemfile, requirements.txt`.
-- **Behavioral-instruction-file edit:** ANY edit to `phases/*.md`, `SKILL.md`, `agents/*.md`, `prompts/*.md`, `CLAUDE.md`, `hooks/*`. (Same high-impact surface `hooks/write-guard.py:43-57` always-delegates and `phases/post-execution-review.md:10-13` always flags. A 1-line instruction-file change can cascade across every pipeline run.)
+- **Behavioral-instruction-file edit:** ANY edit to `phases/*.md`, `SKILL.md`, `agents/*.md`, `CLAUDE.md`, `hooks/*`. (Same high-impact surface `hooks/write-guard.py:43-57` always-delegates and `phases/post-execution-review.md:10-13` always flags. A 1-line instruction-file change can cascade across every pipeline run.)
 
 **When unsure whether a change has a risk effect, treat it as a risk signal (fail UP).** The filename hints exist to catch the obvious cases cheaply; they never EXCLUDE a semantically-risky change in a generically-named file.
 

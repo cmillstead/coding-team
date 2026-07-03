@@ -15,4 +15,6 @@ If a cheaper model fails or returns low-quality results, re-dispatch with the ne
 ## UI/UX Standards
 
 - **Immediate feedback**: If an action has a delay, always show a loading/progress indicator
-- **WCAG 2.1 AA compliance**: Keyboard accessible, color contrast, ARIA labels, focus indicators, semantic HTML, `prefers-reduced-motion` respect
+- **WCAG 2.2 AA compliance**: Keyboard accessible, color contrast, ARIA labels, focus indicators, semantic HTML, `prefers-reduced-motion` respect
+
+Note: `config/CLAUDE.md` is the source of truth for the WCAG version — if it changes there, update this line to match.

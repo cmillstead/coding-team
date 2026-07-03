@@ -10,6 +10,8 @@ scope: design-only — no code in this pass; build gated on EM/user approval
 
 # Coding-Team Workflow Refactor — Architecture Proposal
 
+> **STATUS UNCONFIRMED as of 2026-07-02 audit: D199 still pending; verify whether this spike ran before acting.**
+
 ## 0. Verification status (red-team pass, 2026-06-20)
 
 This proposal rests on two bodies of fact: (a) what the Claude Code **Dynamic Workflows** feature actually does, and (b) what the current `coding-team` codebase actually contains. Both were checked. Summary:

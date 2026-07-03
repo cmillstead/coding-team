@@ -1,5 +1,7 @@
 # RESUME — Workflow API spike (D199 §11 step 1)
 
+> **STATUS UNCONFIRMED as of 2026-07-02 audit: D199 still pending; verify whether this spike ran before acting.**
+
 **Trigger:** user `/clear`'d, then "do the api spike." This is the first build step of the coding-team Workflow refactor.
 
 ## What this is

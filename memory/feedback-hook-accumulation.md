@@ -6,6 +6,8 @@ type: feedback
 
 Harness-engineer recommends new hooks every audit cycle (1-2 per cycle). Over 5 cycles, hooks grew from 16→23. Root cause: the agent's instructions have a structural bias toward hook creation with no counter-pressure.
 
+**Counting-unit note (2026-07-02, superseded-by-context):** As of the hook dispatcher consolidation (see `memory/decisions/2026-06-25-hook-dispatcher-consolidation.md`), 4 of the top-level hook files (`session-start-dispatcher.py`, `prompt-dispatcher.py`, `pretooluse-dispatcher.py`, `posttooluse-dispatcher.py`) are NOT individual behaviors — each routes internally to multiple checks by tool_name/event, consolidating what used to be N separate settings.json entries. "Number of top-level hook files" (currently 14) therefore UNDER-counts real hook logic (dispatcher-internal checks aren't visible at that granularity), while the OLD "number of settings.json PreToolUse/PostToolUse entries" metric now over-counts relative to file count (most entries route through 2 dispatcher files, not N distinct files). Any future audit re-applying the "16→23 hooks in 5 cycles" framing must state which unit it's counting (top-level files vs. settings.json entries vs. dispatcher-internal checks) — the three are no longer interchangeable. The bloat-resistance policy below (steward identity, pre-creation gate, cost awareness, 3-session gate) still applies at the level of "new dispatcher-internal check or new top-level hook file," whichever is being added.
+
 **Why (prompt-craft diagnosis):**
 1. Line 135: "Every feedback memory is a promotion candidate" — frames non-promotion as a gap
 2. Verb priority ladder (Constrain > Inform) — hooks always rank higher than rules/instructions
