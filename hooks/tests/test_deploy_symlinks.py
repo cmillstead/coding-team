@@ -169,6 +169,110 @@ class TestDeploySymlinks:
             "deploy.sh must not create ~/.claude/rules/README.md"
         )
 
+    def test_prune_removes_orphaned_agent_symlink(self, tmp_path: Path):
+        """A ct-*.md symlink whose repo source was deleted (simulating a
+        removed agent) is pruned on the next deploy, while symlinks for
+        agents still present in the repo are left alone."""
+        claude_dir = tmp_path / "claude_dir"
+        claude_dir.mkdir()
+
+        result1 = run_deploy(claude_dir)
+        assert result1.returncode == 0, f"first deploy failed:\n{result1.stderr}"
+
+        current_agent = claude_dir / "agents" / "ct-implementer.md"
+        assert current_agent.exists(), "expected ct-implementer.md to be deployed"
+
+        # Simulate a deleted agent: a dangling symlink whose repo source
+        # no longer exists.
+        stale = claude_dir / "agents" / "ct-DELETED.md"
+        stale.symlink_to(REPO_ROOT / "agents" / "ct-DELETED.md")
+        assert os.path.islink(stale), "setup: stale symlink must exist before re-deploy"
+
+        result2 = run_deploy(claude_dir)
+        assert result2.returncode == 0, f"second deploy failed:\n{result2.stderr}"
+
+        assert not stale.exists() and not stale.is_symlink(), (
+            "stale ct-DELETED.md symlink must be pruned"
+        )
+        assert "pruned:" in result2.stdout, (
+            f"deploy stdout must report the prune, got:\n{result2.stdout}"
+        )
+        assert current_agent.exists() and os.path.islink(current_agent), (
+            "prune must not remove a symlink whose repo source still exists"
+        )
+
+    def test_prune_dry_run_reports_without_removing(self, tmp_path: Path):
+        """--dry-run reports an orphaned agent symlink without removing it."""
+        claude_dir = tmp_path / "claude_dir"
+        claude_dir.mkdir()
+
+        result1 = run_deploy(claude_dir)
+        assert result1.returncode == 0, f"first deploy failed:\n{result1.stderr}"
+
+        stale = claude_dir / "agents" / "ct-DELETED.md"
+        stale.symlink_to(REPO_ROOT / "agents" / "ct-DELETED.md")
+
+        result2 = run_deploy(claude_dir, dry_run=True)
+        assert result2.returncode == 0, f"dry-run deploy failed:\n{result2.stderr}"
+
+        assert "[dry-run] rm" in result2.stdout, (
+            f"dry-run stdout must report the pending prune, got:\n{result2.stdout}"
+        )
+        assert stale.is_symlink(), "--dry-run must not remove the stale symlink"
+
+    def test_prune_leaves_real_file_untouched(self, tmp_path: Path):
+        """A real (non-symlink) ct-*.md file in CLAUDE_DIR with no repo
+        source must never be pruned — the prune loop only ever acts on
+        symlinks, per its `[[ -L "$f" ]]` guard."""
+        claude_dir = tmp_path / "claude_dir"
+        claude_dir.mkdir()
+
+        result1 = run_deploy(claude_dir)
+        assert result1.returncode == 0, f"first deploy failed:\n{result1.stderr}"
+
+        real_file = claude_dir / "agents" / "ct-REAL.md"
+        original_content = "# hand-authored agent note, not a repo symlink\n"
+        real_file.write_text(original_content)
+
+        result2 = run_deploy(claude_dir)
+        assert result2.returncode == 0, f"second deploy failed:\n{result2.stderr}"
+
+        assert real_file.exists() and not os.path.islink(real_file), (
+            "ct-REAL.md must remain a real file, not be removed or replaced"
+        )
+        assert real_file.read_text() == original_content, (
+            "prune must not alter the content of a real file"
+        )
+
+    def test_prune_leaves_foreign_symlink_untouched(self, tmp_path: Path):
+        """A ct-*.md symlink pointing OUTSIDE this repo's agents/ dir (e.g.
+        hand-placed by a user or another tool) must never be pruned, even
+        though no `agents/ct-FOREIGN.md` exists in the repo — the prune
+        loop only removes symlinks that resolve INTO REPO_ROOT/agents/."""
+        claude_dir = tmp_path / "claude_dir"
+        claude_dir.mkdir()
+
+        result1 = run_deploy(claude_dir)
+        assert result1.returncode == 0, f"first deploy failed:\n{result1.stderr}"
+
+        foreign_target = tmp_path / "foreign-source.md"
+        foreign_target.write_text("# not part of the coding-team repo\n")
+
+        foreign = claude_dir / "agents" / "ct-FOREIGN.md"
+        foreign.symlink_to(foreign_target)
+        assert os.path.islink(foreign), "setup: foreign symlink must exist before re-deploy"
+
+        result2 = run_deploy(claude_dir)
+        assert result2.returncode == 0, f"second deploy failed:\n{result2.stderr}"
+
+        assert foreign.is_symlink() and foreign.resolve() == foreign_target.resolve(), (
+            "foreign ct-FOREIGN.md symlink (pointing outside REPO_ROOT/agents) "
+            "must never be pruned"
+        )
+        assert "ct-FOREIGN.md" not in result2.stdout, (
+            f"deploy stdout must not mention pruning the foreign symlink, got:\n{result2.stdout}"
+        )
+
     def test_dry_run_creates_no_files(self, tmp_path: Path):
         """--dry-run must not create any symlinks or files in CLAUDE_DIR."""
         claude_dir = tmp_path / "claude_dir"

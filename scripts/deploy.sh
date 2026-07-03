@@ -62,6 +62,33 @@ for f in "$REPO_ROOT"/agents/ct-*.md; do
     deploy "$f" "$CLAUDE_DIR/agents/$(basename "$f")"
 done
 
+# Prune orphaned agent symlinks: a ct-*.md symlink in CLAUDE_DIR whose repo
+# source was deleted (e.g. an agent removed from agents/) is left dangling
+# by the loop above, since it only ever adds/updates links. Only ever prune
+# a symlink that (a) resolves INTO this repo's agents/ dir (i.e. one we
+# created) and (b) whose target no longer exists. A real file, or a
+# foreign symlink a user hand-placed pointing elsewhere, is never touched.
+for f in "$CLAUDE_DIR"/agents/ct-*.md; do
+    [[ -L "$f" ]] || continue
+
+    # Resolve the symlink target to an absolute path (macOS has no
+    # `readlink -f`; reuse python3, as the rest of the script already does).
+    target_abs=$(python3 -c "import os,sys; d=os.path.dirname(sys.argv[1]); print(os.path.normpath(os.path.join(d, os.readlink(sys.argv[1]))))" "$f")
+    case "$target_abs" in
+        "$REPO_ROOT/agents/"*) ;;  # ours — eligible for prune
+        *) continue ;;             # foreign symlink — never touch
+    esac
+
+    [[ -e "$target_abs" ]] && continue
+
+    if $DRY_RUN; then
+        echo "[dry-run] rm $f"
+    else
+        rm -f "$f"
+        echo "pruned: $f"
+    fi
+done
+
 # Rules: *.md (skip README.md — it is deploy meta-doc, not a behavioral rule)
 for f in "$REPO_ROOT"/rules/*.md; do
     [[ -f "$f" ]] || continue
