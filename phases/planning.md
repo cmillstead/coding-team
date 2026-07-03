@@ -30,7 +30,7 @@ Before writing tasks, check if any planned work needs specialized skill involvem
 
 > This task writes CC instructions. Apply prompt engineering language rules:
 > 1. Framing determines defaults — state desired behavior first in conditionals, before exceptions
-> 2. Name tools explicitly — write "Agent tool", "Teammate tool", "Edit tool", not "dispatch agents" or "use tools"
+> 2. Name tools explicitly — write "Agent tool", "Edit tool", `Agent({ team_name })` for team dispatch, not "dispatch agents", "use tools", or a literal "Teammate tool" (no such tool exists)
 > 3. Prohibitions must be explicit — CC does not infer what it should NOT do; state every prohibition directly
 > 4. Quantify thresholds — write "3 files", "5 minutes", "2 rounds", not "large", "many", "several"
 > 5. Identity over prohibition — for role boundaries, write "You are the orchestrator" not "NEVER write code directly"

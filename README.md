@@ -390,7 +390,7 @@ For simple tasks (typo, rename, single-file fix), the skill skips to Phase 5 wit
 ```
 SKILL.md                          # pipeline router + phase contracts (~200 lines)
 README.md                         # this file
-commands/                         # slash commands (18 files, invokable independently)
+commands/                         # slash commands (22 files — thin stubs that read the matching skills/*/SKILL.md, invokable independently)
   build.md                        #   /build — thin alias for the /coding-team pipeline (~25 lines)
   verify.md                       #   /verify — evidence-before-claims
   tdd.md                          #   /tdd — red-green-refactor cycle
@@ -403,12 +403,16 @@ commands/                         # slash commands (18 files, invokable independ
   release.md                      #   /release — automated release workflow
   retrospective.md                #   /retrospective — post-ship retro
   doc-sync.md                     #   /doc-sync — post-ship doc update
+  doc-write.md                    #   /doc-write — write docs from scratch or improve existing
   dep-audit.md                    #   /dep-audit — dependency audit
   migration-guide.md              #   /migration-guide — upgrade guides
   onboard.md                      #   /onboard — codebase orientation
   a11y.md                         #   /a11y — accessibility audit
   api-qa.md                       #   /api-qa — API contract testing
   incident.md                     #   /incident — incident response
+  debug.md                        #   /debug — root cause investigation
+  harness-engineer.md             #   /harness-engineer — harness infrastructure design & audit
+  prompt-craft.md                 #   /prompt-craft — skill & prompt engineering
 phases/                           # canonical pipeline phase files (21 files, loaded on demand)
   session-resume.md               #   continuation detection + plan discovery
   dialogue.md                     #   Phase 1 — clarify, propose, approve
@@ -474,8 +478,9 @@ agents/                           # native agent definitions (deployed to ~/.cla
   ct-harness-engineer.md          #   harness engineer — hooks, rules, maturity (read-write)
   ct-spec-doc-reviewer.md         #   design doc reviewer
   ct-plan-doc-reviewer.md         #   plan doc reviewer
-  harness-engineer-reference.md   #   on-demand reference for harness engineer
-  implementer-reference.md        #   on-demand reference for implementer
+  reference/                      #   on-demand agent reference files
+    harness-engineer-reference.md #     on-demand reference for harness engineer
+    implementer-reference.md      #     on-demand reference for implementer
 config/                           # global instruction files (deployed to ~/.claude/)
   CLAUDE.md                       #   global CLAUDE.md — role, boundaries, workflow prefs
   golden-principles.md            #   16 tiebreaker principles for ambiguous decisions
@@ -486,6 +491,8 @@ rules/                            # repo-owned rules (deployed to ~/.claude/rule
   dark-features.md                #   dark feature detection — verify reachability
   hook-bypass.md                  #   hook bypass prevention
   mcp-resilience.md               #   MCP retry limits and graceful degradation
+  codesight-fallback.md           #   codesight MCP retry-once-then-degrade (agent dispatch include, no globs)
+  finding-integrity.md            #   Finding Integrity + BLOCKED protocol (agent dispatch include, no globs)
 memory/                           # behavioral feedback, persists across sessions and grows over time
   MEMORY.md                       #   index — points to consolidated file
   consolidated-feedback.md        #   distilled rules from all feedback (loaded by default)

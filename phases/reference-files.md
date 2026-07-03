@@ -59,8 +59,11 @@ Loaded on demand by the skill router. Not needed during active phase work.
 | `phases/task-weight.md` | SKILL.md / referenced by all gates | Single source of truth for task tier classification and per-tier gate matrix |
 | `phases/named-rationalizations.md` | cross-phase | Coding-team-specific known rationalizations, cross-referencing the global failure taxonomy |
 | `phases/wiki-generation.md` | completion.md | Tier-gated vault wiki article generation |
-| `agents/implementer-reference.md` | ct-implementer.md | Code exploration, CI fix context, escalation guidance |
-| `agents/harness-engineer-reference.md` | ct-harness-engineer.md | Report template, Phase 5 auditor protocol, hook design protocol |
+| `agents/reference/implementer-reference.md` | ct-implementer.md | Code exploration, CI fix context, escalation guidance |
+| `agents/reference/harness-engineer-reference.md` | ct-harness-engineer.md | Report template, Phase 5 auditor protocol, hook design protocol |
+| `rules/codesight-fallback.md` | ct-spec-reviewer.md, ct-harden-auditor.md, ct-simplify-auditor.md, ct-qa-reviewer.md, ct-harness-engineer.md | codesight MCP retry-once-then-degrade protocol |
+| `rules/finding-integrity.md` | ct-spec-reviewer.md, ct-harden-auditor.md, ct-simplify-auditor.md, ct-qa-reviewer.md, ct-prompt-craft-auditor.md, ct-harness-engineer.md | Finding Integrity + BLOCKED protocol |
+| `skills/debug/reference.md` | debug/SKILL.md | Pattern-analysis signature table, after-3-failed-fixes detail |
 
 **Agent definitions** (used by the execution loop):
 

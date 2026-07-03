@@ -15,8 +15,7 @@ If user wants isolation (or task warrants it), follow the `/worktree` skill (`sk
 On approval, begin execution. **Agent team per task: implementer + audit team (spec + simplify + harden).** Implementer follows the `/tdd` skill for all implementation work.
 
 **CRITICAL: The main agent is the orchestrator, not the implementer.** During Phase 5, you dispatch all file edits to agents. Your ONLY permitted direct actions are:
-- **Agent tool** — dispatch implementer and auditor subagents
-- **Teammate tool** — dispatch teammates (if agent teams available)
+- **Agent tool** — dispatch implementer and auditor subagents (and, when agent teams are available, teammates via `Agent({ team_name })` — no separate "Teammate" tool exists)
 - **SendMessage tool** — coordinate with teammates
 - **TaskCreate / TaskList / TaskUpdate tools** — manage shared task list
 - **Read tool** — read files for context

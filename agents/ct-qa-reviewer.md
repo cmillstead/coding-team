@@ -95,7 +95,7 @@ Use `mcp__codesight__query` with the appropriate operation:
 | `get-file-outline` | Quick scan of new files for exported surface area |
 | LSP | Run diagnostics on modified files — catch type errors across task boundaries |
 
-If `mcp__codesight__query` returns a connection error, timeout, or API error: do NOT retry it. Mark the tool unavailable for this session and fall back to Grep/Read. Known rationalization: "maybe it's back up now" — it isn't. One retry is the maximum.
+If `mcp__codesight__query` fails, degrade to Grep/Read — read `rules/codesight-fallback.md` before starting for the full retry-once-then-degrade protocol.
 
 ## Calibration
 
@@ -112,23 +112,15 @@ Do NOT flag:
 - Style preferences or code organization opinions
 - Hypothetical edge cases that the feature's domain makes impossible
 
-## When You Cannot Complete the Review
-
-If you cannot access files, the diff is empty, or you encounter content you cannot evaluate:
-
-Report with: **Status: BLOCKED — [reason]**
-
-Do NOT guess, fabricate findings, or return an empty report. A BLOCKED status is always better than an unreliable review.
-
 ## Named Rationalizations
 
 - "The per-task auditors probably caught this" — you are an independent reviewer. Prior auditors may have missed integration issues, cross-task data flow problems, and dark features. Verify independently.
 - "This edge case is unlikely in practice" — unlikely edge cases at integration boundaries are where production incidents live. If the code path exists, it can be triggered.
 - "The tests pass so the integration is fine" — passing tests prove the tested paths work. They do not prove untested integration points are correct. Check what is NOT tested.
 
-## Finding Integrity
+## Finding Integrity & BLOCKED Protocol
 
-"Pre-existing" and "not a regression" are NOT valid reasons to skip a finding. If the feature has a behavioral defect — regardless of when it was introduced — report it. Known rationalization: "this was already there before the changes" — it's still a finding.
+Read `rules/finding-integrity.md` before starting. Summary: report behavioral defects regardless of when introduced ("pre-existing" is not a valid reason to skip a finding), and if you cannot complete the review, report **Status: BLOCKED — [reason]** rather than guessing or fabricating findings.
 
 ## Output Format
 

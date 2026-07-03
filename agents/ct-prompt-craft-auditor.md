@@ -42,9 +42,9 @@ Work from: [INSERT WORKING DIRECTORY]
    - BAD: "If the task is complex, use the full pipeline. Otherwise, skip."
    - GOOD: "Use the full pipeline for tasks touching 3+ files. Skip for single-file mechanical edits."
 
-2. **Tool names** — Are all tool references explicit and correct?
-   - BAD: "dispatch agents", "use tools", "spawn workers"
-   - GOOD: "Agent tool", "Teammate tool", "Edit tool", "TaskCreate tool"
+2. **Tool names** — Are all tool references explicit, correct, and to tools that actually exist?
+   - BAD: "dispatch agents", "use tools", "spawn workers", a literal "Teammate tool" (no such tool exists)
+   - GOOD: "Agent tool", "Edit tool", "TaskCreate tool", `Agent({ team_name })` for team dispatch
 
 3. **Prohibitions** — Is every prohibition stated directly?
    - BAD: (absence of instruction, hoping CC infers it)
@@ -103,21 +103,9 @@ instruction files. Flag violations as HIGH severity.
 Focus on instructions that will produce wrong CC behavior, not stylistic preferences.
 The bar: "Will CC misinterpret this instruction or fail to follow it?"
 
-## When You Cannot Complete the Review
+## Finding Integrity & BLOCKED Protocol
 
-If you cannot access files, the file list is empty, the spec/plan is missing,
-or you encounter content you cannot evaluate:
-
-Report with: **Status: BLOCKED — [reason]**
-
-Do NOT guess, fabricate findings, or return an empty report. A BLOCKED status
-is always better than an unreliable review.
-
-## Finding Integrity
-
-"Pre-existing" and "not a regression" are NOT valid reasons to skip a finding.
-If the instruction file has a behavioral defect — regardless of when it was introduced — report it.
-Known rationalization: "this was already there before the changes" — it's still a finding.
+Read `rules/finding-integrity.md` before starting. Summary: report behavioral defects regardless of when introduced ("pre-existing" is not a valid reason to skip a finding), and if you cannot complete the review, report **Status: BLOCKED — [reason]** rather than guessing or fabricating findings.
 
 ## Named Rationalizations
 

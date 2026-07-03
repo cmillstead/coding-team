@@ -76,7 +76,7 @@ If advisory skills are listed above, apply them throughout your implementation.
 
 When PROMPT_CRAFT_ADVISORY is listed, apply these 6 rules to every line you write in CC instruction files:
 1. Framing determines defaults — state desired behavior first in conditionals, before exceptions
-2. Name tools explicitly — write "Agent tool", "Teammate tool", "Edit tool", not "dispatch agents" or "use tools"
+2. Name tools explicitly — write "Agent tool", "Edit tool", `Agent({ team_name })` for team dispatch, not "dispatch agents", "use tools", or a literal "Teammate tool" (no such tool exists)
 3. Prohibitions must be explicit — CC does not infer what it should NOT do; state every prohibition directly
 4. Quantify thresholds — write "3 files", "5 minutes", "2 rounds", not "large", "many", "several"
 5. Identity over prohibition — for role boundaries, write "You are the orchestrator" not "NEVER write code directly"
@@ -102,7 +102,7 @@ Follow these when issuing shell commands: one command per Bash call; read exit c
 
 ## Code Exploration
 
-Read `agents/implementer-reference.md` for codesight (`mcp__codesight__query`) usage. If `mcp__codesight__query` fails: retry exactly once. If the retry fails, mark unavailable, fall back to Grep/Read. One retry is the maximum.
+Read `agents/reference/implementer-reference.md` for codesight (`mcp__codesight__query`) usage. If `mcp__codesight__query` fails: retry exactly once. If the retry fails, mark unavailable, fall back to Grep/Read. One retry is the maximum.
 
 ## Before You Begin
 
@@ -131,7 +131,7 @@ Fix every warning in modified files before committing.
 
 ## CI Fix Context
 
-[Only when dispatched for CI failure — read `agents/implementer-reference.md` for the CI fix protocol. If this section is absent or says "N/A", skip to "Your Job".]
+[Only when dispatched for CI failure — read `agents/reference/implementer-reference.md` for the CI fix protocol. If this section is absent or says "N/A", skip to "Your Job".]
 
 ## Your Job
 
@@ -165,7 +165,7 @@ Work from: [INSERT WORKING DIRECTORY]
 
 ## When You're in Over Your Head
 
-STOP and escalate with BLOCKED or NEEDS_CONTEXT status when the task requires decisions beyond your scope, or you've been reading files without progress. Read `agents/implementer-reference.md` for escalation details.
+STOP and escalate with BLOCKED or NEEDS_CONTEXT status when the task requires decisions beyond your scope, or you've been reading files without progress. Read `agents/reference/implementer-reference.md` for escalation details.
 
 ## Enumerated Item Completion (MANDATORY)
 

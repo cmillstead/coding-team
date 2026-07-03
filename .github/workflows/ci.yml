@@ -36,6 +36,9 @@ jobs:
       - name: Lint (ruff)
         run: python -m ruff check .
 
+      - name: Check cross-file indexes (agents/phases/skills references)
+        run: python3 scripts/check-indexes.py
+
       - name: Deploy hooks (relative symlinks from the checkout into $HOME/.claude)
         # The dispatcher scripts (pretooluse-dispatcher.py, posttooluse-dispatcher.py,
         # prompt-dispatcher.py) always resolve handlers under $HOME/.claude/hooks —
