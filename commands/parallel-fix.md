@@ -4,4 +4,4 @@ description: "Use when facing 3+ independent test failures or broken subsystems 
 argument-hint: "[test output or error descriptions]"
 ---
 
-Read and follow `skills/parallel-fix/SKILL.md`, passing `$ARGUMENTS` through as the test output or error descriptions.
+Read and follow `~/.claude/skills/coding-team/skills/parallel-fix/SKILL.md`, passing `$ARGUMENTS` through as the test output or error descriptions.

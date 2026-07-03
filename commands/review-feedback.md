@@ -4,4 +4,4 @@ description: "Use when you RECEIVED review comments and need to evaluate and add
 argument-hint: "[paste feedback or PR link]"
 ---
 
-Read and follow `skills/review-feedback/SKILL.md`, passing `$ARGUMENTS` through as the feedback or PR link.
+Read and follow `~/.claude/skills/coding-team/skills/review-feedback/SKILL.md`, passing `$ARGUMENTS` through as the feedback or PR link.

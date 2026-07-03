@@ -4,4 +4,4 @@ description: "Restrict file edits to a specific directory within the coding-team
 argument-hint: "<directory>"
 ---
 
-Read and follow `skills/scope-lock/SKILL.md`, passing `$ARGUMENTS` through as the directory to lock.
+Read and follow `~/.claude/skills/coding-team/skills/scope-lock/SKILL.md`, passing `$ARGUMENTS` through as the directory to lock.

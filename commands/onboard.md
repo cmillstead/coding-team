@@ -4,4 +4,4 @@ description: "Use when orienting to an unfamiliar codebase or helping someone un
 argument-hint: "[specific area or 'everything']"
 ---
 
-Read and follow `skills/onboard/SKILL.md`, passing `$ARGUMENTS` through as the area to focus on (or `everything`).
+Read and follow `~/.claude/skills/coding-team/skills/onboard/SKILL.md`, passing `$ARGUMENTS` through as the area to focus on (or `everything`).

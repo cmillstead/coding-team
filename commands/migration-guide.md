@@ -4,4 +4,4 @@ description: "Use when writing upgrade or migration guides for breaking changes.
 argument-hint: "[version range or description of changes]"
 ---
 
-Read and follow `skills/migration-guide/SKILL.md`, passing `$ARGUMENTS` through as the version range or change description.
+Read and follow `~/.claude/skills/coding-team/skills/migration-guide/SKILL.md`, passing `$ARGUMENTS` through as the version range or change description.

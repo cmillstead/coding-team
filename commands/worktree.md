@@ -4,4 +4,4 @@ description: "Use when the user requests an isolated workspace, or when the task
 argument-hint: "[feature-name]"
 ---
 
-Read and follow `skills/worktree/SKILL.md`, passing `$ARGUMENTS` through as the feature name.
+Read and follow `~/.claude/skills/coding-team/skills/worktree/SKILL.md`, passing `$ARGUMENTS` through as the feature name.

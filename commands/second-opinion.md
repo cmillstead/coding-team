@@ -4,4 +4,4 @@ description: "Use when you want an independent second opinion from a different A
 argument-hint: "[review|challenge|consult <question>] [model]"
 ---
 
-Read and follow `skills/second-opinion/SKILL.md`, passing `$ARGUMENTS` through as the mode (`review`/`challenge`/`consult <question>`) and optional model.
+Read and follow `~/.claude/skills/coding-team/skills/second-opinion/SKILL.md`, passing `$ARGUMENTS` through as the mode (`review`/`challenge`/`consult <question>`) and optional model.

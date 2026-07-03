@@ -11,9 +11,9 @@ independent phase logic, gate rules, or agent lists of its own.
 
 **To execute this command:**
 
-1. Read `SKILL.md` at the repo root.
+1. Read `~/.claude/skills/coding-team/SKILL.md`.
 2. Follow its Session Start router and Phase Sequence exactly, reading each
-   `phases/*.md` detail file on entry as instructed there.
+   `~/.claude/skills/coding-team/phases/*.md` detail file on entry as instructed there.
 3. Pass `$ARGUMENTS` through unchanged as the user's request/entry-point
    selector (e.g. `plan <request>`, `execute <plan-file>`, `auto <request>`,
    `continue`).

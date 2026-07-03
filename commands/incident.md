@@ -4,4 +4,4 @@ description: "Use when coordinating a production incident, building incident res
 argument-hint: "[description of incident or 'post-mortem']"
 ---
 
-Read and follow `skills/incident/SKILL.md`, passing `$ARGUMENTS` through as the incident description (or `post-mortem`).
+Read and follow `~/.claude/skills/coding-team/skills/incident/SKILL.md`, passing `$ARGUMENTS` through as the incident description (or `post-mortem`).
