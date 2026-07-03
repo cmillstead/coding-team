@@ -32,9 +32,21 @@ import json
 import os
 import re
 import subprocess
+import sys
 import tempfile
 import time
 from pathlib import Path
+
+
+# TEMP DIAGNOSTIC (task #12 CI investigation — remove once the runner-side
+# root cause is confirmed): gated by ACTIVE_PLAN_DEBUG=1, prints internal
+# active-plan-resolution state to stderr so it surfaces in CI logs.
+_DEBUG = os.environ.get("ACTIVE_PLAN_DEBUG") == "1"
+
+
+def _debug(msg: str) -> None:
+    if _DEBUG:
+        print(f"[active_plan debug] {msg}", file=sys.stderr, flush=True)
 
 
 class AmbiguousActivePlanError(RuntimeError):
@@ -89,7 +101,9 @@ def _git_main_root() -> Path | None:
     always consulted.
     """
     override = os.environ.get("CODING_TEAM_MAIN_ROOT")
+    _debug(f"cwd={os.getcwd()!r} CODING_TEAM_MAIN_ROOT={override!r}")
     if override:
+        _debug(f"using override root: {override!r}")
         return Path(override)
     try:
         raw = subprocess.check_output(
@@ -97,8 +111,10 @@ def _git_main_root() -> Path | None:
             text=True,
             stderr=subprocess.DEVNULL,
         ).strip()
-    except (subprocess.CalledProcessError, FileNotFoundError, OSError):
+    except (subprocess.CalledProcessError, FileNotFoundError, OSError) as exc:
+        _debug(f"git rev-parse failed: {exc!r}")
         return None
+    _debug(f"git rev-parse raw={raw!r}")
     if not raw:
         return None
     # Strip trailing /.git (or worktree's literal `.git` suffix) to get repo root.
@@ -116,15 +132,18 @@ def find_active_plan() -> Path | None:
     "fail closed": block with the error message.
     """
     main_root = _git_main_root()
+    _debug(f"main_root={main_root!r}")
     if main_root is None:
         return None
     plans_dir = main_root / "docs" / "plans"
+    _debug(f"plans_dir={plans_dir!r} is_dir={plans_dir.is_dir()!r}")
     if not plans_dir.is_dir():
         return None
     try:
         candidates = sorted(plans_dir.glob("*.md"))
     except OSError as exc:
         raise AmbiguousActivePlanError(f"plans dir unlistable: {exc}") from exc
+    _debug(f"candidates={[str(p) for p in candidates]!r}")
 
     in_progress: list[Path] = []
     for plan in candidates:
@@ -229,11 +248,16 @@ def find_active_plan_cached(ttl_seconds: int = 5) -> "Path | None":
 
     cache_path = _cache_file_path()
     now = time.time()
+    _debug(
+        f"cache_path={cache_path!r} main_root={main_root!r} session_id={session_id!r} "
+        f"current_sig={current_sig!r}"
+    )
 
     # Attempt to read and validate the cache
     try:
         raw = cache_path.read_text(encoding="utf-8")
         entry = json.loads(raw)
+        _debug(f"cache entry read: {entry!r}")
 
         if (
             entry.get("repo_root") == str(main_root)
@@ -243,14 +267,17 @@ def find_active_plan_cached(ttl_seconds: int = 5) -> "Path | None":
         ):
             # Cache hit: return the stored result
             stored = entry.get("plan_path")
+            _debug(f"cache HIT -> plan_path={stored!r}")
             return Path(stored) if stored else None
-    except (OSError, ValueError, json.JSONDecodeError, TypeError, KeyError):
+        _debug("cache present but did not match (repo_root/session_id/signature/ttl)")
+    except (OSError, ValueError, json.JSONDecodeError, TypeError, KeyError) as exc:
         # Cache miss or corrupt — proceed to rescan
-        pass
+        _debug(f"cache read failed/absent: {exc!r}")
 
     # Cache miss: call the authoritative primitive.
     # AmbiguousActivePlanError is intentionally NOT caught — let it propagate.
     result = find_active_plan()
+    _debug(f"cache MISS -> find_active_plan() result={result!r}")
 
     # Write the new cache entry, ignoring write errors (cache is optional).
     try:
