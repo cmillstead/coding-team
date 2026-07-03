@@ -141,7 +141,7 @@ class TestPhase5InPipeline:
 
     def test_blocks_instruction_file_edit(self, repo: Path):
         """In-pipeline + instruction-file edit by orchestrator -> blocked."""
-        plan = _write_plan(repo, "plan.md")
+        _write_plan(repo, "plan.md")
         # An instruction file under a worktree of the test repo
         instr_dir = repo / "skills" / "demo"
         instr_dir.mkdir(parents=True)
@@ -155,32 +155,8 @@ class TestPhase5InPipeline:
                 "new_string": "altered",
             },
         }
-        # TEMP DIAGNOSTIC (task #12 CI investigation — remove once the runner-side
-        # root cause is confirmed): ACTIVE_PLAN_DEBUG=1 makes _lib/active_plan.py
-        # print its internal resolution state to the hook's stderr.
-        parsed, stdout, stderr, _rc = _run(
-            event, cwd=repo, env={"ACTIVE_PLAN_DEBUG": "1"}
-        )
-        if parsed is None or parsed.get("decision") != "block":
-            git_check = subprocess.run(
-                ["git", "rev-parse", "--path-format=absolute", "--git-common-dir"],
-                cwd=str(repo),
-                capture_output=True,
-                text=True,
-            )
-            plan_first_line = (
-                plan.read_text().splitlines()[0] if plan.exists() else "<missing>"
-            )
-            pytest.fail(
-                "\n--- DIAGNOSTIC (task #12 CI investigation) ---\n"
-                f"repo={repo}\n"
-                f"plan.exists()={plan.exists()!r} plan_first_line={plan_first_line!r}\n"
-                f"manual `git rev-parse --path-format=absolute --git-common-dir` "
-                f"(cwd={repo}): rc={git_check.returncode} "
-                f"stdout={git_check.stdout!r} stderr={git_check.stderr!r}\n"
-                f"hook stdout={stdout!r}\n"
-                f"hook stderr={stderr!r}\n"
-            )
+        parsed, stdout, _stderr, _rc = _run(event, cwd=repo)
+        assert parsed is not None, f"expected JSON output, got {stdout!r}"
         assert parsed.get("decision") == "block"
         reason = parsed.get("reason", "").lower()
         assert "instruction file" in reason
