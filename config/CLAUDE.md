@@ -68,6 +68,7 @@ Before starting work on a code task or when prior context would help, check avai
 
 ## Workflow Preferences
 
+- **Number your options.** When asking ANY either/or or multi-option question, ALWAYS prefix each choice with `1.`/`2.` (or `a.`/`b.`) — in plain-text questions AND AskUserQuestion options — so I can reply with just a number/letter. Self-check: about to write "X or Y?" with no labels → stop and label them. Standing global rule, every project, every time. I have asked for this repeatedly; do not make me ask again.
 - Commit style: `feat:`, `fix:`, `test:`, `docs:`
 - Don't summarize what you just did at the end of responses — I can read the diff. Exception: when a skill or pipeline phase REQUIRES a structured completion report (e.g., the implementer's DONE report, a phase-completion summary), produce it — the report is the deliverable, not a redundant recap.
 
