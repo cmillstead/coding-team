@@ -13,6 +13,7 @@ Author-facing design defaults distilled from codex-learnings.d entries. One line
 - **P31:** For any metric that skips `None` outputs, add an explicit eligibility flag at the producer — never infer "not applicable" vs "zero-score miss" from the empty output alone, since success-with-nothing and not-applicable look identical.
 - **P32:** Verify every "X does not exist" claim with the same rigor as a positive symbol check — grep the capability across the whole repo and ask how a sibling module already loads that resource before inventing a new location.
 - **P33:** A disambiguating guard denies only on an UNAMBIGUOUS dangerous resolution; when the parse is ambiguous it falls to ASK/non-deny, never deny-on-a-guess.
+- **P34:** Before calling any call site "production" in a plan, open the file and confirm it is not under a `#[cfg(test)]`/test-module/`tests/` gate — trace the real production entrypoint to the shared function rather than listing every textual call site.
 
 ## C — Code defaults
 - **C2:** When a spec says "reject 0/empty/-1," first map the field's consumers (`> 0`, `== 0`, `is_empty()`, match arms); if any treats that value as disable/sentinel/default, keep it valid and validate a different bound.
@@ -29,3 +30,10 @@ Author-facing design defaults distilled from codex-learnings.d entries. One line
 - **C17:** Any path-equality helper must require segment alignment — accept a suffix match only when the preceding character in the longer path is `/` or the paths are exactly equal — and include negative tests for unaligned collisions like `foobar.rs`↔`bar.rs`.
 - **C18:** Implement a metric's matching/keying at the same granularity as its reported rollup unit — when the metric reports per-file, test file membership, not exact-symbol identity, and add a test where the surviving fine unit differs from the signal-carrying one.
 - **C19:** Before finalizing any new match arm or guard, trace the dispatch function top-to-bottom for its target inputs and explicitly list every earlier `return`/early-exit above the new arm to confirm none preempts it.
+- **C20:** For every "entity is present in output" test assertion, name the concrete mechanism (edge/relation/signal/input) by which the fixture causes that entity to surface, and seed it — never rely on seeding the named symbols alone.
+- **C21:** When a row-locating write asserts single-row semantics (`rowCount === 1`, a `persisted`/`claimed` boolean), enforce the locating key with a UNIQUE constraint — on a multi-tenant table, `UNIQUE (tenant_col, key)` (partial-predicate restated for a partial index) — never rely on an "expected unique" comment or a globally-unique-id rationale.
+- **C22:** Any resolver with a primary typed-column lookup (uuid/int/enum) on external text must shape-guard the value in app code before the query and fall through to the secondary key on a guard failure — never let a malformed primary value reach the typed comparison, where it throws and masks the fallback.
+- **C23:** When you add a narrow least-privilege role, REVOKE-before-GRANT in the migration
+- **C24:** For any dedup-key + failure-retention queue design, make failure free the key
+- **C25:** Order required rejection gates BEFORE any generic success/empty early-return, and test each gate at the zero/empty boundary — never assume the "no data" shortcut is safe for an input the spec says must be rejected.
+- **C26:** when a test's job is to pin a whole object, assert the exact key set (`Object.keys(x).sort()` toEqual, or `toStrictEqual` on the whole object), not just the fields you remembered to name — a per-field-only pin catches removals and renames but never additions or cross-branch leaks.
