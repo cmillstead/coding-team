@@ -35,6 +35,24 @@ def _seed_verification_state(session_id: str, *, test_exit_code=None, lint_exit_
     }))
 
 
+def _init_feature_repo(path: Path) -> None:
+    """Init a git repo at *path* on a non-protected branch, then touch a Makefile.
+
+    hooks/tests/conftest.py roots tmp_path INSIDE the checkout (task #12), so a
+    bare, git-less tmp_path is no longer guaranteed to resolve outside any repo:
+    `git -C tmp_path rev-parse --show-toplevel` now walks up and finds the
+    CHECKOUT's own .git, and is_protected_branch() then reports whatever branch
+    the checkout happens to be on (main on a push-to-main CI run) instead of
+    "not a repo". Giving each test its own git repo on a non-protected branch
+    makes the branch check resolve deterministically regardless of the ambient
+    checkout branch, mirroring _make_repo_on_branch used elsewhere in this file.
+    No commit is needed — `git branch --show-current` and `rev-parse
+    --show-toplevel` both resolve correctly on a freshly-initialized repo.
+    """
+    _git(["init", "-b", "feat/test", str(path)], cwd=path.parent)
+    (path / "Makefile").touch()
+
+
 class TestSecretGuard:
     def test_blocks_git_add_env(self, run_hook, make_event):
         event = make_event("Bash", command="git add .env")
@@ -82,7 +100,7 @@ class TestCommitMessageFormat:
     """Tests for commit message prefix validation."""
 
     def test_blocks_commit_without_prefix(self, run_hook, make_event, tmp_state_dir, tmp_path):
-        (tmp_path / "Makefile").touch()
+        _init_feature_repo(tmp_path)
         old_cwd = os.getcwd()
         os.chdir(tmp_path)
         _seed_verification_state(tmp_state_dir)
@@ -96,7 +114,7 @@ class TestCommitMessageFormat:
             os.chdir(old_cwd)
 
     def test_allows_commit_with_feat_prefix(self, run_hook, make_event, tmp_state_dir, tmp_path):
-        (tmp_path / "Makefile").touch()
+        _init_feature_repo(tmp_path)
         old_cwd = os.getcwd()
         os.chdir(tmp_path)
         _seed_verification_state(tmp_state_dir)
@@ -108,7 +126,7 @@ class TestCommitMessageFormat:
             os.chdir(old_cwd)
 
     def test_allows_commit_with_fix_prefix(self, run_hook, make_event, tmp_state_dir, tmp_path):
-        (tmp_path / "Makefile").touch()
+        _init_feature_repo(tmp_path)
         old_cwd = os.getcwd()
         os.chdir(tmp_path)
         _seed_verification_state(tmp_state_dir)
@@ -124,7 +142,7 @@ class TestCommitMessageFileFlag:
     """Tests for -F / --file= commit message extraction."""
 
     def test_validates_message_from_file(self, run_hook, make_event, tmp_state_dir, tmp_path):
-        (tmp_path / "Makefile").touch()
+        _init_feature_repo(tmp_path)
         msg_file = tmp_path / "commit-msg.txt"
         msg_file.write_text("feat: add user authentication\n\nDetailed description here.")
         old_cwd = os.getcwd()
@@ -138,7 +156,7 @@ class TestCommitMessageFileFlag:
             os.chdir(old_cwd)
 
     def test_blocks_bad_prefix_from_file(self, run_hook, make_event, tmp_state_dir, tmp_path):
-        (tmp_path / "Makefile").touch()
+        _init_feature_repo(tmp_path)
         msg_file = tmp_path / "commit-msg.txt"
         msg_file.write_text("add user authentication")
         old_cwd = os.getcwd()
@@ -154,7 +172,7 @@ class TestCommitMessageFileFlag:
             os.chdir(old_cwd)
 
     def test_blocks_unreadable_file(self, run_hook, make_event, tmp_state_dir, tmp_path):
-        (tmp_path / "Makefile").touch()
+        _init_feature_repo(tmp_path)
         old_cwd = os.getcwd()
         os.chdir(tmp_path)
         _seed_verification_state(tmp_state_dir)
@@ -168,7 +186,7 @@ class TestCommitMessageFileFlag:
             os.chdir(old_cwd)
 
     def test_validates_double_dash_file(self, run_hook, make_event, tmp_state_dir, tmp_path):
-        (tmp_path / "Makefile").touch()
+        _init_feature_repo(tmp_path)
         msg_file = tmp_path / "commit-msg.txt"
         msg_file.write_text("fix: resolve memory leak")
         old_cwd = os.getcwd()
@@ -186,7 +204,7 @@ class TestCommitMessageUnparseable:
     """Tests for block-by-default when message can't be extracted."""
 
     def test_blocks_commit_with_no_message_flag(self, run_hook, make_event, tmp_state_dir, tmp_path):
-        (tmp_path / "Makefile").touch()
+        _init_feature_repo(tmp_path)
         old_cwd = os.getcwd()
         os.chdir(tmp_path)
         _seed_verification_state(tmp_state_dir)
@@ -200,7 +218,7 @@ class TestCommitMessageUnparseable:
             os.chdir(old_cwd)
 
     def test_allows_amend_without_message(self, run_hook, make_event, tmp_state_dir, tmp_path):
-        (tmp_path / "Makefile").touch()
+        _init_feature_repo(tmp_path)
         old_cwd = os.getcwd()
         os.chdir(tmp_path)
         _seed_verification_state(tmp_state_dir)
@@ -213,7 +231,7 @@ class TestCommitMessageUnparseable:
 
     def test_bypass_rationalization_in_error(self, run_hook, make_event, tmp_state_dir, tmp_path):
         """Verify the hook bypass rationalization appears in block messages."""
-        (tmp_path / "Makefile").touch()
+        _init_feature_repo(tmp_path)
         old_cwd = os.getcwd()
         os.chdir(tmp_path)
         _seed_verification_state(tmp_state_dir)
@@ -232,7 +250,7 @@ class TestExitCodeCheck:
 
     def test_advises_commit_when_tests_failed(self, run_hook, make_event, tmp_state_dir, tmp_path):
         """Commit is advisory (not blocked) when most recent test run had non-zero exit code."""
-        (tmp_path / "Makefile").touch()
+        _init_feature_repo(tmp_path)
         old_cwd = os.getcwd()
         os.chdir(tmp_path)
         _seed_verification_state(tmp_state_dir, test_exit_code=1, lint_exit_code=0)
@@ -248,7 +266,7 @@ class TestExitCodeCheck:
 
     def test_advises_commit_when_lint_failed(self, run_hook, make_event, tmp_state_dir, tmp_path):
         """Commit is advisory (not blocked) when most recent lint run had non-zero exit code."""
-        (tmp_path / "Makefile").touch()
+        _init_feature_repo(tmp_path)
         old_cwd = os.getcwd()
         os.chdir(tmp_path)
         _seed_verification_state(tmp_state_dir, test_exit_code=0, lint_exit_code=1)
@@ -264,7 +282,7 @@ class TestExitCodeCheck:
 
     def test_advises_commit_when_both_failed(self, run_hook, make_event, tmp_state_dir, tmp_path):
         """Commit is advisory (not blocked) when both test and lint runs failed."""
-        (tmp_path / "Makefile").touch()
+        _init_feature_repo(tmp_path)
         old_cwd = os.getcwd()
         os.chdir(tmp_path)
         _seed_verification_state(tmp_state_dir, test_exit_code=2, lint_exit_code=1)
@@ -280,7 +298,7 @@ class TestExitCodeCheck:
 
     def test_allows_commit_when_both_passed(self, run_hook, make_event, tmp_state_dir, tmp_path):
         """Commit allowed when both test and lint exit codes are 0."""
-        (tmp_path / "Makefile").touch()
+        _init_feature_repo(tmp_path)
         old_cwd = os.getcwd()
         os.chdir(tmp_path)
         _seed_verification_state(tmp_state_dir, test_exit_code=0, lint_exit_code=0)
@@ -293,7 +311,7 @@ class TestExitCodeCheck:
 
     def test_allows_commit_when_exit_codes_unknown(self, run_hook, make_event, tmp_state_dir, tmp_path):
         """Commit allowed when exit codes are None (unknown — PreToolUse fallback)."""
-        (tmp_path / "Makefile").touch()
+        _init_feature_repo(tmp_path)
         old_cwd = os.getcwd()
         os.chdir(tmp_path)
         _seed_verification_state(tmp_state_dir, test_exit_code=None, lint_exit_code=None)
@@ -306,7 +324,7 @@ class TestExitCodeCheck:
 
     def test_pytest_exit_code_5_treated_as_passing(self, run_hook, make_event, tmp_state_dir, tmp_path):
         """Exit code 5 (pytest no tests collected) should not block commits."""
-        (tmp_path / "Makefile").touch()
+        _init_feature_repo(tmp_path)
         old_cwd = os.getcwd()
         os.chdir(tmp_path)
         _seed_verification_state(tmp_state_dir, test_exit_code=5, lint_exit_code=0)
@@ -319,7 +337,7 @@ class TestExitCodeCheck:
 
     def test_pre_existing_failure_rationalization_in_message(self, run_hook, make_event, tmp_state_dir, tmp_path):
         """Advisory message includes named rationalization about pre-existing failures."""
-        (tmp_path / "Makefile").touch()
+        _init_feature_repo(tmp_path)
         old_cwd = os.getcwd()
         os.chdir(tmp_path)
         _seed_verification_state(tmp_state_dir, test_exit_code=1, lint_exit_code=0)
@@ -406,7 +424,7 @@ class TestPostToolUseCapture:
         # Arrange: state with a failed pytest run (exit_code=1)
         _seed_verification_state(tmp_state_dir, test_exit_code=1, lint_exit_code=0)
 
-        (tmp_path / "Makefile").touch()
+        _init_feature_repo(tmp_path)
         old_cwd = os.getcwd()
         os.chdir(tmp_path)
         try:
@@ -473,7 +491,7 @@ class TestPostToolUseCapture:
         if state_file.exists():
             state_file.unlink()
 
-        (tmp_path / "Makefile").touch()
+        _init_feature_repo(tmp_path)
         old_cwd = os.getcwd()
         os.chdir(tmp_path)
         try:
