@@ -94,10 +94,20 @@ def _write_plan(repo_root: Path, name: str, body: str | None = None) -> Path:
 def _run(
     event: dict, cwd: Path | None = None, env: dict | None = None
 ) -> tuple[dict | None, str, str, int]:
-    """Run write-guard.py with the given event; return (parsed_json, stdout, stderr, returncode)."""
+    """Run write-guard.py with the given event; return (parsed_json, stdout, stderr, returncode).
+
+    When `cwd` is given, CODING_TEAM_MAIN_ROOT is set to it so active-plan
+    detection uses the test repo directly instead of depending on `git
+    rev-parse` succeeding in an ephemeral tmp repo (see _lib/active_plan.py).
+    An explicit `env` entry for the same key is not overridden.
+    """
     run_env = None
-    if env is not None:
-        run_env = {**os.environ, **env}
+    if cwd is not None or env is not None:
+        run_env = dict(os.environ)
+        if cwd is not None:
+            run_env.setdefault("CODING_TEAM_MAIN_ROOT", str(cwd))
+        if env is not None:
+            run_env.update(env)
     result = subprocess.run(
         ["python3", str(HOOK_PATH)],
         input=json.dumps(event),

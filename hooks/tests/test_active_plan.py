@@ -72,12 +72,19 @@ def repo(tmp_path: Path) -> Path:
 
 @pytest.fixture
 def session_env(tmp_path: Path) -> dict:
-    """Return env dict with a unique test session ID and a per-test cache file."""
+    """Return env dict with a unique test session ID and a per-test cache file.
+
+    Also pins CODING_TEAM_MAIN_ROOT to tmp_path (the same path the `repo`
+    fixture initializes as a git repo) so active-plan detection uses the
+    test repo directly instead of depending on `git rev-parse` succeeding
+    in an ephemeral tmp repo (see _lib/active_plan.py).
+    """
     session_id = f"test-active-plan-{uuid.uuid4().hex[:12]}"
     cache_file = tmp_path / "active-plan-cache.json"
     return {
         "CLAUDE_CODE_SESSION_ID": session_id,
         "ACTIVE_PLAN_CACHE_FILE": str(cache_file),
+        "CODING_TEAM_MAIN_ROOT": str(tmp_path),
     }
 
 
@@ -415,10 +422,12 @@ print(json.dumps({{"plan": str(result) if result else None}}))
         session_env1 = {
             "CLAUDE_CODE_SESSION_ID": f"session-A-{uuid.uuid4().hex[:8]}",
             "ACTIVE_PLAN_CACHE_FILE": str(cache_file1),
+            "CODING_TEAM_MAIN_ROOT": str(repo),
         }
         session_env2 = {
             "CLAUDE_CODE_SESSION_ID": f"session-B-{uuid.uuid4().hex[:8]}",
             "ACTIVE_PLAN_CACHE_FILE": str(cache_file2),
+            "CODING_TEAM_MAIN_ROOT": str(repo),
         }
 
         code = """

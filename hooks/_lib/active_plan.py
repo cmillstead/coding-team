@@ -79,7 +79,18 @@ def _parse_frontmatter(text: str) -> dict[str, str]:
 
 
 def _git_main_root() -> Path | None:
-    """Return the absolute repository root, or None if not in a git repo."""
+    """Return the absolute repository root, or None if not in a git repo.
+
+    Test seam: if CODING_TEAM_MAIN_ROOT is set and non-empty, it is returned
+    directly and `git` is never invoked. This lets tests point at a tmp repo
+    without depending on `git rev-parse` succeeding in ephemeral CI sandboxes
+    (git resolution can fail silently inside a fresh pytest tmp_path repo).
+    Unset (the default / production path): behavior is unchanged, git is
+    always consulted.
+    """
+    override = os.environ.get("CODING_TEAM_MAIN_ROOT")
+    if override:
+        return Path(override)
     try:
         raw = subprocess.check_output(
             ["git", "rev-parse", "--path-format=absolute", "--git-common-dir"],
