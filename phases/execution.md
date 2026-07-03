@@ -15,12 +15,11 @@ If user wants isolation (or task warrants it), follow the `/worktree` skill (`sk
 On approval, begin execution. **Agent team per task: implementer + audit team (spec + simplify + harden).** Implementer follows the `/tdd` skill for all implementation work.
 
 **CRITICAL: The main agent is the orchestrator, not the implementer.** During Phase 5, you dispatch all file edits to agents. Your ONLY permitted direct actions are:
-- **Agent tool** — dispatch implementer and auditor subagents
-- **Teammate tool** — dispatch teammates (if agent teams available)
+- **Agent tool** — dispatch implementer and auditor subagents (and, when agent teams are available, teammates via `Agent({ team_name })` — no separate "Teammate" tool exists)
 - **SendMessage tool** — coordinate with teammates
 - **TaskCreate / TaskList / TaskUpdate tools** — manage shared task list
 - **Read tool** — read files for context
-- **Edit/Write tools** — for `memory/`, `~/Documents/obsidian-vault/`, `/tmp/` session files, and **small source code edits** (≤20 lines, 1 file) where audit value is low. All instruction files (`agents/`, `phases/`, `prompts/`, `skills/`, `CLAUDE.md`), hooks (`hooks/`), and larger source code changes (>20 lines or multi-file) go through the Agent tool. See "Phase 5 Edit Routing" in SKILL.md.
+- **Edit/Write tools** — for `memory/`, `~/Documents/obsidian-vault/`, `/tmp/` session files, and **small source code edits** (≤20 lines, 1 file) where audit value is low. All instruction files (`agents/`, `phases/`, `skills/`, `CLAUDE.md`), hooks (`hooks/`), and larger source code changes (>20 lines or multi-file) go through the Agent tool. See "Phase 5 Edit Routing" in SKILL.md.
 - **Bash tool for git commands only** — `git diff`, `git log`, `git rev-parse` (NOT test commands, NOT `pytest`, NOT `npm test`, NOT `cargo test`)
 
 If you use Edit, Write, or Bash to run tests during Phase 5, the task must be re-done by an agent. Your direct edit bypasses the audit loop and is not trusted — it skips spec review, simplify audit, and harden audit. Unreviewed code does not ship.
@@ -37,7 +36,7 @@ Execution uses subagents because the plan pre-decomposes work into independent t
 
 **Pre-flight: Activate plan.** BEFORE dispatching the first implementer, edit the active plan file's frontmatter using the Edit tool: change `status: planned` to `status: in-progress`. This is a normal Edit by the orchestrator — write-guard isn't yet active because the plan currently has `status: planned`, not `status: in-progress`.
 
-Once the edit lands, write-guard is active for the duration of Phase 5: orchestrator direct Edit/Write to instruction files (`agents/`, `phases/`, `prompts/`, `skills/`, `CLAUDE.md`, hooks) will be blocked, forcing all instruction-file work through the Agent tool.
+Once the edit lands, write-guard is active for the duration of Phase 5: orchestrator direct Edit/Write to instruction files (`agents/`, `phases/`, `skills/`, `CLAUDE.md`, hooks) will be blocked, forcing all instruction-file work through the Agent tool.
 
 Verify: re-read the plan, confirm `status: in-progress` is present in the frontmatter block (between the leading `---` delimiters). If the plan still shows `status: planned`, re-edit before proceeding. If multiple plans now claim `status: in-progress`, the lifecycle hook will fail closed — clear the stale ones (mark them `complete`) before dispatching.
 

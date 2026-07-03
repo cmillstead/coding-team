@@ -64,7 +64,7 @@ Each team can be a single agent (for simple investigations) or a full task team 
 **Agent teams mode (AGENT_TEAMS_AVAILABLE = true, 3+ domains, possibly shared infrastructure):**
 
 1. Create team:
-   `Teammate({ operation: "spawnTeam", team_name: "parallel-fix-<timestamp>" })`
+   `TeamCreate({ team_name: "parallel-fix-<timestamp>" })`
 
 2. Create tasks (one per domain):
    ```
@@ -76,20 +76,21 @@ Each team can be a single agent (for simple investigations) or a full task team 
    ```
 
 3. Spawn one teammate per domain:
+   `Agent({ subagent_type: "general-purpose", name: "<domain-slug>", team_name: "parallel-fix-<timestamp>", run_in_background: true, prompt: "<scope, goal, context, constraints, expected output>" })`
    - Spawn prompt includes: specific scope, error messages, relevant code, constraints, expected output format
-   - Additional instruction: "If during investigation you discover this failure is related to another domain being investigated by a teammate, message them immediately. Do NOT proceed with a fix that depends on assumptions about another domain's state without coordinating."
+   - Additional instruction: "If during investigation you discover this failure is related to another domain being investigated by a teammate, message them immediately via SendMessage. Do NOT proceed with a fix that depends on assumptions about another domain's state without coordinating."
 
 4. Monitor:
-   - Watch for cross-domain messages (the signal that "independent" failures may share a root cause)
+   - Watch for cross-domain messages via `SendMessage` (the signal that "independent" failures may share a root cause)
+   - Track per-domain status with `TaskUpdate`
    - If cross-domain dependency discovered: pause affected teams, re-scope, potentially merge into a single investigation
    - Otherwise: let teams work to completion
 
 5. Review and integrate (same as subagent step 4 below)
 
-6. Shutdown and cleanup:
-   `Teammate({ operation: "requestShutdown", target_agent_id: "<each>" })`
-   Wait for approvals.
-   `Teammate({ operation: "cleanup" })`
+6. Shutdown and cleanup (lead only):
+   `TaskStop` each remaining task for the team.
+   Lead performs team cleanup once all teammates have reported or been stopped.
 
 **Subagent mode (AGENT_TEAMS_AVAILABLE = false, or 2 domains, or provably independent):**
 
@@ -129,7 +130,7 @@ Return: summary of root cause and what you fixed.
 
 ## Red Flags
 
-**The lead NEVER writes code directly.** Dispatch all fixes through Agent tool or Teammate tool. If you catch yourself about to use Edit or Write — STOP and spawn an agent instead. Direct fixes bypass the verification loop and are not trusted.
+**The lead NEVER writes code directly.** Dispatch all fixes through the Agent tool (subagents or, when team-coordinated, `Agent({ team_name })` teammates). If you catch yourself about to use Edit or Write — STOP and spawn an agent instead. Direct fixes bypass the verification loop and are not trusted.
 
 ## Verification Gate
 

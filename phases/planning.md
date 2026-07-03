@@ -22,7 +22,7 @@ Before writing tasks, check if any planned work needs specialized skill involvem
 
 | Task modifies... | Category | Include in task annotation |
 |---|---|---|
-| `phases/*.md`, `agents/*.md`, `prompts/*.md`, `skills/*/SKILL.md`, `SKILL.md`, `CLAUDE.md`, `memory/*.md` | prompt-engineering | **Advisory skills:** PROMPT_CRAFT_ADVISORY |
+| `phases/*.md`, `agents/*.md`, `skills/*/SKILL.md`, `SKILL.md`, `CLAUDE.md`, `memory/*.md` | prompt-engineering | **Advisory skills:** PROMPT_CRAFT_ADVISORY |
 | Test files only (`tests/**`, `*_test.*`, `test_*.*`) | testing | **Advisory skills:** `/tdd` — follow red-green-refactor cycle |
 | Auth, payment, encryption, or data-deletion code paths | security-sensitive | **Advisory skills:** `/second-opinion challenge` recommended after implementation |
 
@@ -30,7 +30,7 @@ Before writing tasks, check if any planned work needs specialized skill involvem
 
 > This task writes CC instructions. Apply prompt engineering language rules:
 > 1. Framing determines defaults — state desired behavior first in conditionals, before exceptions
-> 2. Name tools explicitly — write "Agent tool", "Teammate tool", "Edit tool", not "dispatch agents" or "use tools"
+> 2. Name tools explicitly — write "Agent tool", "Edit tool", `Agent({ team_name })` for team dispatch, not "dispatch agents", "use tools", or a literal "Teammate tool" (no such tool exists)
 > 3. Prohibitions must be explicit — CC does not infer what it should NOT do; state every prohibition directly
 > 4. Quantify thresholds — write "3 files", "5 minutes", "2 rounds", not "large", "many", "several"
 > 5. Identity over prohibition — for role boundaries, write "You are the orchestrator" not "NEVER write code directly"

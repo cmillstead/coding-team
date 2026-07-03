@@ -23,7 +23,7 @@ from pathlib import Path
 import pytest
 
 
-HOOKS_DIR = Path("/Users/cevin/.claude/skills/coding-team/hooks")
+HOOKS_DIR = Path(__file__).resolve().parent.parent  # tests/ -> hooks/
 HOOK_PATH = HOOKS_DIR / "write-guard.py"
 
 # Ensure hooks/ is on sys.path so direct imports from _lib work.
@@ -94,10 +94,20 @@ def _write_plan(repo_root: Path, name: str, body: str | None = None) -> Path:
 def _run(
     event: dict, cwd: Path | None = None, env: dict | None = None
 ) -> tuple[dict | None, str, str, int]:
-    """Run write-guard.py with the given event; return (parsed_json, stdout, stderr, returncode)."""
+    """Run write-guard.py with the given event; return (parsed_json, stdout, stderr, returncode).
+
+    When `cwd` is given, CODING_TEAM_MAIN_ROOT is set to it so active-plan
+    detection uses the test repo directly instead of depending on `git
+    rev-parse` succeeding in an ephemeral tmp repo (see _lib/active_plan.py).
+    An explicit `env` entry for the same key is not overridden.
+    """
     run_env = None
-    if env is not None:
-        run_env = {**os.environ, **env}
+    if cwd is not None or env is not None:
+        run_env = dict(os.environ)
+        if cwd is not None:
+            run_env.setdefault("CODING_TEAM_MAIN_ROOT", str(cwd))
+        if env is not None:
+            run_env.update(env)
     result = subprocess.run(
         ["python3", str(HOOK_PATH)],
         input=json.dumps(event),
@@ -968,7 +978,7 @@ class TestGraduatedC1Advisory:
         }
         parsed, stdout, _stderr, _rc = _run(event)
         # Exactly one JSON object (not two, not zero)
-        lines = [l for l in stdout.strip().splitlines() if l.strip()]
+        lines = [line for line in stdout.strip().splitlines() if line.strip()]
         assert len(lines) == 1, f"Expected exactly 1 JSON line, got {len(lines)}: {stdout!r}"
         assert parsed is not None
         assert parsed["decision"] == "allow"
@@ -996,7 +1006,7 @@ class TestGraduatedC1Advisory:
             },
         }
         parsed, stdout, _stderr, _rc = _run(event, cwd=repo)
-        lines = [l for l in stdout.strip().splitlines() if l.strip()]
+        lines = [line for line in stdout.strip().splitlines() if line.strip()]
         assert len(lines) == 1, (
             f"Expected exactly 1 JSON line (single-emission), got {len(lines)}: {stdout!r}"
         )
@@ -1084,7 +1094,7 @@ class TestGraduatedC1Advisory:
             },
         }
         parsed, stdout, _stderr, _rc = _run(event, cwd=repo, env=env)
-        lines = [l for l in stdout.strip().splitlines() if l.strip()]
+        lines = [line for line in stdout.strip().splitlines() if line.strip()]
         assert len(lines) == 1, (
             f"Expected exactly 1 JSON line, got {len(lines)}: {stdout!r}"
         )
@@ -1218,7 +1228,7 @@ class TestC17C1CrossResponsibility:
 
         # Assert
         assert c1_result is not None, (
-            f"C1 must fire on 'repoPath = compute()' — got None"
+            "C1 must fire on 'repoPath = compute()' — got None"
         )
         assert ps_result is None, (
             f"check_path_safety must not fire on a plain assignment with no string op — got: {ps_result!r}"
@@ -1247,7 +1257,7 @@ class TestC17C1CrossResponsibility:
 
         # Assert
         assert ps_result is not None, (
-            f"check_path_safety must fire on filepath.startswith — got None"
+            "check_path_safety must fire on filepath.startswith — got None"
         )
         # C1 returns None: 'filepath' has 'file' immediately before 'path' (no boundary).
         # This is the observed behavior — do not assume clean exclusion; record it here.
@@ -1280,10 +1290,10 @@ class TestC17C1CrossResponsibility:
 
         # Assert: both fire (direct-call confirmation of co-firing)
         assert c1_result is not None, (
-            f"C1 must fire on 'repoPath' — got None"
+            "C1 must fire on 'repoPath' — got None"
         )
         assert ps_result is not None, (
-            f"check_path_safety must fire on 'repoPath.startswith' — got None"
+            "check_path_safety must fire on 'repoPath.startswith' — got None"
         )
 
 
@@ -1538,7 +1548,6 @@ class TestPaulPhaseGateOverride:
         """When override is active and gate would block, a log line is appended."""
         phase_dir = _make_paul_phase_dir(tmp_path)
         file_path = str(phase_dir / "DISCOVERY.md")
-        log_path = tmp_path / "phase-gate-overrides.log"
         # Temporarily patch the log path by setting env var override + checking log
         # Since the log path is hardcoded to ~/.claude/security/..., we verify
         # the function returns None under override (log append is best-effort).
@@ -1584,7 +1593,7 @@ class TestPaulPhaseGateFailOpen:
         import shutil
         shutil.rmtree(str(phase_dir))
         try:
-            result = _WRITE_GUARD.check_paul_phase_gate(file_path)
+            _WRITE_GUARD.check_paul_phase_gate(file_path)
             # Must not raise; may return None or a block reason
             # (the path is gone, but the function should handle it)
         except Exception as exc:  # noqa: BLE001  # testing fail-open

@@ -5,7 +5,7 @@ When the Team Leader spawns you as a specialist worker, your lens is:
 **Focus:** Prompt quality, skill coverage, agent coordination patterns, instruction clarity.
 
 **Questions to answer:**
-- Are the existing agent prompts (`prompts/*.md`) well-suited for this task?
+- Are the existing agent prompts (`agents/*.md`, or `prompts/*.md` in harnesses that use that layout) well-suited for this task?
 - Does this task need a new prompt template or modifications to an existing one?
 - Will the skill advisory blocks the Team Leader passes to workers be useful or noise?
 - Are there behavioral issues in the current skill/prompt setup that this task will hit?

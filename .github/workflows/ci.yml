@@ -24,7 +24,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install pytest pyyaml
+          pip install pytest pyyaml ruff
 
       - name: Run smoke tests
         run: python -m pytest hooks/tests/test_agent_smoke.py hooks/tests/test_skill_evals.py -v -k "not llm_eval and not llm_judge" --tb=short
@@ -32,3 +32,30 @@ jobs:
       - name: Test summary
         if: always()
         run: python -m pytest hooks/tests/test_agent_smoke.py hooks/tests/test_skill_evals.py -k "not llm_eval and not llm_judge" --tb=no -q 2>&1 | tail -5
+
+      - name: Lint (ruff)
+        run: python -m ruff check .
+
+      - name: Check cross-file indexes (agents/phases/skills references)
+        run: python3 scripts/check-indexes.py
+
+      - name: Deploy hooks (relative symlinks from the checkout into $HOME/.claude)
+        # The dispatcher scripts (pretooluse-dispatcher.py, posttooluse-dispatcher.py,
+        # prompt-dispatcher.py) always resolve handlers under $HOME/.claude/hooks —
+        # deploy.sh's CLAUDE_DIR override changes only where it WRITES symlinks, not
+        # where the dispatchers READ from, so this must target the real $HOME here.
+        # On ubuntu-latest $HOME is /home/runner (never /Users/cevin), so deploying
+        # the checkout's own hooks/ there is the structural guard against the F4
+        # regression class: any hardcoded personal-machine path in a hook or test
+        # would fail on this runner, where no such path can exist.
+        run: bash scripts/deploy.sh
+
+      - name: Run full hooks test suite
+        # test_prompt_dispatcher.py is excluded here: it oracle-tests against an
+        # external, non-repo integration (~/src/engram/.base/hooks/*.py and a
+        # pinned pyenv interpreter) that only exists on the maintainer's machine.
+        # That is a distinct, pre-existing external-dependency gap — not the F4
+        # HOOKS_DIR-portability class this job structurally guards — and is out
+        # of scope to redesign here since the referenced hooks live outside this
+        # repo entirely and cannot be deployed to a runner.
+        run: python -m pytest hooks/tests/ --ignore=hooks/tests/test_prompt_dispatcher.py -k "not llm_eval and not llm_judge" -v --tb=short

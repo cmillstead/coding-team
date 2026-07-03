@@ -23,18 +23,15 @@ Shared-state reset strategy (critical for parity validity):
 """
 
 import importlib.util
-import io
 import json
 import os
 import subprocess
-import sys
 import time
 import uuid
 from pathlib import Path
 
-import pytest
 
-HOOKS_DIR = Path("/Users/cevin/.claude/skills/coding-team/hooks")
+HOOKS_DIR = Path(__file__).resolve().parent.parent  # tests/ -> hooks/
 DISPATCHER_PATH = HOOKS_DIR / "prompt-dispatcher.py"
 PYTHON = "/Users/cevin/.pyenv/versions/3.11.14/bin/python3"
 

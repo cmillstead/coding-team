@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Codesight integration hooks: agent prompt injection + auto-reindex on file writes + usage logging."""
 
-import os, sys
+import os
+import sys
 sys.path.insert(0, os.path.dirname(__file__))
 
 import hashlib
@@ -192,4 +193,8 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as exc:  # noqa: BLE001 — advisory hook: fail open, never break the session
+        print(f"codesight-hooks.py: crashed with {exc!r} — advisory hook, continuing", file=sys.stderr)
+    sys.exit(0)

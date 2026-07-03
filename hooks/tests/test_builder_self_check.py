@@ -1,15 +1,13 @@
 """Tests for builder-self-check.py hook."""
 
 import json
-import os
 import subprocess
 import time
 from pathlib import Path
 
-import pytest
 
 
-HOOKS_DIR = Path("/Users/cevin/.claude/skills/coding-team/hooks")
+HOOKS_DIR = Path(__file__).resolve().parent.parent  # tests/ -> hooks/
 
 
 def run_builder_hook(event: dict, timeout: int = 30) -> dict | None:

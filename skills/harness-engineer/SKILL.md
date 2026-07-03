@@ -85,3 +85,5 @@ Trigger: [when should the constraint fire]
 ```
 
 The agent has access to the engram CLI (`engram search … --json`, `engram query-nodes … --json`) for KB lookups, codesight-mcp for code analysis, and Bash for inspecting hook scripts and settings.
+
+**Fallback if `engram` is unavailable:** if `engram` is not on PATH, or the dev server is down, retry once; if it still fails, degrade to Grep/Read over `cookbook/` and `docs/reports/` for the same lookups — consistent with the repo's MCP-resilience pattern (retry once max, then degrade to built-in tools).

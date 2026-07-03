@@ -157,6 +157,14 @@ def _run_and_emit(handlers: list[str], payload: str, skip: set[str]) -> None:
                 sys.stderr.write(stderr)
                 sys.stderr.flush()
             sys.exit(2)
+        if rc != 0:
+            # An exit code outside the known contract (0, 2) is otherwise
+            # indistinguishable from a handler crash — name it explicitly.
+            print(
+                f"posttooluse-dispatcher: {Path(script).name} returned unexpected "
+                f"exit code {rc} (not 0 or 2) — possible crash, not an intentional block",
+                file=sys.stderr,
+            )
         kind, content = _classify_output(stdout)
         if kind == "block":
             blocks.append(content)

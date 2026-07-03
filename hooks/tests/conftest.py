@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 
 
-HOOKS_DIR = Path("/Users/cevin/.claude/skills/coding-team/hooks")
+HOOKS_DIR = Path(__file__).resolve().parent.parent  # tests/ -> hooks/
 
 
 def pytest_addoption(parser):
@@ -25,7 +25,25 @@ def pytest_addoption(parser):
 
 
 def pytest_configure(config):
-    """Register custom markers."""
+    """Register custom markers and root pytest's tmp dirs outside /tmp.
+
+    Root cause (task #12): write-guard.py's is_orchestrator_file() treats
+    ANY path starting with the literal prefix "/tmp" as an always-allowed
+    orchestrator scratch file (by design, for real /tmp scratch work). On
+    Linux (incl. GitHub Actions ubuntu-latest), /tmp is a real, non-symlinked
+    directory, so pytest's default tmp_path base resolves to a literal
+    /tmp/pytest-of-<user>/... path — a Phase5 test repo built under tmp_path
+    then silently satisfies is_orchestrator_file() and the guard under test
+    never fires, regardless of active-plan detection. On macOS this never
+    reproduces because /tmp is a symlink to /private/tmp and pytest resolves
+    tmp_path through it, so local runs looked green while CI was red.
+    Rooting tmp dirs at the repo root (NOT under hooks/ — write-guard.py's
+    is_instruction_file() treats any .py under a path containing a "hooks"
+    segment as behavioral, which a hooks/.pytest-tmp/ placement would have
+    made every test .py file falsely match) means no test path can start
+    with "/tmp" or contain "hooks" on any platform. Only applies when
+    --basetemp wasn't explicitly passed on the command line.
+    """
     config.addinivalue_line(
         "markers",
         "llm_judge: marks tests that require real LLM calls (deselect with '-m \"not llm_judge\"')",
@@ -34,6 +52,10 @@ def pytest_configure(config):
         "markers",
         "smoke: Tier 1 agent smoke tests (structural validation, no LLM calls)",
     )
+    if config.option.basetemp is None:
+        base = HOOKS_DIR.parent / ".pytest-tmp"
+        base.mkdir(exist_ok=True)
+        config.option.basetemp = str(base)
 
 
 # ---------------------------------------------------------------------------

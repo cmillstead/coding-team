@@ -62,10 +62,14 @@ change; no renumber; table-safe because an inline-code span contains no `|`). Gr
 - **floor** — reserved for always-applicable entries (P1–P4 plan-symbol concerns; any
   untagged/unclassifiable entry defaults here). A `floor` entry is always `applicable` WHEN IN SCOPE — scope-mismatch is checked first, so a `scope:plan` floor entry (P1–P4) is correctly scope-dismissed in a pure `diff` review.
 
-**Category enum (16):**
+**Category enum (19):**
 `plan-symbol · negative-existence · ambiguity-guard · helper-reuse · metric-aggregate ·
 path-equality · sentinel-semantics · ci-config · lossy-stash · test-hermeticity · command-grammar ·
-select-threading · concurrency-lock · default-flip · migration-parity · tenant-isolation`
+select-threading · concurrency-lock · default-flip · migration-parity · tenant-isolation ·
+test-fixture-completeness · uniqueness-enforcement · input-shape-guard`
+
+(`test-fixture-completeness`, `uniqueness-enforcement`, and `input-shape-guard` are `reasoning-shape` —
+no grep battery; they always deep-check when in scope. See C20, C21, C22.)
 
 ## Grep battery (provable categories only)
 

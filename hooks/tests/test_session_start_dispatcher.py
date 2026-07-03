@@ -13,7 +13,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-_HOOKS = Path("/Users/cevin/.claude/skills/coding-team/hooks")
+_HOOKS = Path(__file__).resolve().parent.parent  # tests/ -> hooks/
 _DISPATCHER = _HOOKS / "session-start-dispatcher.py"
 
 # Load the dispatcher module by path (filename has a hyphen → not importable).

@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 
-HOOKS_DIR = Path("/Users/cevin/.claude/skills/coding-team/hooks")
+HOOKS_DIR = Path(__file__).resolve().parent.parent  # tests/ -> hooks/
 
 
 def run_python(code: str, stdin_data: str = "") -> subprocess.CompletedProcess:
@@ -198,8 +198,9 @@ class TestOutputFunctions:
             'from _lib.output import allow; allow()',
         )
         parsed = json.loads(result.stdout)
-        assert parsed["decision"] == "allow"
-        assert "reason" not in parsed
+        assert parsed["hookSpecificOutput"]["hookEventName"] == "PreToolUse"
+        assert parsed["hookSpecificOutput"]["permissionDecision"] == "allow"
+        assert "decision" not in parsed
 
     def test_allow_with_reason_structure(self):
         result = run_python(
@@ -242,7 +243,7 @@ class TestUpdateInput:
         event = {"tool_input": {"prompt": "P", "description": "D"}}
         code = (
             "import json, sys\n"
-            "sys.path.insert(0, '/Users/cevin/.claude/skills/coding-team/hooks')\n"
+            f"sys.path.insert(0, {str(HOOKS_DIR)!r})\n"
             "from _lib.event import parse_event\n"
             "from _lib import output\n"
             "ev = parse_event()\n"
@@ -259,7 +260,7 @@ class TestUpdateInput:
         event = {"tool_input": {"prompt": "P"}}
         code = (
             "import sys\n"
-            "sys.path.insert(0, '/Users/cevin/.claude/skills/coding-team/hooks')\n"
+            f"sys.path.insert(0, {str(HOOKS_DIR)!r})\n"
             "from _lib.event import parse_event\n"
             "from _lib import output\n"
             "ev = parse_event()\n"
@@ -269,9 +270,11 @@ class TestUpdateInput:
         result = run_python(code, stdin_data=json.dumps(event))
         assert result.returncode == 0, result.stderr
         parsed = json.loads(result.stdout)
-        # Fail-open: emits plain allow, NOT hookSpecificOutput
-        assert parsed == {"decision": "allow"}
-        assert "hookSpecificOutput" not in parsed
+        # Fail-open: emits plain allow (modern shape), NOT updatedInput
+        assert parsed["hookSpecificOutput"]["hookEventName"] == "PreToolUse"
+        assert parsed["hookSpecificOutput"]["permissionDecision"] == "allow"
+        assert "updatedInput" not in parsed["hookSpecificOutput"]
+        assert "decision" not in parsed
 
 
 # ---------------------------------------------------------------------------

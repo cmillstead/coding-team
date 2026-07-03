@@ -32,6 +32,11 @@ fi
 stale_lines=""
 cutoff=$(date -v-14d +%s 2>/dev/null || date -d '14 days ago' +%s 2>/dev/null) || cutoff=0
 
+# Fetch all open PR head refs ONCE. Previously this hook made one `gh pr list
+# --head` network call per stale branch, so session-start latency scaled with
+# local branch count. One bounded call + local lookup keeps it constant-time.
+open_pr_heads=$(timeout 10 gh pr list --state open --json headRefName --limit 200 2>/dev/null | jq -r '.[].headRefName' 2>/dev/null) || open_pr_heads=""
+
 if [ "$cutoff" -gt 0 ]; then
     while IFS= read -r branch; do
         [ -z "$branch" ] && continue
@@ -48,9 +53,8 @@ if [ "$cutoff" -gt 0 ]; then
         [ -z "$last_commit" ] && continue
 
         if [ "$last_commit" -lt "$cutoff" ]; then
-            # Check if branch has an open PR
-            has_pr=$(timeout 5 gh pr list --head "$branch" --state open --json number --limit 1 2>/dev/null)
-            if [ -z "$has_pr" ] || [ "$has_pr" = "[]" ]; then
+            # Check if branch has an open PR (local lookup, no per-branch network call)
+            if ! printf '%s\n' "$open_pr_heads" | grep -qxF "$branch"; then
                 age_days=$(( ($(date +%s) - last_commit) / 86400 ))
                 stale_lines="${stale_lines}- ${branch} (${age_days}d old, no PR)\n"
             fi

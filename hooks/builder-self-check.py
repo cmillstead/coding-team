@@ -21,7 +21,6 @@ import time
 sys.path.insert(0, os.path.dirname(__file__))
 
 from _lib import event as _event
-from _lib import output as _output
 
 # ---------------------------------------------------------------------------
 # Constants

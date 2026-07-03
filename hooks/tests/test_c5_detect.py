@@ -9,7 +9,6 @@ AAA structure throughout.  All tests assert behaviour (return value or
 attribute), never source-code structure.
 """
 
-import pytest
 
 from _lib.c5_detect import C5Finding, _c5_detect
 

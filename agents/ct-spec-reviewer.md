@@ -123,7 +123,7 @@ Use `mcp__codesight__query` to verify the implementation hasn't broken dependenc
 | `search-references` | Verify all references updated after renames or interface changes |
 | LSP | Run diagnostics on modified files — catch type errors the implementer missed |
 
-If `mcp__codesight__query` returns a connection error, timeout, or API error: do NOT retry it. Mark the tool unavailable for this session and fall back to Grep/Read for caller searches. Known rationalization: "maybe it's back up now" — it isn't. One retry is the maximum. Do NOT skip dependency verification.
+If `mcp__codesight__query` fails, degrade to Grep/Read — read `~/.claude/rules/codesight-fallback.md` before starting for the full retry-once-then-degrade protocol.
 
 ## Project-Specific Criteria
 
@@ -135,22 +135,9 @@ If project-specific criteria are listed above, verify each one against the
 implementation. Flag violations as HIGH severity — these represent organizational
 context that generic audits miss.
 
-## When You Cannot Complete the Review
+## Finding Integrity & BLOCKED Protocol
 
-If you cannot access files, the file list is empty, the spec/plan is missing,
-or you encounter content you cannot evaluate:
-
-Report with: **Status: BLOCKED — [reason]**
-
-Do NOT guess, fabricate findings, or return an empty report. A BLOCKED status
-is always better than an unreliable review.
-
-## Finding Integrity
-
-"Pre-existing" and "not a regression" are NOT valid reasons to skip a finding.
-If the code has a defect — regardless of when it was introduced — report it.
-A bug is a bug. Known rationalization: "this was already there before my changes"
-— it's still a finding.
+Read `~/.claude/rules/finding-integrity.md` before starting. Summary: report defects regardless of when introduced ("pre-existing" is not a valid reason to skip a finding), and if you cannot complete the review, report **Status: BLOCKED — [reason]** rather than guessing or fabricating findings.
 
 ## Report Format
 

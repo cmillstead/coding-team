@@ -71,7 +71,7 @@ Use `mcp__codesight__query` for deeper security analysis:
 
 **Unwired security utilities:** Use operation `search-references` to check that security-critical functions (sanitization, validation, auth checks, rate limiting) are called at ALL expected sites, not just where a scan finding flagged them. A sanitization function that exists but is only called at 1 of 7 call sites is worse than no function — it creates the illusion of protection. Flag as HIGH when a security utility exists but `search-references` shows fewer callers than expected call sites.
 
-If `mcp__codesight__query` returns a connection error, timeout, or API error: do NOT retry it. Mark the tool unavailable for this session and fall back to Grep/Read for call-site analysis. Known rationalization: "maybe it's back up now" — it isn't. One retry is the maximum. Do NOT skip data flow tracing on security-sensitive code.
+If `mcp__codesight__query` fails, degrade to Grep/Read — read `~/.claude/rules/codesight-fallback.md` before starting for the full retry-once-then-degrade protocol. Do NOT skip data flow tracing on security-sensitive code.
 
 ## Dependency Vulnerability Check
 
@@ -99,21 +99,9 @@ Categories:
 - **patch** — targeted fix (add validation, sanitize input)
 - **security refactor** — structural change needed (must pass refactor gate)
 
-## When You Cannot Complete the Review
+## Finding Integrity & BLOCKED Protocol
 
-If you cannot access files, the file list is empty, the spec/plan is missing,
-or you encounter content you cannot evaluate:
-
-Report with: **Status: BLOCKED — [reason]**
-
-Do NOT guess, fabricate findings, or return an empty report. A BLOCKED status
-is always better than an unreliable review.
-
-## Finding Integrity
-
-"Pre-existing" and "not a regression" are NOT valid reasons to skip a finding.
-If the code has a security vulnerability — regardless of when it was introduced — report it.
-Known rationalization: "this was already there before the changes" — it's still a finding.
+Read `~/.claude/rules/finding-integrity.md` before starting. Summary: report vulnerabilities regardless of when introduced ("pre-existing" is not a valid reason to skip a finding), and if you cannot complete the review, report **Status: BLOCKED — [reason]** rather than guessing or fabricating findings.
 
 ## Output Format
 

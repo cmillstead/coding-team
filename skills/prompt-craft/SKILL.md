@@ -133,7 +133,7 @@ Read the file completely, then evaluate. For standard block templates, see `skil
 - [ ] Under 200 lines? "When You Cannot Complete" block? Finding Integrity block?
 - [ ] Escalation paths explicit (BLOCKED, NEEDS_CONTEXT)?
 
-### Prompt template quality (`prompts/*.md`)
+### Prompt template quality (agent/prompt template files)
 - [ ] Tells agent what it IS and what it is NOT?
 - [ ] Full context provided? Output format specified? Failure handling?
 

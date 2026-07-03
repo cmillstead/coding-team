@@ -1,0 +1,23 @@
+[tool.ruff]
+# Match the CI test matrix (.github/workflows/ci.yml: python-version 3.11, 3.12).
+target-version = "py311"
+line-length = 100
+
+# Non-Python files and caches never contain lintable Python; scripts/*.sh are
+# shell, not Python, so exclude them explicitly alongside the standard caches.
+extend-exclude = [
+    "scripts/*.sh",
+    "*.sh",
+    "__pycache__",
+    ".pytest_cache",
+    ".ruff_cache",
+    ".git",
+]
+
+[tool.ruff.lint]
+# Keep the default rule set (E/F) plus a few pragmatic additions already
+# relevant to this codebase's hook scripts.
+select = ["E", "F"]
+# E501 (line too long): pre-existing lines across the codebase, cosmetic only.
+# Ignored rather than reflowed; F and the rest of E (E4xx/E7xx etc.) stay active.
+ignore = ["E501"]

@@ -20,7 +20,7 @@ from pathlib import Path
 import pytest
 
 
-HOOKS_DIR = Path("/Users/cevin/.claude/skills/coding-team/hooks")
+HOOKS_DIR = Path(__file__).resolve().parent.parent  # tests/ -> hooks/
 
 ACTIVE_FRONTMATTER = "---\nstatus: in-progress\n---\n\n"
 PLANNED_FRONTMATTER = "---\nstatus: planned\n---\n\n"
@@ -72,12 +72,19 @@ def repo(tmp_path: Path) -> Path:
 
 @pytest.fixture
 def session_env(tmp_path: Path) -> dict:
-    """Return env dict with a unique test session ID and a per-test cache file."""
+    """Return env dict with a unique test session ID and a per-test cache file.
+
+    Also pins CODING_TEAM_MAIN_ROOT to tmp_path (the same path the `repo`
+    fixture initializes as a git repo) so active-plan detection uses the
+    test repo directly instead of depending on `git rev-parse` succeeding
+    in an ephemeral tmp repo (see _lib/active_plan.py).
+    """
     session_id = f"test-active-plan-{uuid.uuid4().hex[:12]}"
     cache_file = tmp_path / "active-plan-cache.json"
     return {
         "CLAUDE_CODE_SESSION_ID": session_id,
         "ACTIVE_PLAN_CACHE_FILE": str(cache_file),
+        "CODING_TEAM_MAIN_ROOT": str(tmp_path),
     }
 
 
@@ -91,7 +98,7 @@ class TestCrossInvocationCache:
         reads+parses a plan's frontmatter. On a cache hit the counter must NOT
         increase between call 1 and call 2.
         """
-        plan = _write_plan(repo, "plan.md")
+        _write_plan(repo, "plan.md")
         counter_file = tmp_path / "scan_counter.json"
         counter_file.write_text("0")
 
@@ -170,12 +177,12 @@ print(json.dumps({{"plan": str(result) if result else None}}))
         plan = _write_plan(repo, "plan.md", PLANNED_FRONTMATTER + "# Plan\n")
 
         # Call 1: planned -> expect None (gate disarmed)
-        code_call1 = f"""
+        code_call1 = """
 import json
 from pathlib import Path
 from _lib.active_plan import find_active_plan_cached
 result = find_active_plan_cached(ttl_seconds=60)
-print(json.dumps({{"plan": str(result) if result else None}}))
+print(json.dumps({"plan": str(result) if result else None}))
 """
         r1 = run_python(code_call1, cwd=repo, env=session_env)
         assert r1.returncode == 0, f"call 1 failed: {r1.stderr}"
@@ -189,12 +196,12 @@ print(json.dumps({{"plan": str(result) if result else None}}))
         )
 
         # Call 2: same path, now in-progress -> MUST NOT return None
-        code_call2 = f"""
+        code_call2 = """
 import json
 from pathlib import Path
 from _lib.active_plan import find_active_plan_cached
 result = find_active_plan_cached(ttl_seconds=60)
-print(json.dumps({{"plan": str(result) if result else None}}))
+print(json.dumps({"plan": str(result) if result else None}))
 """
         r2 = run_python(code_call2, cwd=repo, env=session_env)
         assert r2.returncode == 0, f"call 2 failed: {r2.stderr}"
@@ -215,12 +222,12 @@ print(json.dumps({{"plan": str(result) if result else None}}))
         )
 
         # Call 1: unchecked plan
-        code_call1 = f"""
+        code_call1 = """
 import json
 from pathlib import Path
 from _lib.active_plan import find_active_plan_cached
 result = find_active_plan_cached(ttl_seconds=60)
-print(json.dumps({{"plan": str(result) if result else None}}))
+print(json.dumps({"plan": str(result) if result else None}))
 """
         r1 = run_python(code_call1, cwd=repo, env=session_env)
         assert r1.returncode == 0, r1.stderr
@@ -365,11 +372,11 @@ print(json.dumps({{"plan": str(result) if result else None}}))
         _write_plan(repo, "plan.md")
 
         # Call 1: populate cache with TTL of 0 seconds (already expired on next call)
-        code_call1 = f"""
+        code_call1 = """
 import json
 from _lib.active_plan import find_active_plan_cached
 result = find_active_plan_cached(ttl_seconds=0)
-print(json.dumps({{"plan": str(result) if result else None}}))
+print(json.dumps({"plan": str(result) if result else None}))
 """
         r1 = run_python(code_call1, cwd=repo, env=session_env)
         assert r1.returncode == 0, r1.stderr
@@ -415,10 +422,12 @@ print(json.dumps({{"plan": str(result) if result else None}}))
         session_env1 = {
             "CLAUDE_CODE_SESSION_ID": f"session-A-{uuid.uuid4().hex[:8]}",
             "ACTIVE_PLAN_CACHE_FILE": str(cache_file1),
+            "CODING_TEAM_MAIN_ROOT": str(repo),
         }
         session_env2 = {
             "CLAUDE_CODE_SESSION_ID": f"session-B-{uuid.uuid4().hex[:8]}",
             "ACTIVE_PLAN_CACHE_FILE": str(cache_file2),
+            "CODING_TEAM_MAIN_ROOT": str(repo),
         }
 
         code = """

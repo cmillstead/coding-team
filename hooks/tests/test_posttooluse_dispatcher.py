@@ -21,7 +21,7 @@ from pathlib import Path
 
 import pytest
 
-HOOKS_DIR = Path("/Users/cevin/.claude/skills/coding-team/hooks")
+HOOKS_DIR = Path(__file__).resolve().parent.parent  # tests/ -> hooks/
 POSTTOOLUSE_DISPATCHER = HOOKS_DIR / "posttooluse-dispatcher.py"
 USAGE_LOG = Path.home() / ".config" / "codesight-mcp" / "usage.log"
 

@@ -50,22 +50,7 @@ If the codesight MCP server is not available, fall back to Grep/Read for call-si
 
 ## Phase 2: Pattern Analysis
 
-Check if this bug matches a known pattern:
-
-| Pattern | Signature | Where to look |
-|---|---|---|
-| Race condition | Intermittent, timing-dependent | Concurrent access to shared state |
-| Nil/null propagation | TypeError, AttributeError | Missing guards on optional values |
-| State corruption | Inconsistent data, partial updates | Transactions, callbacks, hooks |
-| Integration failure | Timeout, unexpected response | External API calls, service boundaries |
-| Configuration drift | Works locally, fails in CI/staging | Env vars, feature flags, DB state |
-| Stale cache | Shows old data, fixes on cache clear | Redis, CDN, in-memory caches |
-
-**Error research:** Use the `WebSearch` tool to search for exact error messages, stack traces, or unfamiliar error codes. Library documentation, GitHub issues, and Stack Overflow often have the root cause. Search BEFORE forming hypotheses — external knowledge prevents wasted investigation.
-
-Also check:
-- **Git log** for prior fixes in the same area — recurring bugs in the same files are an architectural smell, not coincidence
-- Find working examples of similar code in the codebase and compare
+Check if this bug matches a known pattern (race condition, nil/null propagation, state corruption, integration failure, configuration drift, stale cache). See `skills/debug/reference.md` → "Phase 2: Pattern Analysis" for the full signature table, error-research guidance, and git-log/prior-fix checks.
 
 ## Phase 3: Hypothesis and Testing
 
@@ -86,7 +71,7 @@ Also check:
 Use agent teams for parallel investigation.
 
 1. Create team:
-   `Teammate({ operation: "spawnTeam", team_name: "debug-<feature>-<timestamp>" })`
+   `TeamCreate({ team_name: "debug-<feature>-<timestamp>" })`
 
 2. Create tasks (one per hypothesis):
    ```
@@ -98,23 +83,24 @@ Use agent teams for parallel investigation.
    ```
 
 3. Spawn investigators (one per hypothesis, all read-only Explore):
+   `Agent({ subagent_type: "Explore", name: "<hypothesis-slug>", team_name: "debug-<feature>-<timestamp>", run_in_background: true, prompt: "<hypothesis, relevant code paths, error context>" })`
    - Spawn prompt includes: the hypothesis, relevant code paths, error context, and instruction to message peers when finding cross-cutting evidence
    - Explicit instruction: "If you find evidence that refutes another teammate's hypothesis, message them immediately via SendMessage. If another teammate sends you evidence against your hypothesis, pivot your investigation."
    - All teammates run in Explore (read-only) mode
 
 4. Monitor via lead:
    - Watch for idle notifications (teammate finished investigating)
-   - Check inbox for cross-team findings
+   - Check inbox for cross-team findings via `SendMessage`
+   - Track per-hypothesis status with `TaskUpdate`
    - When all teammates report or idle: collect results
 
 5. Synthesize:
    - The hypothesis with the strongest confirming evidence (and no refuting evidence from peers) informs Phase 4
    - If debate produced convergence on a root cause not in any original hypothesis, use that
 
-6. Shutdown and cleanup:
-   `Teammate({ operation: "requestShutdown", target_agent_id: "<each>" })`
-   Wait for approvals.
-   `Teammate({ operation: "cleanup" })`
+6. Shutdown and cleanup (lead only):
+   `TaskStop` each remaining task for the team.
+   Lead performs team cleanup once all teammates have reported or been stopped.
 
 **If AGENT_TEAMS_AVAILABLE = false, or 2 hypotheses only:**
 
@@ -181,12 +167,7 @@ Status:          DONE | DONE_WITH_CONCERNS | BLOCKED
 
 ## After 3+ Failed Fixes: Question Architecture
 
-Pattern indicating an architectural problem:
-- Each fix reveals new shared state/coupling in different places
-- Fixes require "massive refactoring" to implement
-- Each fix creates new symptoms elsewhere
-
-**STOP and escalate to user.** This is not a failed hypothesis — this is a wrong architecture.
+If each fix reveals new shared state/coupling, requires "massive refactoring," or creates new symptoms elsewhere — **STOP and escalate to user.** This is not a failed hypothesis, it's a wrong architecture. See `skills/debug/reference.md` → "After 3+ Failed Fixes" for the full pattern description.
 
 ## Red Flags — STOP and Follow Process
 

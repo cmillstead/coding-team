@@ -12,7 +12,7 @@ import sys
 import time
 
 sys.path.insert(0, os.path.dirname(__file__))
-from _lib.event import parse_event, get_tool_name, get_tool_input
+from _lib.event import parse_event, get_tool_name, get_tool_input, get_tool_result
 from _lib.output import advisory as emit_advisory
 from _lib.state import get_state_file, load_state, save_state, is_stale
 
@@ -139,29 +139,27 @@ def main():
         return
 
     tool_input = get_tool_input(event)
-    tool_result = event.get("tool_result", {})
     command = tool_input.get("command", "")
     if not command:
         return
 
-    stdout = tool_result.get("stdout", "") if isinstance(tool_result, dict) else str(tool_result)
-    stderr = tool_result.get("stderr", "") if isinstance(tool_result, dict) else ""
-    exit_code = tool_result.get("exit_code", 0) if isinstance(tool_result, dict) else None
+    # The real PostToolUse wire schema delivers Bash results under `tool_response`
+    # (keys: stdout/stderr/interrupted/isImage/noOutputExpected — NO exit_code).
+    # get_tool_result() reads that key (falling back to tool_result/tool_output
+    # for cross-version robustness) and normalizes stdout+stderr into one string.
+    result_text = get_tool_result(event).lower()
 
-    is_failure = False
-    if exit_code is not None and exit_code != 0:
-        is_failure = True
-    elif any(marker in stdout.lower() for marker in ["error", "failed", "failure", "exception", "traceback"]):
-        is_failure = True
-    elif any(marker in stderr.lower() for marker in ["error", "failed", "failure"]):
-        is_failure = True
+    is_failure = any(
+        marker in result_text
+        for marker in ["error", "failed", "failure", "exception", "traceback"]
+    )
 
     state_path = get_state_file("claude-loop-detection")
     state = _load_loop_state(state_path)
 
     if is_failure:
         pattern = normalize_command(command)
-        category = classify_failure(stdout, stderr)
+        category = classify_failure(result_text, "")
         state["failures"].append({"pattern": pattern, "command": command[:200], "category": category, "time": time.time()})
         state["failures"] = state["failures"][-20:]
         _save_loop_state(state_path, state)
@@ -182,4 +180,8 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as exc:  # noqa: BLE001 — advisory hook: fail open, never break the session
+        print(f"loop-detection.py: crashed with {exc!r} — advisory hook, continuing", file=sys.stderr)
+    sys.exit(0)

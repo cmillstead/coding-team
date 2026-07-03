@@ -15,7 +15,6 @@ been deleted. Tests for those deleted functions have been removed here.
 import sys
 from pathlib import Path
 
-import pytest
 
 _LIB = Path(__file__).resolve().parent.parent
 if str(_LIB) not in sys.path:

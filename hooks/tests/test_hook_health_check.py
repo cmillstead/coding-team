@@ -3,14 +3,12 @@
 import importlib.util
 import json
 import os
-import subprocess
-import sys
 import textwrap
 from pathlib import Path
 
 import pytest
 
-HOOKS_DIR = Path("/Users/cevin/.claude/skills/coding-team/hooks")
+HOOKS_DIR = Path(__file__).resolve().parent.parent  # tests/ -> hooks/
 
 
 def load_module():
@@ -351,7 +349,6 @@ class TestCheckMcpHealth:
 
     def test_found_binary_not_in_issues(self, hhc, tmp_path):
         """A binary that exists on disk is not reported as missing."""
-        import shutil
 
         # Create a real binary in tmp_path and prepend to PATH
         fake_bin = tmp_path / "codesight-mcp"
@@ -396,12 +393,7 @@ class TestCheckInstructionFileLengths:
         short_file.write_text("\n".join(f"line {i}" for i in range(50)))
 
         # Point repo_root to tmp_path by patching __file__ indirectly
-        original_fn = hhc.check_instruction_file_lengths
-
         def patched():
-            import types
-
-            orig_path = hhc.Path
             repo_root = tmp_path
             warnings = []
             instruction_globs = [
