@@ -86,7 +86,7 @@ Also check:
 Use agent teams for parallel investigation.
 
 1. Create team:
-   `Teammate({ operation: "spawnTeam", team_name: "debug-<feature>-<timestamp>" })`
+   `TeamCreate({ team_name: "debug-<feature>-<timestamp>" })`
 
 2. Create tasks (one per hypothesis):
    ```
@@ -98,23 +98,24 @@ Use agent teams for parallel investigation.
    ```
 
 3. Spawn investigators (one per hypothesis, all read-only Explore):
+   `Agent({ subagent_type: "Explore", name: "<hypothesis-slug>", team_name: "debug-<feature>-<timestamp>", run_in_background: true, prompt: "<hypothesis, relevant code paths, error context>" })`
    - Spawn prompt includes: the hypothesis, relevant code paths, error context, and instruction to message peers when finding cross-cutting evidence
    - Explicit instruction: "If you find evidence that refutes another teammate's hypothesis, message them immediately via SendMessage. If another teammate sends you evidence against your hypothesis, pivot your investigation."
    - All teammates run in Explore (read-only) mode
 
 4. Monitor via lead:
    - Watch for idle notifications (teammate finished investigating)
-   - Check inbox for cross-team findings
+   - Check inbox for cross-team findings via `SendMessage`
+   - Track per-hypothesis status with `TaskUpdate`
    - When all teammates report or idle: collect results
 
 5. Synthesize:
    - The hypothesis with the strongest confirming evidence (and no refuting evidence from peers) informs Phase 4
    - If debate produced convergence on a root cause not in any original hypothesis, use that
 
-6. Shutdown and cleanup:
-   `Teammate({ operation: "requestShutdown", target_agent_id: "<each>" })`
-   Wait for approvals.
-   `Teammate({ operation: "cleanup" })`
+6. Shutdown and cleanup (lead only):
+   `TaskStop` each remaining task for the team.
+   Lead performs team cleanup once all teammates have reported or been stopped.
 
 **If AGENT_TEAMS_AVAILABLE = false, or 2 hypotheses only:**
 
