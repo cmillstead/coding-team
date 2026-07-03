@@ -668,4 +668,8 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as exc:  # noqa: BLE001 — advisory hook: fail open, never break the session
+        print(f"hook-health-check.py: crashed with {exc!r} — advisory hook, continuing", file=sys.stderr)
+    sys.exit(0)

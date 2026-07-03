@@ -1,7 +1,6 @@
 """Tests for loop-detection.py hook."""
 
 import hashlib
-import os
 from pathlib import Path
 
 
@@ -131,3 +130,69 @@ class TestTestFailureClassification:
         assert result.parsed is not None
         reason = result.parsed["reason"].lower()
         assert "test" in reason or "assertion" in reason
+
+
+class TestRealPostToolUseWireSchema:
+    """F3 regression: real PostToolUse events deliver Bash results under
+    `tool_response` (keys: stdout/stderr/interrupted/isImage/noOutputExpected
+    — NO `tool_result`, NO exit_code). Before the fix, loop-detection.py read
+    `event.get("tool_result", {})`, which is always empty on a real event, so
+    the hook could never observe a failure and loop detection never fired.
+
+    These events are built as raw dicts (not via `make_event`, whose
+    `tool_result` kwarg only ever sets the WRONG `tool_result` key) to
+    faithfully reproduce the real wire shape.
+    """
+
+    def test_three_real_tool_response_failures_triggers_recovery_advisory(
+        self, run_hook, tmp_state_dir
+    ):
+        """3 repeats of a real `tool_response`-keyed Bash failure fire the advisory.
+
+        This is the load-bearing regression test for F3: it asserts loop
+        detection actually fires end-to-end via subprocess invocation of the
+        real hook script, using the real PostToolUse wire shape.
+        """
+        event = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "npm run build"},
+            "tool_response": {
+                "stdout": "Error: Cannot find module 'lodash'\nBuild failed",
+                "stderr": "",
+                "interrupted": False,
+                "isImage": False,
+                "noOutputExpected": False,
+                # Deliberately NO exit_code — real Bash tool_response never has one.
+            },
+        }
+
+        run_hook("loop-detection.py", event)
+        run_hook("loop-detection.py", event)
+        result = run_hook("loop-detection.py", event)
+
+        assert result.returncode == 0, f"Hook crashed: stderr={result.stderr!r}"
+        assert result.parsed is not None, (
+            f"Expected a recovery advisory after 3 real tool_response failures, "
+            f"got no JSON output: stdout={result.stdout!r} stderr={result.stderr!r}"
+        )
+        assert result.parsed["decision"] == "allow"
+        reason = result.parsed["reason"].lower()
+        assert "failed" in reason
+        assert "build" in reason or "dependencies" in reason or "module" in reason
+
+    def test_real_tool_response_success_produces_no_output(self, run_hook, tmp_state_dir):
+        """A real `tool_response`-keyed successful Bash call stays silent."""
+        event = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "npm run build"},
+            "tool_response": {
+                "stdout": "Build succeeded",
+                "stderr": "",
+                "interrupted": False,
+                "isImage": False,
+                "noOutputExpected": False,
+            },
+        }
+        result = run_hook("loop-detection.py", event)
+        assert result.returncode == 0
+        assert result.stdout.strip() == ""

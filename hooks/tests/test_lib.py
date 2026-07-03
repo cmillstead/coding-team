@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 
-HOOKS_DIR = Path("/Users/cevin/.claude/skills/coding-team/hooks")
+HOOKS_DIR = Path(__file__).resolve().parent.parent  # tests/ -> hooks/
 
 
 def run_python(code: str, stdin_data: str = "") -> subprocess.CompletedProcess:
@@ -243,7 +243,7 @@ class TestUpdateInput:
         event = {"tool_input": {"prompt": "P", "description": "D"}}
         code = (
             "import json, sys\n"
-            "sys.path.insert(0, '/Users/cevin/.claude/skills/coding-team/hooks')\n"
+            f"sys.path.insert(0, {str(HOOKS_DIR)!r})\n"
             "from _lib.event import parse_event\n"
             "from _lib import output\n"
             "ev = parse_event()\n"
@@ -260,7 +260,7 @@ class TestUpdateInput:
         event = {"tool_input": {"prompt": "P"}}
         code = (
             "import sys\n"
-            "sys.path.insert(0, '/Users/cevin/.claude/skills/coding-team/hooks')\n"
+            f"sys.path.insert(0, {str(HOOKS_DIR)!r})\n"
             "from _lib.event import parse_event\n"
             "from _lib import output\n"
             "ev = parse_event()\n"

@@ -31,7 +31,6 @@ directory is consulted from any worktree.
 import json
 import os
 import re
-import stat
 import subprocess
 import tempfile
 import time

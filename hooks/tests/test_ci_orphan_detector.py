@@ -1,7 +1,7 @@
 import subprocess
 from pathlib import Path
 
-HOOKS_DIR = Path("/Users/cevin/.claude/skills/coding-team/hooks")
+HOOKS_DIR = Path(__file__).resolve().parent.parent  # tests/ -> hooks/
 
 
 class TestCiOrphanDetectorSyntax:

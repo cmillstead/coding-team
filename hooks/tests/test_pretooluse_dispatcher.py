@@ -23,7 +23,7 @@ from pathlib import Path
 
 import pytest
 
-HOOKS_DIR = Path("/Users/cevin/.claude/skills/coding-team/hooks")
+HOOKS_DIR = Path(__file__).resolve().parent.parent  # tests/ -> hooks/
 PRETOOLUSE_DISPATCHER = HOOKS_DIR / "pretooluse-dispatcher.py"
 WRITE_GUARD = HOOKS_DIR / "write-guard.py"
 GIT_SAFETY_GUARD = HOOKS_DIR / "git-safety-guard.py"

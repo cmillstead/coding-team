@@ -10,16 +10,15 @@ from pathlib import Path
 import pytest
 
 # Ensure hooks/ is on sys.path so `from _lib import graduated_checks` works
-HOOKS_DIR = Path("/Users/cevin/.claude/skills/coding-team/hooks")
+HOOKS_DIR = Path(__file__).resolve().parent.parent  # tests/ -> hooks/
 if str(HOOKS_DIR) not in sys.path:
     sys.path.insert(0, str(HOOKS_DIR))
 
-from _lib.graduated_checks import (
+from _lib.graduated_checks import (  # noqa: E402 — import must follow the sys.path mutation above
     CheckResult,
     check_c1_path_trust,
     check_c5_test_hermeticity,
     dispatch,
-    GRADUATED_CHECKS,
 )
 
 

@@ -1,11 +1,10 @@
 """Tests for deploy-drift-check.py hook — driving find_drift directly with tmp_path."""
 
 import importlib.util
-import sys
 from pathlib import Path
 
 
-HOOKS_DIR = Path("/Users/cevin/.claude/skills/coding-team/hooks")
+HOOKS_DIR = Path(__file__).resolve().parent.parent  # tests/ -> hooks/
 
 
 def _load_find_drift():

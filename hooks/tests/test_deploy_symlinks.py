@@ -10,7 +10,7 @@ import subprocess
 from pathlib import Path
 
 
-REPO_ROOT = Path("/Users/cevin/.claude/skills/coding-team")
+REPO_ROOT = Path(__file__).resolve().parent.parent.parent  # tests/ -> hooks/ -> repo root
 DEPLOY_SH = REPO_ROOT / "scripts" / "deploy.sh"
 
 

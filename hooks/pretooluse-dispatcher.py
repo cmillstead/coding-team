@@ -108,14 +108,24 @@ def _run_handler(
         return "", "", 0
 
 
-def _passthrough(stdout: str, stderr: str, returncode: int) -> None:
+def _passthrough(stdout: str, stderr: str, returncode: int, handler_name: str = "") -> None:
     """Write stdout to real stdout, stderr to real stderr, and exit with returncode.
 
     This is the blocking-guard contract: the output is byte-identical to
     running the guard directly — no JSON re-serialization, no wrapping.
     Handles both mechanism (a): stdout JSON + exit 0, and mechanism (b):
     stderr message + exit 2.
+
+    An exit code outside the known contract (0, 2) is otherwise indistinguishable
+    from a handler crash — emit a one-line advisory naming the handler and code
+    so it's visible instead of silently passed through.
     """
+    if returncode not in (0, 2):
+        print(
+            f"pretooluse-dispatcher: {handler_name or 'handler'} returned unexpected "
+            f"exit code {returncode} (not 0 or 2) — possible crash, not an intentional block",
+            file=sys.stderr,
+        )
     if stdout:
         sys.stdout.write(stdout)
         sys.stdout.flush()
@@ -149,14 +159,14 @@ def main() -> None:
         if not _is_skipped(CODESIGHT_HOOKS, skip):
             stdout, stderr, rc = _run_handler([sys.executable, CODESIGHT_HOOKS], payload)
             if stdout.strip() or rc != 0:
-                _passthrough(stdout, stderr, rc)
+                _passthrough(stdout, stderr, rc, Path(CODESIGHT_HOOKS).name)
 
     elif tool_name in ("Edit", "Write"):
         # Write guard (blocking): pass stdout verbatim and exit if it produced output.
         if not _is_skipped(WRITE_GUARD, skip):
             stdout, stderr, rc = _run_handler([sys.executable, WRITE_GUARD], payload)
             if stdout.strip() or rc != 0:
-                _passthrough(stdout, stderr, rc)
+                _passthrough(stdout, stderr, rc, Path(WRITE_GUARD).name)
 
     elif tool_name == "Bash":
         # Git safety guard (blocking) — runs first.
@@ -165,7 +175,7 @@ def main() -> None:
         if not _is_skipped(GIT_SAFETY_GUARD, skip):
             stdout, stderr, rc = _run_handler([sys.executable, GIT_SAFETY_GUARD], payload)
             if stdout.strip() or rc != 0:
-                _passthrough(stdout, stderr, rc)
+                _passthrough(stdout, stderr, rc, Path(GIT_SAFETY_GUARD).name)
 
         # rtk hook claude — only runs if git-safety-guard was silent (no output).
         # rtk is a single matcher entry that previously ran independently as a
@@ -178,7 +188,7 @@ def main() -> None:
                 )
                 # Pass through rtk output and its exit code (rtk may exit non-zero).
                 if stdout.strip() or rc != 0:
-                    _passthrough(stdout, stderr, rc)
+                    _passthrough(stdout, stderr, rc, "rtk")
             else:
                 print(
                     "pretooluse-dispatcher: rtk not found on PATH; skipping",

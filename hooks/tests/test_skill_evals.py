@@ -215,7 +215,7 @@ class TestCrossSkillConsistency:
 
         if broken_refs:
             pytest.fail(
-                f"Broken cross-references:\n" + "\n".join(broken_refs)
+                "Broken cross-references:\n" + "\n".join(broken_refs)
             )
 
 
