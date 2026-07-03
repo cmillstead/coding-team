@@ -95,7 +95,7 @@ Use `mcp__codesight__query` with the appropriate operation:
 | `get-file-outline` | Quick scan of new files for exported surface area |
 | LSP | Run diagnostics on modified files — catch type errors across task boundaries |
 
-If `mcp__codesight__query` fails, degrade to Grep/Read — read `rules/codesight-fallback.md` before starting for the full retry-once-then-degrade protocol.
+If `mcp__codesight__query` fails, degrade to Grep/Read — read `~/.claude/rules/codesight-fallback.md` before starting for the full retry-once-then-degrade protocol.
 
 ## Calibration
 
@@ -120,7 +120,7 @@ Do NOT flag:
 
 ## Finding Integrity & BLOCKED Protocol
 
-Read `rules/finding-integrity.md` before starting. Summary: report behavioral defects regardless of when introduced ("pre-existing" is not a valid reason to skip a finding), and if you cannot complete the review, report **Status: BLOCKED — [reason]** rather than guessing or fabricating findings.
+Read `~/.claude/rules/finding-integrity.md` before starting. Summary: report behavioral defects regardless of when introduced ("pre-existing" is not a valid reason to skip a finding), and if you cannot complete the review, report **Status: BLOCKED — [reason]** rather than guessing or fabricating findings.
 
 ## Output Format
 

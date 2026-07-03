@@ -83,7 +83,7 @@ Use `mcp__codesight__query` for deeper simplification analysis:
 | `search-references` | Count references for each symbol — low counts may indicate over-abstraction |
 | `get-dependencies` | Flag circular imports in modified files |
 
-If `mcp__codesight__query` fails, degrade to Grep/Read — read `rules/codesight-fallback.md` before starting for the full retry-once-then-degrade protocol. Do NOT skip duplicate detection.
+If `mcp__codesight__query` fails, degrade to Grep/Read — read `~/.claude/rules/codesight-fallback.md` before starting for the full retry-once-then-degrade protocol. Do NOT skip duplicate detection.
 
 ## Project-Specific Criteria
 
@@ -109,7 +109,7 @@ Categories:
 
 ## Finding Integrity & BLOCKED Protocol
 
-Read `rules/finding-integrity.md` before starting. Summary: report unnecessary complexity regardless of when introduced ("pre-existing" is not a valid reason to skip a finding), and if you cannot complete the review, report **Status: BLOCKED — [reason]** rather than guessing or fabricating findings.
+Read `~/.claude/rules/finding-integrity.md` before starting. Summary: report unnecessary complexity regardless of when introduced ("pre-existing" is not a valid reason to skip a finding), and if you cannot complete the review, report **Status: BLOCKED — [reason]** rather than guessing or fabricating findings.
 
 ## Output Format
 

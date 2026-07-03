@@ -71,7 +71,7 @@ Use `mcp__codesight__query` for deeper security analysis:
 
 **Unwired security utilities:** Use operation `search-references` to check that security-critical functions (sanitization, validation, auth checks, rate limiting) are called at ALL expected sites, not just where a scan finding flagged them. A sanitization function that exists but is only called at 1 of 7 call sites is worse than no function — it creates the illusion of protection. Flag as HIGH when a security utility exists but `search-references` shows fewer callers than expected call sites.
 
-If `mcp__codesight__query` fails, degrade to Grep/Read — read `rules/codesight-fallback.md` before starting for the full retry-once-then-degrade protocol. Do NOT skip data flow tracing on security-sensitive code.
+If `mcp__codesight__query` fails, degrade to Grep/Read — read `~/.claude/rules/codesight-fallback.md` before starting for the full retry-once-then-degrade protocol. Do NOT skip data flow tracing on security-sensitive code.
 
 ## Dependency Vulnerability Check
 
@@ -101,7 +101,7 @@ Categories:
 
 ## Finding Integrity & BLOCKED Protocol
 
-Read `rules/finding-integrity.md` before starting. Summary: report vulnerabilities regardless of when introduced ("pre-existing" is not a valid reason to skip a finding), and if you cannot complete the review, report **Status: BLOCKED — [reason]** rather than guessing or fabricating findings.
+Read `~/.claude/rules/finding-integrity.md` before starting. Summary: report vulnerabilities regardless of when introduced ("pre-existing" is not a valid reason to skip a finding), and if you cannot complete the review, report **Status: BLOCKED — [reason]** rather than guessing or fabricating findings.
 
 ## Output Format
 

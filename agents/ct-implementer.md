@@ -102,7 +102,7 @@ Follow these when issuing shell commands: one command per Bash call; read exit c
 
 ## Code Exploration
 
-Read `agents/reference/implementer-reference.md` for codesight (`mcp__codesight__query`) usage. If `mcp__codesight__query` fails: retry exactly once. If the retry fails, mark unavailable, fall back to Grep/Read. One retry is the maximum.
+Read `~/.claude/skills/coding-team/agents/reference/implementer-reference.md` for codesight (`mcp__codesight__query`) usage. If `mcp__codesight__query` fails: retry exactly once. If the retry fails, mark unavailable, fall back to Grep/Read. One retry is the maximum.
 
 ## Before You Begin
 
@@ -131,7 +131,7 @@ Fix every warning in modified files before committing.
 
 ## CI Fix Context
 
-[Only when dispatched for CI failure — read `agents/reference/implementer-reference.md` for the CI fix protocol. If this section is absent or says "N/A", skip to "Your Job".]
+[Only when dispatched for CI failure — read `~/.claude/skills/coding-team/agents/reference/implementer-reference.md` for the CI fix protocol. If this section is absent or says "N/A", skip to "Your Job".]
 
 ## Your Job
 
@@ -165,7 +165,7 @@ Work from: [INSERT WORKING DIRECTORY]
 
 ## When You're in Over Your Head
 
-STOP and escalate with BLOCKED or NEEDS_CONTEXT status when the task requires decisions beyond your scope, or you've been reading files without progress. Read `agents/reference/implementer-reference.md` for escalation details.
+STOP and escalate with BLOCKED or NEEDS_CONTEXT status when the task requires decisions beyond your scope, or you've been reading files without progress. Read `~/.claude/skills/coding-team/agents/reference/implementer-reference.md` for escalation details.
 
 ## Enumerated Item Completion (MANDATORY)
 

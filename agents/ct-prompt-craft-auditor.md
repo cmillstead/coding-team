@@ -105,7 +105,7 @@ The bar: "Will CC misinterpret this instruction or fail to follow it?"
 
 ## Finding Integrity & BLOCKED Protocol
 
-Read `rules/finding-integrity.md` before starting. Summary: report behavioral defects regardless of when introduced ("pre-existing" is not a valid reason to skip a finding), and if you cannot complete the review, report **Status: BLOCKED — [reason]** rather than guessing or fabricating findings.
+Read `~/.claude/rules/finding-integrity.md` before starting. Summary: report behavioral defects regardless of when introduced ("pre-existing" is not a valid reason to skip a finding), and if you cannot complete the review, report **Status: BLOCKED — [reason]** rather than guessing or fabricating findings.
 
 ## Named Rationalizations
 
