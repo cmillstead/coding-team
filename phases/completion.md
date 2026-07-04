@@ -170,18 +170,15 @@ type: project
 
 Read `phases/memory-nudge.md` and follow its instructions.
 
-## Agent Teardown (before Session Complete)
-
-Before printing the Session Complete block, reap any Phase-5 agents still alive. Across a long Phase 5, backgrounded subagents (implementer, auditors, QA reviewer) or agent-team teammates may still be running or idle. Leaving them alive blocks session exit — finished agents pile up.
-
-- **Subagent mode (Agent tool):** `TaskStop` each Phase-5 subagent still running or idle — implementer(s), auditors, and the QA reviewer — using the agent IDs returned at dispatch. The per-round auditor reap in `phases/audit-loop.md` handles most auditors; this step is the backstop that also catches a lingering implementer or QA reviewer.
-- **Agent-team mode:** `TaskStop` each remaining teammate by ID, then perform team cleanup (lead only), mirroring the SHUTDOWN/CLEANUP steps in `phases/design-team-lifecycle.md`, `skills/parallel-fix/SKILL.md`, and `skills/debug/SKILL.md`.
-
-`TaskStop` on an already-finished agent is a safe no-op, so this step is idempotent. Perform it regardless of the chosen completion option (merge / PR / keep / discard).
-
 ---
 
 ## Session Complete
+
+**Before printing the block below, reap any Phase-5 agents still alive** so finished agents don't block session exit (this runs for every tier and every completion option — merge / PR / keep / discard):
+- **Subagent mode (Agent tool):** `TaskStop` each Phase-5 subagent still running or idle — implementer(s), auditors, QA reviewer — by the `agentId` returned in each agent's dispatch result. The per-round auditor reap in `phases/audit-loop.md` handles most auditors; this is the backstop that also catches a lingering implementer or QA reviewer.
+- **Agent-team mode:** `TaskStop` each remaining teammate by ID, then lead-only team cleanup, mirroring the shutdown steps in `phases/design-team-lifecycle.md`, `skills/parallel-fix/SKILL.md`, and `skills/debug/SKILL.md`.
+
+`TaskStop` on an already-finished agent is a safe no-op.
 
 After the user chooses a completion option and it's been executed, print this block VERBATIM (substitute actual branch name and chosen option):
 
