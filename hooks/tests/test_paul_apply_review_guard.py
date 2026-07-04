@@ -11,7 +11,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-HOOKS_DIR = Path("/Users/cevin/.claude/skills/coding-team/hooks")
+HOOKS_DIR = Path(__file__).resolve().parent.parent
 GUARD = HOOKS_DIR / "paul-apply-review-guard.py"
 
 
