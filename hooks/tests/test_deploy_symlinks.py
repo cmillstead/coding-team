@@ -304,3 +304,44 @@ class TestDeployRegistrationCheck:
         assert result.returncode == 0, result.stderr
         assert "All hooks registered." in result.stdout, result.stdout
         assert "deployed but not registered" not in result.stdout, result.stdout
+
+
+class TestPaulReviewGateSymlinks:
+    def test_review_guard_symlinked(self, tmp_path: Path):
+        claude_dir = tmp_path / "claude_dir"
+        claude_dir.mkdir()
+        result = run_deploy(claude_dir)
+        assert result.returncode == 0, result.stderr
+        link = claude_dir / "hooks" / "paul-apply-review-guard.py"
+        assert os.path.islink(link), f"{link} must be a symlink"
+        expected = REPO_ROOT / "hooks" / "paul-apply-review-guard.py"
+        assert link.resolve() == expected.resolve()
+
+    def test_agent_guard_symlinked(self, tmp_path: Path):
+        claude_dir = tmp_path / "claude_dir"
+        claude_dir.mkdir()
+        result = run_deploy(claude_dir)
+        assert result.returncode == 0, result.stderr
+        link = claude_dir / "hooks" / "paul-apply-agent-guard.py"
+        assert os.path.islink(link), f"{link} must be a symlink"
+        expected = REPO_ROOT / "hooks" / "paul-apply-agent-guard.py"
+        assert link.resolve() == expected.resolve()
+
+    def test_paul_review_lib_reachable(self, tmp_path: Path):
+        claude_dir = tmp_path / "claude_dir"
+        claude_dir.mkdir()
+        result = run_deploy(claude_dir)
+        assert result.returncode == 0, result.stderr
+        lib = claude_dir / "hooks" / "_lib"
+        assert (lib / "paul_review.py").exists()
+        assert (lib / "paul_review_record.py").exists()
+        assert (lib / "paul_review_check.py").exists()
+
+    def test_no_unregistered_warning_for_paul_hooks(self, tmp_path: Path):
+        claude_dir = tmp_path / "claude_dir"
+        claude_dir.mkdir()
+        result = run_deploy(claude_dir)
+        assert result.returncode == 0, result.stderr
+        assert "paul-apply-review-guard.py deployed but not registered" not in result.stdout
+        assert "paul-apply-agent-guard.py deployed but not registered" not in result.stdout
+        assert "All hooks registered." in result.stdout, result.stdout
