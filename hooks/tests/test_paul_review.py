@@ -209,3 +209,52 @@ def test_recorder_records_reviewer_verbatim(tmp_path):
 def test_recorder_nonzero_on_missing_plan(tmp_path):
     result = _run_record(tmp_path / "nope-PLAN.md")
     assert result.returncode != 0
+
+
+# --- paul_review_check.py CLI exit-code checker ---
+
+CHECK_CLI = HOOKS_DIR / "_lib" / "paul_review_check.py"
+
+
+def _run_check(plan):
+    return subprocess.run(
+        [sys.executable, str(CHECK_CLI), "--plan", str(plan)],
+        capture_output=True, text=True, timeout=10,
+    )
+
+
+def test_check_exit0_on_valid_pass(tmp_path):
+    plan = _write_plan(tmp_path)
+    _write_review(plan)
+    result = _run_check(plan)
+    assert result.returncode == 0
+
+
+def test_check_exit1_on_missing(tmp_path):
+    plan = _write_plan(tmp_path)
+    result = _run_check(plan)
+    assert result.returncode == 1
+    assert "MISSING" in (result.stdout + result.stderr)
+
+
+def test_check_exit1_on_stale(tmp_path):
+    plan = _write_plan(tmp_path)
+    _write_review(plan)
+    plan.write_bytes(b"edited body\n")
+    result = _run_check(plan)
+    assert result.returncode == 1
+    assert "STALE" in (result.stdout + result.stderr)
+
+
+def test_check_exit1_on_not_pass(tmp_path):
+    plan = _write_plan(tmp_path)
+    _write_review(plan, verdict="REVISE")
+    result = _run_check(plan)
+    assert result.returncode == 1
+
+
+def test_check_exit1_on_wrong_reviewer(tmp_path):
+    plan = _write_plan(tmp_path)
+    _write_review(plan, reviewer="claude")
+    result = _run_check(plan)
+    assert result.returncode == 1
