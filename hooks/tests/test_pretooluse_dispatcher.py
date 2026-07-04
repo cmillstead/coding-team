@@ -377,6 +377,54 @@ class TestCodesightPromptInjection:
         assert hook_out.get("permissionDecision") == "allow"
 
 
+class TestAgentGuardChaining:
+    """Path B: paul-apply-agent-guard runs FIRST in the Agent branch. If it
+    blocks, its block is passed through and codesight does NOT run. If it does
+    not block, codesight injection still happens."""
+
+    def test_agent_guard_block_passes_through(self, tmp_path):
+        """An execution-intent Agent dispatch for a PLAN with no PASS is blocked
+        by the dispatcher (guard output, not codesight injection)."""
+        sub = tmp_path / ".paul" / "phases" / "02-medium-risk-domains"
+        sub.mkdir(parents=True)
+        plan = sub / "02-02-PLAN.md"
+        plan.write_bytes(b"plan body\n")  # no .review.json
+        rel = ".paul/phases/02-medium-risk-domains/02-02-PLAN.md"
+        event = {
+            "tool_name": "Agent",
+            "tool_input": {"prompt": f"Implement Task 1 from {rel}. Write code."},
+        }
+        result = subprocess.run(
+            [sys.executable, str(PRETOOLUSE_DISPATCHER)],
+            input=json.dumps(event), capture_output=True, text=True,
+            timeout=20, cwd=str(tmp_path), env={**os.environ},
+        )
+        assert result.returncode == 0
+        parsed = json.loads(result.stdout)
+        assert parsed.get("decision") == "block"
+        # codesight injection must NOT be present (guard short-circuited)
+        assert "MANDATORY SEARCH RULES" not in result.stdout
+
+    def test_agent_non_execution_falls_through_to_codesight(self, tmp_path):
+        """A benign Agent dispatch (no plan execution) still gets codesight
+        injection — the guard is silent and the chain falls through."""
+        event = {
+            "tool_name": "Agent",
+            "tool_input": {"prompt": "implement a function to process data"},
+        }
+        result = subprocess.run(
+            [sys.executable, str(PRETOOLUSE_DISPATCHER)],
+            input=json.dumps(event), capture_output=True, text=True,
+            timeout=20, cwd=str(tmp_path), env={**os.environ},
+        )
+        assert result.returncode == 0
+        parsed = json.loads(result.stdout)
+        assert parsed.get("decision") != "block"
+        hook_out = parsed.get("hookSpecificOutput", {})
+        injected = hook_out.get("updatedInput", {}).get("prompt", "")
+        assert "MANDATORY SEARCH RULES" in injected
+
+
 class TestDisableEscapeHatch:
     """Test: CT_PRETOOLUSE_DISPATCHER_DISABLE=1 bypasses everything."""
 
