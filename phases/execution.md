@@ -77,6 +77,7 @@ For each task in plan:
   IMPLEMENTER (see ~/.claude/agents/ct-implementer.md)
   2. Dispatch implementer via Agent tool — use model tier from the plan
      - Pass: full task text, context, working directory
+     - Record the `agentId` returned by the dispatch — the Agent Teardown step in `phases/completion.md` (and `/release`) uses it to reap a lingering implementer at session exit.
      - If the task has advisory skills: include the advisory block in the implementer prompt's Advisory Skills section. The implementer applies these rules throughout implementation.
      - If the task involves Python, TypeScript, Angular, JavaScript, HTML, or SCSS files, read `~/.claude/code-style.md` using the Read tool and include its contents in the implementer prompt's Code Style section.
      - Read `~/.claude/golden-principles.md` and include in the implementer prompt's Context section when the task involves architectural decisions or new patterns.
@@ -173,6 +174,7 @@ After all tasks pass and the full test suite is clean, dispatch the QA reviewer 
    ```
 2. Dispatch the QA reviewer via Agent tool (model: sonnet, subagent_type: Explore — read-only):
    - Pass: feature description (from the original plan), full diff summary, list of all modified files, and the list of tasks that were executed
+   - Record the `agentId` returned by the dispatch — completion.md's Agent Teardown uses it to reap a lingering QA reviewer at session exit.
    - See `~/.claude/agents/ct-qa-reviewer.md` for the full prompt template
 3. Triage QA findings using the same severity routing as the audit loop:
    - **HIGH** (integration mismatch, dark feature, behavioral bug) → dispatch implementer to fix, then re-run full test suite
