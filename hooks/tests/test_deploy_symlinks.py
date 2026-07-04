@@ -291,3 +291,16 @@ class TestDeploySymlinks:
         assert "dry-run" in result.stdout.lower(), (
             "dry-run stdout must indicate no-op mode"
         )
+
+
+class TestDeployRegistrationCheck:
+    """deploy.sh's registration check greps all 5 sites, so every deployed hook
+    is recognized: 'All hooks registered.' prints and no hook warns."""
+
+    def test_all_hooks_registered_no_warnings(self, tmp_path: Path):
+        claude_dir = tmp_path / "claude_dir"
+        claude_dir.mkdir()
+        result = run_deploy(claude_dir)
+        assert result.returncode == 0, result.stderr
+        assert "All hooks registered." in result.stdout, result.stdout
+        assert "deployed but not registered" not in result.stdout, result.stdout
