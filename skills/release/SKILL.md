@@ -17,6 +17,8 @@ If no PR exists, start from step 1.
 
 ## Workflow
 
+0. **Reap lingering Phase-5 agents (when entering from the pipeline):** If `/release` is entered right after Phase 5 (an active `status: in-progress` plan exists), first reap any Phase-5 subagents/teammates still alive — follow the **Agent Teardown** step in `phases/completion.md`: `TaskStop` the implementer / auditors / QA reviewer by their dispatch `agentId`s (agent-team teammates by ID + lead cleanup if applicable). `TaskStop` on an already-finished agent is a safe no-op. This mirrors completion.md so the `/release` exit path doesn't leak the agents the manual Phase-6 path reaps.
+
 1. **Detect base branch:**
    ```bash
    BASE=$(gh pr view --json baseRefName -q .baseRefName 2>/dev/null || gh repo view --json defaultBranchRef -q .defaultBranchRef.name 2>/dev/null || echo "main")
