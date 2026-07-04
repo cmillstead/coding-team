@@ -18,9 +18,10 @@ After the completeness check passes and implementer reports DONE or DONE_WITH_CO
       Both conditions required (belt and suspenders). If either is missing, skip this auditor.
    e. Harness engineer (see ~/.claude/agents/ct-harness-engineer.md) — triggers when modified files include at least 1 file matching: `settings.json`, `hooks/*`, `rules/*`, `*.claude/CLAUDE.md`, `agents/*.md`
       Dispatch as general-purpose (needs Bash for hook inspection). If no harness files in the diff, skip.
-3. Triage findings (see Audit Triage below)
-4. If findings to fix → dispatch new implementer to fix → re-audit (max 3 rounds)
-   Fresh audit agents each round — don't reuse.
+3. **Reap this round's auditors (before triage).** Once every auditor dispatched this round has reported its findings (completed or gone idle), `TaskStop` each one by the agent ID returned at dispatch. Auditors are read-only — their work is done the moment findings are in hand, so stopping them here prevents finished audit subagents from accumulating across rounds and across tasks (the finished-agents-block-session-exit bug). Auditors stay backgrounded and parallel during the round; only this post-collection reap is added. Mirrors the shutdown step in `skills/parallel-fix/SKILL.md`, `skills/debug/SKILL.md`, and `phases/design-team-lifecycle.md`: collect results, then TaskStop remaining agents. `TaskStop` on an already-finished agent is a safe no-op.
+4. Triage findings (see Audit Triage below)
+5. If findings to fix → dispatch new implementer to fix → re-audit (max 3 rounds)
+   Fresh audit agents each round — don't reuse. Each re-audit round reaps its own auditors the same way (step 3) once its findings are collected, so the loop doesn't reintroduce accumulation.
    After the implementer applies audit fixes: re-run tests to verify fixes didn't introduce regressions. This is mandatory.
    **Same-class search (after security fixes):** When an implementer fixes a security finding (injection, auth bypass, unsanitized input, missing validation), dispatch a follow-up search before re-audit:
    - Use `mcp__codesight__query` with operation `search-references` or `search-text` to find all analogous call sites
