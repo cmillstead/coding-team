@@ -32,6 +32,7 @@ from pathlib import Path
 
 # Registration order — MUST be preserved (spec §"The 8 hooks").
 HOOK_PATHS: list[str] = [
+    "/Users/cevin/.claude/hooks/paul-apply-review-guard.py",   # Path A fence — MUST be first
     "/Users/cevin/src/engram/.base/hooks/active-hook.py",
     "/Users/cevin/src/engram/.base/hooks/backlog-hook.py",
     "/Users/cevin/src/engram/.base/hooks/base-pulse-check.py",

@@ -550,6 +550,15 @@ sys.exit(0)
 # Latency test
 # ---------------------------------------------------------------------------
 
+class TestPaulGuardRegistration:
+    def test_paul_guard_registered_first(self):
+        """paul-apply-review-guard.py is the FIRST hook in HOOK_PATHS."""
+        module = _load_dispatcher_module()
+        assert module.HOOK_PATHS[0].endswith("paul-apply-review-guard.py"), (
+            f"guard must be first; got {module.HOOK_PATHS[0]}"
+        )
+
+
 class TestLatency:
     def test_dispatcher_no_op_under_600ms(self):
         """Dispatcher wall-clock time for a no-op run < 600ms.
