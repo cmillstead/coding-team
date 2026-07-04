@@ -165,3 +165,47 @@ def test_validate_detail_is_actionable(tmp_path):
     plan = _write_plan(tmp_path)
     ok, status, detail = pr.validate_review(plan)
     assert "/second-opinion review" in detail  # error message is an instruction
+
+
+# --- paul_review_record.py CLI recorder ---
+
+RECORD_CLI = HOOKS_DIR / "_lib" / "paul_review_record.py"
+
+
+def _run_record(plan, **kw):
+    cmd = [sys.executable, str(RECORD_CLI), "--plan", str(plan),
+           "--reviewer", kw.get("reviewer", "codex"),
+           "--rounds", str(kw.get("rounds", 1)),
+           "--session", kw.get("session", "sess-1"),
+           "--detail", kw.get("detail", "codex exec, 1 round")]
+    return subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+
+
+def test_recorder_writes_valid_pass_artifact(tmp_path):
+    plan = _write_plan(tmp_path)
+    result = _run_record(plan)
+    assert result.returncode == 0, result.stderr
+    ok, status, _ = pr.validate_review(plan)
+    assert ok is True and status == "OK"
+
+
+def test_recorder_hash_matches_primitive(tmp_path):
+    plan = _write_plan(tmp_path)
+    _run_record(plan)
+    data = json.loads(pr.review_path_for(plan).read_text())
+    assert data["plan_sha256"] == pr.compute_plan_hash(plan)
+    assert data["verdict"] == "PASS"
+    assert data["reviewer"] == "codex"
+    assert data["schema_version"] == 1
+
+
+def test_recorder_records_reviewer_verbatim(tmp_path):
+    plan = _write_plan(tmp_path)
+    _run_record(plan, reviewer="codex")
+    data = json.loads(pr.review_path_for(plan).read_text())
+    assert data["reviewer"] == "codex"
+
+
+def test_recorder_nonzero_on_missing_plan(tmp_path):
+    result = _run_record(tmp_path / "nope-PLAN.md")
+    assert result.returncode != 0
