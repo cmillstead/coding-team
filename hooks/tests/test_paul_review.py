@@ -8,9 +8,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-import pytest
-
-HOOKS_DIR = Path("/Users/cevin/.claude/skills/coding-team/hooks")
+HOOKS_DIR = Path(__file__).resolve().parent.parent
 
 
 def _load():

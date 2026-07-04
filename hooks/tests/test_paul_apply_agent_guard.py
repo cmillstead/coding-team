@@ -63,7 +63,7 @@ def _make_plan(tmp_path, with_pass=False):
 
 
 def test_execution_dispatch_no_pass_blocks(tmp_path):
-    plan = _make_plan(tmp_path, with_pass=False)
+    _make_plan(tmp_path, with_pass=False)
     rel = ".paul/phases/02-medium-risk-domains/02-02-PLAN.md"
     prompt = f"Implement Task 1 from {rel}. Write code and run tests."
     result, parsed = _run(prompt, tmp_path)
@@ -71,7 +71,7 @@ def test_execution_dispatch_no_pass_blocks(tmp_path):
 
 
 def test_execution_dispatch_with_pass_allows(tmp_path):
-    plan = _make_plan(tmp_path, with_pass=True)
+    _make_plan(tmp_path, with_pass=True)
     rel = ".paul/phases/02-medium-risk-domains/02-02-PLAN.md"
     prompt = f"Implement Task 1 from {rel}. Write code and run tests."
     result, parsed = _run(prompt, tmp_path)
