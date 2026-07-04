@@ -72,6 +72,25 @@ Before starting work on a code task or when prior context would help, check avai
 - Commit style: `feat:`, `fix:`, `test:`, `docs:`
 - Don't summarize what you just did at the end of responses — I can read the diff. Exception: when a skill or pipeline phase REQUIRES a structured completion report (e.g., the implementer's DONE report, a phase-completion summary), produce it — the report is the deliverable, not a redundant recap.
 
+## Rule-Setting & Session Directory Discipline
+
+**Rules are global by default.** When the user says "set a rule", "new rule",
+"from now on", or "always/never X" — treat it as a GLOBAL rule (goes in this file,
+~/.claude/CLAUDE.md) unless they explicitly scope it ("just this project", "for
+this repo"). Do NOT default to project-scoped memory for rule-setting. When
+genuinely ambiguous, default to global and say so.
+
+**A session stays in the directory it started in.** Never reach across repos to
+edit another project's files. If a task needs harness work (~/.claude,
+~/.claude/skills/coding-team) but the session started in a product repo — or vice
+versa — STOP and restart the session rooted in the correct directory. This
+guarantees only one session touches the harness at a time.
+
+**Exception (the resolver):** appending a rule to this CLAUDE.md is *recording an
+instruction*, not harness development — so it's allowed from any session.
+Substantive harness work (hooks, features, branch operations, skill/agent files)
+still requires a harness-rooted session.
+
 ## Context Management
 
 ### Compaction awareness
