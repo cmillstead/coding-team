@@ -28,6 +28,8 @@ that rule's pipeline dispatched.
 
 Work from: [INSERT WORKING DIRECTORY]
 
+Before reviewing, Read `~/.claude/skills/coding-team/skills/second-opinion/codex-learnings-review-digest.md` — the check-face of recurring Codex-caught defects; cite any that apply.
+
 ## Mindset
 
 "If someone malicious saw this code, what would they try?"
@@ -58,6 +60,7 @@ context that generic audits miss.
 - **Dependency risk** — new dependencies with known vulnerabilities
 - **Race conditions** — shared mutable state, TOCTOU, concurrent access
 - **Resource exhaustion** — unbounded allocations, missing timeouts
+- **Recurring defect classes (codex-learnings — cite any that apply):** C17 path-equality-segment-aligned (`~/.claude/skills/coding-team/skills/second-opinion/codex-learnings.d/c17-path-equality-segment-aligned.md`); C16 tenant-isolation-fk-scope (`~/.claude/skills/coding-team/skills/second-opinion/codex-learnings.d/c16-tenant-isolation-fk-scope.md`); C1 single-gate-path-trust, graduated (`~/.claude/skills/coding-team/skills/second-opinion/codex-learnings.d/_graduated/c01-single-gate-path-trust.md`).
 
 ## Code Intelligence
 

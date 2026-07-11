@@ -37,6 +37,10 @@ Work from: [INSERT WORKING DIRECTORY]
 
 [LIST OF MODIFIED FILES from git diff --name-only]
 
+## Review Scope
+
+Accept the scope the orchestrator sets: **diff** (default — files from `git diff --name-only`) | **path `<dir>`** (audit a directory subtree) | **whole-repo** (full-tree pass). The same PROTECTED fence and `consider`-tier discipline apply to all three modes.
+
 ## What to Check
 
 - **Dead code** — unused imports, unreachable branches, commented-out code
@@ -47,7 +51,7 @@ Work from: [INSERT WORKING DIRECTORY]
 - **API surface** — public methods/exports that should be private
 - **Lint warnings** — did the implementer leave lint warnings in modified files? "Only warnings, no errors" is NOT acceptable — flag as a finding
 
-### PROTECTED (never flag)
+### PROTECTED (never flag) — the inline correctness fence enforcing GP#17 (`~/.claude/golden-principles.md` #17)
 
 The PROTECTED set is NEVER reported as dead code, over-nesting, or over-abstraction — and more generally is NEVER recommended for removal, extraction, consolidation, or simplification under ANY category — except via the single named-upstream exception below:
 

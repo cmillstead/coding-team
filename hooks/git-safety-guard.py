@@ -407,21 +407,26 @@ def is_docs_only_commit(command: str, target_root: str) -> bool:
     )
 
 
-# Repo-relative paths/prefixes whose staging makes the codex digest stale-able.
+# Repo-relative paths/prefixes whose staging makes a codex digest stale-able.
+# TWO digest faces share the same entries/generator: design (author-facing
+# "what to do") and review (reviewer-facing "what to check"). Either face can
+# drift independently, so both are gate-relevant paths.
 _CODEX_ENTRIES_PREFIX = "skills/second-opinion/codex-learnings.d/"
 _CODEX_DIGEST_PATH = "skills/second-opinion/codex-learnings-digest.md"
+_CODEX_REVIEW_DIGEST_PATH = "skills/second-opinion/codex-learnings-review-digest.md"
 _CODEX_DIGEST_SCRIPT = "skills/second-opinion/scripts/build-digest.py"
 
 
 def _staged_touches_codex_digest_inputs(staged_files: list[str]) -> bool:
-    """Return True iff any staged path is a codex digest INPUT.
+    """Return True iff any staged path is a codex digest INPUT (either face).
 
     A digest input is any of:
       * a codex entry ``.md`` under ``skills/second-opinion/codex-learnings.d/``,
-      * the digest itself ``skills/second-opinion/codex-learnings-digest.md``,
+      * the design digest ``skills/second-opinion/codex-learnings-digest.md``,
+      * the review digest ``skills/second-opinion/codex-learnings-review-digest.md``,
       * the GENERATOR script ``skills/second-opinion/scripts/build-digest.py``
         (its sort / extraction / format logic changes the rendering, so a
-        staged edit to it can silently leave the committed digest stale).
+        staged edit to it can silently leave a committed digest stale).
 
     Match is tolerant of an optional leading path segment (e.g. a submodule
     prefix) via the same segment-aligned style used by the other helpers.
@@ -432,6 +437,8 @@ def _staged_touches_codex_digest_inputs(staged_files: list[str]) -> bool:
             continue
         if norm == _CODEX_DIGEST_PATH or norm.endswith("/" + _CODEX_DIGEST_PATH):
             return True
+        if norm == _CODEX_REVIEW_DIGEST_PATH or norm.endswith("/" + _CODEX_REVIEW_DIGEST_PATH):
+            return True
         if norm == _CODEX_DIGEST_SCRIPT or norm.endswith("/" + _CODEX_DIGEST_SCRIPT):
             return True
         idx = norm.find(_CODEX_ENTRIES_PREFIX)
@@ -440,11 +447,12 @@ def _staged_touches_codex_digest_inputs(staged_files: list[str]) -> bool:
     return False
 
 
-# The three codex digest-input paths, repo-relative. Enumerated for ls-files
+# The four codex digest-input paths, repo-relative. Enumerated for ls-files
 # scoping when materializing the tracked working tree.
 _CODEX_TRACKED_PATHS = [
     _CODEX_ENTRIES_PREFIX.rstrip("/"),
     _CODEX_DIGEST_PATH,
+    _CODEX_REVIEW_DIGEST_PATH,
     _CODEX_DIGEST_SCRIPT,
 ]
 
@@ -508,14 +516,16 @@ def _materialize_codex_tree(target_root: str) -> str | None:
     return temp_dir
 
 
-def _run_digest_check(target_root: str):
-    """Run build-digest.py --check against the tracked WORKING-TREE content.
+def _run_digest_check(target_root: str, face: str = "design"):
+    """Run build-digest.py --face <face> --check against the tracked WORKING-TREE content.
 
     Returns the completed subprocess (caller inspects returncode / stderr), or
     None on ANY failure (infra hiccup or materialization error → fail OPEN).
 
     Materializes a temp tree mirroring the tracked codex working tree (untracked
-    files excluded) and runs the check against it.
+    files excluded) and runs the check against it. ``face`` selects which
+    digest (``design`` or ``review``) is checked; the caller is responsible for
+    calling this once per face — see ``check_codex_digest_sync``.
 
     DELIBERATE DESIGN CHOICE (Codex #2 declined): the ON-DISK generator
     (``<root>/skills/second-opinion/scripts/build-digest.py``) is the TRUSTED
@@ -536,10 +546,11 @@ def _run_digest_check(target_root: str):
         # accuracy).
         script = Path(target_root) / _CODEX_DIGEST_SCRIPT
         entries_dir = Path(temp_dir) / _CODEX_ENTRIES_PREFIX.rstrip("/")
-        digest_path = Path(temp_dir) / _CODEX_DIGEST_PATH
+        digest_rel = _CODEX_REVIEW_DIGEST_PATH if face == "review" else _CODEX_DIGEST_PATH
+        digest_path = Path(temp_dir) / digest_rel
         try:
             return subprocess.run(
-                ["python3", str(script), "--check",
+                ["python3", str(script), "--face", face, "--check",
                  "--entries-dir", str(entries_dir),
                  "--digest-path", str(digest_path)],
                 cwd=target_root,
@@ -554,13 +565,20 @@ def _run_digest_check(target_root: str):
 
 
 def check_codex_digest_sync(command: str, target_root: str) -> str | None:
-    """Return a block message iff the committed codex digest is known-stale.
+    """Return a block message iff a committed codex digest is known-stale.
 
-    Runs ``build-digest.py --check`` INLINE so a commit that touches a codex
-    learnings entry (or the digest) cannot land with a stale digest. Because
-    entries and the digest are all ``.md`` files, this gate MUST run before the
-    docs-only early return in the verification checklist (which would otherwise
-    skip the check entirely for an entries-only commit).
+    Runs ``build-digest.py --check`` INLINE, ONCE PER FACE (design AND
+    review), so a commit that touches a codex learnings entry (or either
+    digest) cannot land with a stale digest. Because entries and the digests
+    are all ``.md`` files, this gate MUST run before the docs-only early
+    return in the verification checklist (which would otherwise skip the
+    check entirely for an entries-only commit).
+
+    BOTH FACES, INDEPENDENTLY, NO EARLY RETURN: the design and review digests
+    are checked separately and the results combined — an in-sync design face
+    does NOT short-circuit the review-face check (19b2: an early return here
+    would shadow the second gate). The commit is blocked if EITHER face is
+    stale; the block message names which face(s) drifted.
 
     GRAMMAR-FREE BY DESIGN — checks the TRACKED WORKING TREE, not the index.
     The gate does NOT parse the ``git commit`` command string to detect ``-a`` /
@@ -659,31 +677,48 @@ def check_codex_digest_sync(command: str, target_root: str) -> str | None:
     if not script_path.exists():
         return None  # not the codex repo / script absent → fail open
 
-    check = _run_digest_check(target_root)
-    if check is None:
-        return None  # any infra / materialization failure → fail OPEN
+    # Check BOTH faces INDEPENDENTLY. Deliberately NO early return after the
+    # design check passes — see docstring (19b2: an early return here would
+    # shadow the review-face gate).
+    check_design = _run_digest_check(target_root, face="design")
+    check_review = _run_digest_check(target_root, face="review")
 
     # Block ONLY on the dedicated digest-problem code 3 (a clean run that
     # determined the digest is stale / missing / has entry errors). Fail OPEN
-    # on 0 (in sync), 1 (the generator crashed / syntax error), and all other
-    # returncodes — a broken generator must never block a commit.
-    if check.returncode != 3:
+    # on 0 (in sync), 1 (the generator crashed / syntax error), None (infra /
+    # materialization failure), and all other returncodes — a broken
+    # generator or infra hiccup must never block a commit.
+    design_stale = check_design is not None and check_design.returncode == 3
+    review_stale = check_review is not None and check_review.returncode == 3
+
+    if not design_stale and not review_stale:
         return None
 
-    diff = (check.stderr or "").strip()
-    if len(diff) > 2000:
-        diff = diff[:2000] + "\n... (diff truncated)"
+    def _fmt_diff(completed) -> str:
+        diff = (completed.stderr or "").strip()
+        if len(diff) > 2000:
+            diff = diff[:2000] + "\n... (diff truncated)"
+        return diff
 
     msg = (
         "CODEX DIGEST STALE\n\n"
-        "The committed skills/second-opinion/codex-learnings-digest.md is stale "
-        "relative to the codex-learnings.d entry files being committed.\n\n"
-        "Fix: run build-digest.py to regenerate the digest, then re-commit.\n\n"
-        "Known rationalization: 'the entry change is trivial' — a stale digest "
-        "silently feeds agents the OLD design defaults.\n"
+        "A committed codex digest is stale relative to the codex-learnings.d "
+        "entry files being committed.\n\n"
+        "Fix: run build-digest.py to regenerate the digest, then re-commit "
+        "(add --face review for the review digest).\n\n"
+        "Known rationalization: 'the entry change is trivial' — a stale "
+        "digest silently feeds agents the OLD design/review defaults.\n"
     )
-    if diff:
-        msg += f"\n--check reported:\n{diff}\n"
+    if design_stale:
+        msg += "\n[design face] skills/second-opinion/codex-learnings-digest.md is stale.\n"
+        diff = _fmt_diff(check_design)
+        if diff:
+            msg += f"--check reported:\n{diff}\n"
+    if review_stale:
+        msg += "\n[review face] skills/second-opinion/codex-learnings-review-digest.md is stale.\n"
+        diff = _fmt_diff(check_review)
+        if diff:
+            msg += f"--check reported:\n{diff}\n"
     return msg
 
 

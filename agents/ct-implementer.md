@@ -91,9 +91,7 @@ If code-style rules are included above, follow them for all code you write.
 
 ## Codex Design Defaults
 
-[INSERT contents of ~/.claude/skills/coding-team/skills/second-opinion/codex-learnings-digest.md here — the orchestrator reads this file and pastes it into the implementer prompt for plan/code-authoring tasks.]
-
-If design defaults are included above, follow them while authoring code — they are the generative twin of the codex pre-flight checklist; authoring to them means the recurring mistake is never made.
+Read `~/.claude/skills/coding-team/skills/second-opinion/codex-learnings-digest.md` before implementing — the author-facing design defaults (the generative twin of the codex pre-flight checklist); author to them so the recurring mistake is never made.
 
 ## Command Hygiene
 
@@ -185,9 +183,10 @@ Known rationalization: **"I've done the representative ones"** — there are no 
 
 **Completeness:** Count the items in the spec. Count the items you changed. Are they equal? If not, go back and finish.
 **Quality:** Are names clear? Is the code clean and maintainable?
-**Discipline:** Did I avoid overbuilding (YAGNI)? Only build what was requested?
+**Discipline:** Right-sized per `~/.claude/golden-principles.md` #17 (Right-Sized Code)?
 **Testing:** Do tests verify behavior (not mock behavior)? Did I follow TDD?
 **Documentation:** Did my changes affect any documented behavior? If so, did I update the docs?
+**Reachability:** Is each new feature wired to ≥1 entry point (route/CLI/handler/test)? If not, flag "DARK FEATURE: {name}" — see `~/.claude/rules/dark-features.md`.
 
 If you find issues during self-review, fix them now.
 

@@ -955,19 +955,22 @@ def _load_hook_module():
     return mod
 
 
-# Real-shaped entry: a single '**Design default:**' line is required by build-digest.py.
+# Real-shaped entry: a single '**Design default:**' line is required by
+# build-digest.py's design face, and the 3rd table column is required by its
+# review face — header text MUST be the real "Check before dispatch" (not the
+# abbreviated "Check") so review-face extraction succeeds on these fixtures.
 _ENTRY_P1 = (
     "# P1\n\n"
-    "| ID | Pattern | Check |\n"
-    "|----|---------|-------|\n"
+    "| ID | Pattern | Check before dispatch |\n"
+    "|----|---------|----------------------|\n"
     "| P1 | Phantom symbol | Grep for every named symbol. |\n\n"
     "**Design default:** Verify every symbol the plan names exists before writing the plan.\n"
 )
 
 _ENTRY_C1 = (
     "# C1\n\n"
-    "| ID | Pattern | Check |\n"
-    "|----|---------|-------|\n"
+    "| ID | Pattern | Check before dispatch |\n"
+    "|----|---------|----------------------|\n"
     "| C1 | Single-gate path trust | Classify path-shaped fields into tiers. |\n\n"
     "**Design default:** Classify a path-shaped field as identifier / fs-path / repo-relative.\n"
 )
@@ -1004,9 +1007,17 @@ def _build_codex_repo(root: Path) -> Path:
 
 
 def _regenerate_digest(root: Path) -> None:
-    """Run the real build-digest.py (no --check) to write an in-sync digest."""
+    """Run the real build-digest.py (no --check) to write an in-sync design digest."""
     script = root / "skills" / "second-opinion" / "scripts" / "build-digest.py"
     subprocess.run(["python3", str(script)], check=True, capture_output=True, text=True)
+
+
+def _regenerate_review_digest(root: Path) -> None:
+    """Run the real build-digest.py --face review (no --check) to write an in-sync review digest."""
+    script = root / "skills" / "second-opinion" / "scripts" / "build-digest.py"
+    subprocess.run(
+        ["python3", str(script), "--face", "review"], check=True, capture_output=True, text=True
+    )
 
 
 class TestCodexDigestSyncGate:
@@ -1040,22 +1051,122 @@ class TestCodexDigestSyncGate:
         assert "the entry change is trivial" in block
 
     def test_returns_none_when_digest_in_sync(self, tmp_path):
-        """(b) entry committed with the digest correctly regenerated → None (allowed)."""
+        """(b) entry committed with BOTH digests correctly regenerated → None (allowed)."""
         mod = _load_hook_module()
         repo = _build_codex_repo(tmp_path / "repo")
 
-        # Edit an entry AND regenerate the digest so they are in sync, stage both.
+        # Edit an entry AND regenerate BOTH digests so they are in sync, stage all.
         entry = repo / "skills" / "second-opinion" / "codex-learnings.d" / "p01-phantom-symbol.md"
         entry.write_text(_ENTRY_P1.replace(
             "before writing the plan.",
             "before writing the plan, every time.",
         ), encoding="utf-8")
         _regenerate_digest(repo)
+        _regenerate_review_digest(repo)
         _git(["add", "skills/second-opinion/codex-learnings.d/p01-phantom-symbol.md"], cwd=repo)
         _git(["add", "skills/second-opinion/codex-learnings-digest.md"], cwd=repo)
+        _git(["add", "skills/second-opinion/codex-learnings-review-digest.md"], cwd=repo)
 
         command = f'cd {repo} && git commit -m "fix: tweak p01 and regen"'
         assert mod.check_codex_digest_sync(command, str(repo)) is None
+
+    def test_both_faces_clean_returns_none(self, tmp_path):
+        """BOTH faces clean → allow. Named explicitly per the design/review two-face gate."""
+        mod = _load_hook_module()
+        repo = _build_codex_repo(tmp_path / "repo")
+
+        entry = repo / "skills" / "second-opinion" / "codex-learnings.d" / "p01-phantom-symbol.md"
+        entry.write_text(_ENTRY_P1.replace(
+            "before writing the plan.",
+            "before writing the plan, in both faces.",
+        ), encoding="utf-8")
+        _regenerate_digest(repo)
+        _regenerate_review_digest(repo)
+        _git(["add", "skills/second-opinion/codex-learnings.d/p01-phantom-symbol.md"], cwd=repo)
+        _git(["add", "skills/second-opinion/codex-learnings-digest.md"], cwd=repo)
+        _git(["add", "skills/second-opinion/codex-learnings-review-digest.md"], cwd=repo)
+
+        command = f'cd {repo} && git commit -m "fix: tweak p01, both digests in sync"'
+        assert mod.check_codex_digest_sync(command, str(repo)) is None
+
+    def test_design_clean_review_stale_blocks(self, tmp_path):
+        """design digest clean, review digest STALE → block (no early return after design passes).
+
+        Editing ONLY the check-face table cell (leaving the Design default
+        sentence untouched) leaves the design render byte-identical to the
+        committed baseline (design stays clean) while the review render now
+        diverges from the committed baseline (review goes stale). Proves
+        19b2: the design face passing must NOT short-circuit the review check.
+        """
+        mod = _load_hook_module()
+        repo = _build_codex_repo(tmp_path / "repo")
+
+        # Establish an in-sync BASELINE for both faces and commit them.
+        _regenerate_digest(repo)
+        _regenerate_review_digest(repo)
+        _git(["add", "skills/second-opinion/codex-learnings-digest.md"], cwd=repo)
+        _git(["add", "skills/second-opinion/codex-learnings-review-digest.md"], cwd=repo)
+        _git(["commit", "-m", "chore: add both digests"], cwd=repo)
+
+        # Edit ONLY the check-face table cell; the Design default sentence is
+        # untouched, so the design render still matches the committed baseline.
+        # Deliberately do NOT regenerate either digest — the review digest now
+        # diverges from this edit; the design digest still matches (nothing
+        # about the Design default line changed).
+        entry = repo / "skills" / "second-opinion" / "codex-learnings.d" / "p01-phantom-symbol.md"
+        entry.write_text(_ENTRY_P1.replace(
+            "| P1 | Phantom symbol | Grep for every named symbol. |",
+            "| P1 | Phantom symbol | Grep for every named symbol, always. |",
+        ), encoding="utf-8")
+        _git(["add", "skills/second-opinion/codex-learnings.d/p01-phantom-symbol.md"], cwd=repo)
+
+        command = f'cd {repo} && git commit -m "fix: tweak p01 check face only"'
+        block = mod.check_codex_digest_sync(command, str(repo))
+
+        assert block is not None, "review face must independently block even when design is clean"
+        assert "CODEX DIGEST STALE" in block
+        assert "[review face]" in block
+        assert "codex-learnings-review-digest.md" in block
+        assert "[design face]" not in block, "design face is clean and must not be listed as stale"
+
+    def test_design_stale_review_clean_blocks(self, tmp_path):
+        """design digest STALE, review digest clean → block (no early return after review passes).
+
+        Editing ONLY the Design default sentence (leaving the check-face table
+        cell untouched) leaves the review render byte-identical to the
+        committed baseline (review stays clean) while the design render now
+        diverges from the committed baseline (design goes stale). Proves
+        19b2: the review face passing must NOT short-circuit the design check.
+        """
+        mod = _load_hook_module()
+        repo = _build_codex_repo(tmp_path / "repo")
+
+        # Establish an in-sync BASELINE for both faces and commit them.
+        _regenerate_digest(repo)
+        _regenerate_review_digest(repo)
+        _git(["add", "skills/second-opinion/codex-learnings-digest.md"], cwd=repo)
+        _git(["add", "skills/second-opinion/codex-learnings-review-digest.md"], cwd=repo)
+        _git(["commit", "-m", "chore: add both digests"], cwd=repo)
+
+        # Edit ONLY the Design default sentence; the check-face table cell is
+        # untouched, so the review render still matches the committed baseline.
+        # Deliberately do NOT regenerate either digest — the design digest now
+        # diverges from this edit; the review digest still matches.
+        entry = repo / "skills" / "second-opinion" / "codex-learnings.d" / "p01-phantom-symbol.md"
+        entry.write_text(_ENTRY_P1.replace(
+            "**Design default:** Verify every symbol the plan names exists before writing the plan.\n",
+            "**Design default:** A DIFFERENT default; the check-face cell text is untouched.\n",
+        ), encoding="utf-8")
+        _git(["add", "skills/second-opinion/codex-learnings.d/p01-phantom-symbol.md"], cwd=repo)
+
+        command = f'cd {repo} && git commit -m "fix: tweak p01 design default only"'
+        block = mod.check_codex_digest_sync(command, str(repo))
+
+        assert block is not None, "design face must independently block even when review is clean"
+        assert "CODEX DIGEST STALE" in block
+        assert "[design face]" in block
+        assert "codex-learnings-digest.md" in block
+        assert "[review face]" not in block, "review face is clean and must not be listed as stale"
 
     def test_returns_none_for_unrelated_commit(self, tmp_path):
         """(c) commit touching only non-codex files → None and --check NOT run."""
@@ -1189,25 +1300,28 @@ class TestCodexDigestSyncGate:
         assert "CODEX DIGEST STALE" in block
 
     def test_commit_dash_am_in_sync_returns_none(self, tmp_path):
-        """FIX A: `git commit -am` with the working tree in sync → None (allowed)."""
+        """FIX A: `git commit -am` with the working tree in sync (BOTH digests) → None (allowed)."""
         mod = _load_hook_module()
         repo = _build_codex_repo(tmp_path / "repo")
 
-        # Commit an in-sync digest so BOTH the entry and the digest are TRACKED
-        # (a -a commit only captures tracked modifications; the digest must be
-        # tracked to be part of the to-be-committed tree).
+        # Commit in-sync digests so the entry AND both digests are TRACKED
+        # (a -a commit only captures tracked modifications; the digests must
+        # be tracked to be part of the to-be-committed tree).
         _regenerate_digest(repo)
+        _regenerate_review_digest(repo)
         _git(["add", "skills/second-opinion/codex-learnings-digest.md"], cwd=repo)
-        _git(["commit", "-m", "chore: add digest"], cwd=repo)
+        _git(["add", "skills/second-opinion/codex-learnings-review-digest.md"], cwd=repo)
+        _git(["commit", "-m", "chore: add digests"], cwd=repo)
 
-        # Edit the tracked entry, regenerate the digest so the WORKING TREE is in
-        # sync, stage NOTHING (a -a commit captures tracked modifications).
+        # Edit the tracked entry, regenerate BOTH digests so the WORKING TREE is
+        # in sync, stage NOTHING (a -a commit captures tracked modifications).
         entry = repo / "skills" / "second-opinion" / "codex-learnings.d" / "p01-phantom-symbol.md"
         entry.write_text(_ENTRY_P1.replace(
             "before writing the plan.",
             "before writing the plan, consistently.",
         ), encoding="utf-8")
         _regenerate_digest(repo)
+        _regenerate_review_digest(repo)
 
         assert _git(["diff", "--cached", "--name-only"], cwd=repo).stdout.strip() == ""
 
@@ -1255,10 +1369,12 @@ class TestCodexDigestSyncGate:
         mod = _load_hook_module()
         repo = _build_codex_repo(tmp_path / "repo")
 
-        # Working tree is in sync: regenerate the digest for the tracked entries.
+        # Working tree is in sync: regenerate BOTH digests for the tracked entries.
         _regenerate_digest(repo)
+        _regenerate_review_digest(repo)
         _git(["add", "skills/second-opinion/codex-learnings-digest.md"], cwd=repo)
-        _git(["commit", "-m", "chore: add digest"], cwd=repo)
+        _git(["add", "skills/second-opinion/codex-learnings-review-digest.md"], cwd=repo)
+        _git(["commit", "-m", "chore: add digests"], cwd=repo)
 
         # Edit a TRACKED entry and regenerate so the tracked set stays in sync;
         # stage nothing (a -a commit captures tracked modifications).
@@ -1268,6 +1384,7 @@ class TestCodexDigestSyncGate:
             "before writing the plan, reliably.",
         ), encoding="utf-8")
         _regenerate_digest(repo)
+        _regenerate_review_digest(repo)
 
         # Drop an UNTRACKED draft entry whose Design default is NOT in the digest.
         draft = repo / "skills" / "second-opinion" / "codex-learnings.d" / "20260620-120000-ab12-draft.md"
@@ -1360,10 +1477,12 @@ class TestCodexDigestSyncGate:
         mod = _load_hook_module()
         repo = _build_codex_repo(tmp_path / "repo")
 
-        # Working tree in sync: regenerate + commit the digest for tracked entries.
+        # Working tree in sync: regenerate + commit BOTH digests for tracked entries.
         _regenerate_digest(repo)
+        _regenerate_review_digest(repo)
         _git(["add", "skills/second-opinion/codex-learnings-digest.md"], cwd=repo)
-        _git(["commit", "-m", "chore: add digest"], cwd=repo)
+        _git(["add", "skills/second-opinion/codex-learnings-review-digest.md"], cwd=repo)
+        _git(["commit", "-m", "chore: add digests"], cwd=repo)
 
         # Edit a TRACKED entry and regenerate so the tracked set stays in sync.
         entry = repo / "skills" / "second-opinion" / "codex-learnings.d" / "p01-phantom-symbol.md"
@@ -1372,6 +1491,7 @@ class TestCodexDigestSyncGate:
             "before writing the plan, reliably.",
         ), encoding="utf-8")
         _regenerate_digest(repo)
+        _regenerate_review_digest(repo)
 
         # Drop an UNTRACKED draft entry whose Design default is NOT in the digest.
         draft = repo / "skills" / "second-opinion" / "codex-learnings.d" / "20260620-120000-ab12-draft.md"

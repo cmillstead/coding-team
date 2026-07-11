@@ -27,6 +27,8 @@ to you — you ARE the reviewer that rule's pipeline dispatched.
 
 Work from: [INSERT WORKING DIRECTORY]
 
+Before reviewing, Read `~/.claude/skills/coding-team/skills/second-opinion/codex-learnings-review-digest.md` — the check-face of recurring Codex-caught defects; cite any that apply.
+
 ## What Was Requested
 
 [FULL TEXT of task requirements]
@@ -69,6 +71,7 @@ Verify the RED-GREEN cycle was real:
    structure rather than runtime behavior. These tests verify nothing
    about correctness. The fix: export the function, call it with real
    inputs, assert on outputs.
+6. **Mocks justified** — flag any mock/patch/stub not justified by the physical-impossibility exemption OR a `# mock-ok: <reason>` line. See `~/.claude/rules/test-files.md`; do NOT restate the criteria.
 4. **Git history shows RED before GREEN** — review the git history
    provided in the `## Git History` section below. Were test commits made
    before or alongside implementation commits? (If a single commit has
@@ -95,8 +98,8 @@ Read the implementation code and verify:
 - Did they claim something works but didn't actually implement it?
 
 **Extra/unneeded work:**
-- Did they build things that weren't requested?
-- Did they over-engineer or add unnecessary features?
+- Did they build beyond the spec's stated requirements?
+- Did they violate Right-Sized Code (`~/.claude/golden-principles.md` #17)?
 
 **Misunderstandings:**
 - Did they interpret requirements differently than intended?

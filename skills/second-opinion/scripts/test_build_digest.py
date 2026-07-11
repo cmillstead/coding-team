@@ -55,6 +55,8 @@ check = _mod.check
 main = _mod.main
 EXIT_OK = _mod.EXIT_OK
 EXIT_DIGEST_PROBLEM = _mod.EXIT_DIGEST_PROBLEM
+FACE_DESIGN = _mod.FACE_DESIGN
+FACE_REVIEW = _mod.FACE_REVIEW
 
 
 # ---------------------------------------------------------------------------
@@ -529,3 +531,295 @@ def test_cli_overrides_equals_form(tmp_path):
 
     # Assert
     assert rc == EXIT_OK
+
+
+# ---------------------------------------------------------------------------
+# Test 11 — review face: legacy TABLE-CELL check extraction, including an
+# embedded/escaped pipe and backticks (F2, format 1).
+# ---------------------------------------------------------------------------
+def test_review_face_extracts_table_cell_check_with_escaped_pipe(tmp_path):
+    """review face extracts the 3rd table column, unescaping an embedded '\\|' back to a literal '|'."""
+    # Arrange
+    content = (
+        "# C16\n\n"
+        "| ID | Pattern | Check before dispatch |\n"
+        "|----|---------|----------------------|\n"
+        "| C16 | Some pattern | Ask: does X \\| Y \\| Z apply? Verify before dispatch. |\n\n"
+        "**Design default:** Some design sentence.\n"
+    )
+    (tmp_path / "c16-slug.md").write_text(content, encoding="utf-8")
+
+    # Act
+    text, errors = render_digest(tmp_path, face=FACE_REVIEW)
+
+    # Assert
+    assert errors == []
+    assert "### C16" in text
+    assert "Ask: does X | Y | Z apply? Verify before dispatch." in text
+
+
+def test_review_face_table_cell_backticks_preserved(tmp_path):
+    """A table-cell check face containing inline-code backticks is extracted verbatim."""
+    # Arrange
+    content = (
+        "# C2\n\n"
+        "| ID | Pattern | Check before dispatch |\n"
+        "|----|---------|----------------------|\n"
+        "| C2 | `@tags: foo` Some pattern text | Confirm `removeOnFail: true` is set. |\n\n"
+        "**Design default:** Some design sentence.\n"
+    )
+    (tmp_path / "c02-slug.md").write_text(content, encoding="utf-8")
+
+    # Act
+    text, errors = render_digest(tmp_path, face=FACE_REVIEW)
+
+    # Assert
+    assert errors == []
+    assert "Confirm `removeOnFail: true` is set." in text
+
+
+# ---------------------------------------------------------------------------
+# Test 12 — review face: standalone MULTI-LINE labeled-section check
+# extraction, including a numbered list (F2, format 2).
+# ---------------------------------------------------------------------------
+def test_review_face_extracts_multiline_labeled_check_with_numbered_list(tmp_path):
+    """review face extracts a standalone '**Check before dispatch:**' section, preserving a
+    multi-line numbered list, and stops at the NEXT bold '**Label:**' line."""
+    # Arrange
+    content = (
+        "# C24\n\n"
+        "`@tags: concurrency-lock; reasoning-shape; scope:diff`\n\n"
+        "**Pattern:** A poll-based producer enqueues jobs with a stable dedup key.\n\n"
+        "**Check before dispatch:**\n"
+        "1. Confirm removeOnFail: true so a failed job frees the key.\n"
+        "2. Confirm the scheduler bounds retained job output.\n\n"
+        "**Design default:** Make failure free the key and bound scheduler retention.\n"
+    )
+    (tmp_path / "20260701-133000-0f84-slug.md").write_text(content, encoding="utf-8")
+
+    # Act
+    text, errors = render_digest(tmp_path, face=FACE_REVIEW)
+
+    # Assert — both numbered items present; the Design default body is NOT bled into the check
+    assert errors == []
+    assert "### C24" in text
+    assert "1. Confirm removeOnFail: true so a failed job frees the key." in text
+    assert "2. Confirm the scheduler bounds retained job output." in text
+    assert "Make failure free the key" not in text
+
+
+# ---------------------------------------------------------------------------
+# Test 13 — review face: an entry with NO check face at all is a GAP error.
+# ---------------------------------------------------------------------------
+def test_review_face_missing_check_face_is_gap_error(tmp_path):
+    """review face: an entry with neither a table-cell nor a labeled check face is a GAP error."""
+    # Arrange — a Design-default-only entry, no check face anywhere
+    content = (
+        "# P01\n\n"
+        "**Design default:** Some design sentence with no check face anywhere.\n"
+    )
+    (tmp_path / "p01-slug.md").write_text(content, encoding="utf-8")
+
+    # Act
+    text, errors = render_digest(tmp_path, face=FACE_REVIEW)
+
+    # Assert
+    assert text == ""
+    assert len(errors) == 1
+    assert "GAP" in errors[0]
+
+
+# ---------------------------------------------------------------------------
+# Test 14 — review face: an entry with TWO check faces (both formats present
+# at once) is a DUPLICATE error.
+# ---------------------------------------------------------------------------
+def test_review_face_two_check_faces_is_duplicate_error(tmp_path):
+    """review face: an entry mixing a table-cell check AND a labeled check section is DUPLICATE."""
+    # Arrange
+    content = (
+        "# C99\n\n"
+        "| ID | Pattern | Check before dispatch |\n"
+        "|----|---------|----------------------|\n"
+        "| C99 | Some pattern | The table-cell check face. |\n\n"
+        "**Check before dispatch:**\n"
+        "A second, labeled check face that should not coexist with the table cell.\n\n"
+        "**Design default:** Some design sentence.\n"
+    )
+    (tmp_path / "c99-slug.md").write_text(content, encoding="utf-8")
+
+    # Act
+    text, errors = render_digest(tmp_path, face=FACE_REVIEW)
+
+    # Assert
+    assert text == ""
+    assert len(errors) == 1
+    assert "DUPLICATE" in errors[0]
+
+
+# ---------------------------------------------------------------------------
+# Test 15 — review face NEGATIVE GATE: a '**Review check:**' label (a
+# forbidden third per-entry field, B2 rejected design) is a hard error.
+# ---------------------------------------------------------------------------
+def test_review_face_review_check_label_is_forbidden(tmp_path):
+    """review face: a '**Review check:**' label is FORBIDDEN — the check face IS the review face."""
+    # Arrange
+    content = (
+        "# C50\n\n"
+        "| ID | Pattern | Check before dispatch |\n"
+        "|----|---------|----------------------|\n"
+        "| C50 | Some pattern | The check face. |\n\n"
+        "**Review check:** A forbidden third per-entry field.\n\n"
+        "**Design default:** Some design sentence.\n"
+    )
+    (tmp_path / "c50-slug.md").write_text(content, encoding="utf-8")
+
+    # Act
+    text, errors = render_digest(tmp_path, face=FACE_REVIEW)
+
+    # Assert
+    assert text == ""
+    assert len(errors) == 1
+    assert "FORBIDDEN" in errors[0]
+    assert "Review check" in errors[0]
+
+
+# ---------------------------------------------------------------------------
+# Test 16 — review face: a good set (both formats, exactly one check face
+# each) renders with ZERO errors.
+# ---------------------------------------------------------------------------
+def test_review_face_good_mixed_set_renders_with_zero_errors(tmp_path):
+    """A set with BOTH table-cell and labeled-section entries, each with exactly one check
+    face, renders with zero errors and both entries present."""
+    # Arrange
+    table_entry = (
+        "# C16\n\n"
+        "| ID | Pattern | Check before dispatch |\n"
+        "|----|---------|----------------------|\n"
+        "| C16 | Some pattern | Table-cell check for C16. |\n\n"
+        "**Design default:** Design sentence for C16.\n"
+    )
+    (tmp_path / "c16-slug.md").write_text(table_entry, encoding="utf-8")
+
+    labeled_entry = (
+        "# C24\n\n"
+        "**Check before dispatch:**\n"
+        "1. First check step.\n"
+        "2. Second check step.\n\n"
+        "**Design default:** Design sentence for C24.\n"
+    )
+    (tmp_path / "20260701-133000-0f84-slug.md").write_text(labeled_entry, encoding="utf-8")
+
+    # Act
+    text, errors = render_digest(tmp_path, face=FACE_REVIEW)
+
+    # Assert
+    assert errors == []
+    assert "### C16" in text
+    assert "### C24" in text
+    assert "Table-cell check for C16." in text
+    assert "1. First check step." in text
+
+
+# ---------------------------------------------------------------------------
+# Test 17 — design face output is BYTE-IDENTICAL to the committed
+# codex-learnings-digest.md, rendered over the REAL entries dir. This is the
+# regression guard: the design face MUST stay unchanged by the review-face
+# parameterization.
+# ---------------------------------------------------------------------------
+def test_design_face_output_is_byte_identical_to_committed_digest():
+    """render_digest(face='design') over the REAL entries dir equals the committed digest byte-for-byte."""
+    # Arrange
+    real_entries_dir = _mod.ENTRIES_DIR
+    real_digest_path = _mod.DESIGN_DIGEST_PATH
+
+    # Act
+    text, errors = render_digest(real_entries_dir, face=FACE_DESIGN)
+
+    # Assert
+    assert errors == []
+    committed = real_digest_path.read_text(encoding="utf-8")
+    assert text == committed
+
+
+# ---------------------------------------------------------------------------
+# Test 18 — review face: exactly one check face per entry holds across the
+# REAL entries dir (every live entry succeeds with zero GAP/DUPLICATE errors).
+# ---------------------------------------------------------------------------
+def test_review_face_real_entries_dir_has_exactly_one_check_face_each():
+    """render_digest(face='review') over the REAL entries dir succeeds with zero errors."""
+    # Arrange
+    real_entries_dir = _mod.ENTRIES_DIR
+
+    # Act
+    text, errors = render_digest(real_entries_dir, face=FACE_REVIEW)
+
+    # Assert
+    assert errors == [], errors
+    assert text != ""
+
+
+# ---------------------------------------------------------------------------
+# Test 19 — CLI: --face review --check, in sync vs. drifted.
+# ---------------------------------------------------------------------------
+def test_cli_face_review_check_in_sync(tmp_path):
+    """main(['--face','review','--check',...]) returns 0 when the review digest is in sync."""
+    # Arrange
+    entries_dir = tmp_path / "entries"
+    entries_dir.mkdir()
+    content = (
+        "# C1\n\n"
+        "| ID | Pattern | Check before dispatch |\n"
+        "|----|---------|----------------------|\n"
+        "| C1 | Pattern text | Check text for C1. |\n\n"
+        "**Design default:** Design sentence for C1.\n"
+    )
+    (entries_dir / "c1-slug.md").write_text(content, encoding="utf-8")
+    digest_path = tmp_path / "review-digest.md"
+    assert write(entries_dir, digest_path, face=FACE_REVIEW) == EXIT_OK
+
+    # Act
+    rc = main([
+        "--face", "review", "--check",
+        "--entries-dir", str(entries_dir), "--digest-path", str(digest_path),
+    ])
+
+    # Assert
+    assert rc == EXIT_OK
+
+
+def test_cli_face_review_check_on_drift(tmp_path):
+    """main(['--face','review','--check',...]) returns 3 when the review digest drifts from entries."""
+    # Arrange
+    entries_dir = tmp_path / "entries"
+    entries_dir.mkdir()
+    content = (
+        "# C1\n\n"
+        "| ID | Pattern | Check before dispatch |\n"
+        "|----|---------|----------------------|\n"
+        "| C1 | Pattern text | Original check text. |\n\n"
+        "**Design default:** Design sentence.\n"
+    )
+    (entries_dir / "c1-slug.md").write_text(content, encoding="utf-8")
+    digest_path = tmp_path / "review-digest.md"
+    write(entries_dir, digest_path, face=FACE_REVIEW)
+
+    mutated = content.replace("Original check text.", "MUTATED check text.")
+    (entries_dir / "c1-slug.md").write_text(mutated, encoding="utf-8")
+
+    # Act
+    rc = main([
+        "--face", "review", "--check",
+        "--entries-dir", str(entries_dir), "--digest-path", str(digest_path),
+    ])
+
+    # Assert
+    assert rc == EXIT_DIGEST_PROBLEM
+
+
+def test_cli_invalid_face_returns_digest_problem():
+    """An unrecognized --face value returns EXIT_DIGEST_PROBLEM rather than silently defaulting."""
+    # Act
+    rc = main(["--face", "bogus", "--check"])
+
+    # Assert
+    assert rc == EXIT_DIGEST_PROBLEM
