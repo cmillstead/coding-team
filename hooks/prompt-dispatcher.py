@@ -41,6 +41,7 @@ HOOK_PATHS: list[str] = [
     "/Users/cevin/.claude/hooks/session-capture-check.py",
     "/Users/cevin/.claude/hooks/proactive-recall.py",
     "/Users/cevin/.claude/hooks/mid-session-recall.py",
+    "/Users/cevin/.claude/hooks/ci-watch-inject.py",
 ]
 
 

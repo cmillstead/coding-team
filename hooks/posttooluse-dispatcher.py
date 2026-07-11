@@ -51,6 +51,7 @@ LINT_WARNING_ENFORCER = str(HOOKS / "lint-warning-enforcer.py")
 CODING_TEAM_LIFECYCLE = str(HOOKS / "coding-team-lifecycle.py")
 CODESIGHT_HOOKS = str(HOOKS / "codesight-hooks.py")
 BUILDER_SELF_CHECK = str(HOOKS / "builder-self-check.py")
+CI_WATCH_ARM = str(HOOKS / "ci-watch-arm.py")
 
 
 def _skip_names() -> set[str]:
@@ -198,7 +199,7 @@ def main() -> None:
     tool_name = event.get("tool_name", "")
 
     if tool_name == "Bash":
-        _run_and_emit([LOOP_DETECTION, LINT_WARNING_ENFORCER], payload, skip)
+        _run_and_emit([LOOP_DETECTION, LINT_WARNING_ENFORCER, CI_WATCH_ARM], payload, skip)
 
     elif tool_name == "Skill":
         _run_and_emit([CODING_TEAM_LIFECYCLE], payload, skip)
