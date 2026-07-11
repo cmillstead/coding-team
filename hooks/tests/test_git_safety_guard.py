@@ -1,6 +1,8 @@
 """Tests for git-safety-guard.py hook."""
 
+import contextlib
 import hashlib
+import io
 import json
 import os
 import subprocess
@@ -1975,6 +1977,139 @@ class TestDenyCompoundUnlessBlessed:
             )
         finally:
             os.chdir(old_cwd)
+
+
+@contextlib.contextmanager
+def _env_override(key: str, value: str | None):
+    """Temporarily set (value given) or unset (value None) an env var; restore after.
+
+    Direct os.environ save/restore — mirrors conftest.py's tmp_state_dir fixture
+    idiom. subprocess.run inherits the current process env when no explicit
+    `env=` kwarg is passed, so this also covers run_hook subprocess calls made
+    inside the `with` block.
+    """
+    old = os.environ.get(key)
+    if value is None:
+        os.environ.pop(key, None)
+    else:
+        os.environ[key] = value
+    try:
+        yield
+    finally:
+        if old is None:
+            os.environ.pop(key, None)
+        else:
+            os.environ[key] = old
+
+
+class TestCompoundAllowOverride:
+    """GIT_SAFETY_ALLOW_COMPOUND disables the compound block for NON-GIT compounds.
+
+    Non-git compounds fall through to CC's normal permission handling. A command
+    with a git token does NOT take the override — it follows the normal routing
+    (recognized git ops defer to the earlier guards; parser-miss forms stay
+    blocked by the compound deny). The git-op guards (secret/branch/verify/format)
+    that run earlier in main() are untouched.
+    """
+
+    def _fn(self):
+        return _load_hook_module()._deny_compound_unless_blessed
+
+    def test_flag_set_lets_nongit_compound_fall_through(self):
+        buf = io.StringIO()
+        with _env_override("GIT_SAFETY_ALLOW_COMPOUND", "1"):
+            with contextlib.redirect_stdout(buf):
+                result = self._fn()("ls | head")
+        assert result is False, "non-git compound must fall through when flag set"
+        assert buf.getvalue().strip() == "", (
+            f"no output expected when override active, got: {buf.getvalue()!r}"
+        )
+
+    def test_flag_set_nongit_compound_falls_through_subprocess(self, run_hook, make_event):
+        with _env_override("GIT_SAFETY_ALLOW_COMPOUND", "1"):
+            result = run_hook("git-safety-guard.py", make_event("Bash", command="ls | head"))
+        assert result.returncode == 0, f"hook must exit 0, got {result.returncode}; stderr={result.stderr!r}"
+        assert result.stdout.strip() == "", f"fall-through must emit no output, got: {result.stdout!r}"
+        assert result.parsed is None, (
+            f"non-git compound must fall through in subprocess with flag set, "
+            f"got block: {result.stdout!r}"
+        )
+
+    @pytest.mark.parametrize("cmd", [
+        "git -C /repo add .env && echo done",
+        "GIT -C /repo add .env && echo done",
+    ])
+    def test_parsermiss_git_compound_still_blocked_when_flag_set(self, cmd):
+        buf = io.StringIO()
+        with _env_override("GIT_SAFETY_ALLOW_COMPOUND", "1"):
+            with contextlib.redirect_stdout(buf):
+                result = self._fn()(cmd)
+        assert result is True, f"git-referencing compound must stay blocked with flag set: {cmd!r}"
+        parsed = json.loads(buf.getvalue())
+        assert parsed["decision"] == "block"
+        assert "One command per Bash call" in parsed["reason"]
+
+    @pytest.mark.parametrize("flag", ["1", None])
+    def test_gated_git_op_compound_is_flag_independent(
+        self, run_hook, make_event, tmp_path, flag
+    ):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        _make_repo_on_branch(repo, branch="feature-x")
+        (repo / "safe.py").write_text("x = 1\n")
+        cmd = f'cd {repo} && git add safe.py && echo done'
+        with _env_override("GIT_SAFETY_ALLOW_COMPOUND", flag):
+            result = run_hook("git-safety-guard.py", make_event("Bash", command=cmd))
+        assert result.returncode == 0, f"hook must exit 0, got {result.returncode}; stderr={result.stderr!r}"
+        assert result.parsed is None, (
+            f"safe gated-git-op compound on a feature branch must fall through "
+            f"(no hook block) regardless of flag ({flag!r}), got block: {result.stdout!r}"
+        )
+
+    def test_flag_unset_still_blocks_nongit_compound(self):
+        buf = io.StringIO()
+        with _env_override("GIT_SAFETY_ALLOW_COMPOUND", None):
+            with contextlib.redirect_stdout(buf):
+                result = self._fn()("ls | head")
+        assert result is True, "flag unset must still block compounds"
+        parsed = json.loads(buf.getvalue())
+        assert parsed["decision"] == "block"
+        assert "One command per Bash call" in parsed["reason"]
+
+    def test_git_op_compound_still_gated_when_flag_set(self, run_hook, make_event, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        _make_repo_on_branch(repo, branch="main")
+        (repo / "new_file.py").write_text("x = 1\n")
+        old_cwd = os.getcwd()
+        os.chdir(str(repo))
+        try:
+            cmd = f'cd {repo} && git add new_file.py && git commit -m "feat: add x"'
+            with _env_override("GIT_SAFETY_ALLOW_COMPOUND", "1"):
+                result = run_hook("git-safety-guard.py", make_event("Bash", command=cmd))
+            assert result.parsed is not None, (
+                f"expected BLOCK for git-op compound on main, got: {result.stdout!r}"
+            )
+            assert result.parsed["decision"] == "block"
+            assert "feature branch" in result.parsed["reason"].lower(), (
+                f"git-op compound must route to branch guard, got: {result.parsed['reason']!r}"
+            )
+        finally:
+            os.chdir(old_cwd)
+
+    @pytest.mark.parametrize("value,blocks", [
+        ("1", False), ("true", False), ("yes", False), ("on", False),
+        ("TRUE", False), (" 1 ", False),
+        ("0", True), ("no", True), ("off", True), ("", True),
+    ])
+    def test_flag_value_parsing_nongit(self, value, blocks):
+        buf = io.StringIO()
+        with _env_override("GIT_SAFETY_ALLOW_COMPOUND", value):
+            with contextlib.redirect_stdout(buf):
+                result = self._fn()("ls | head")
+        assert result is blocks, (
+            f"value {value!r}: expected block={blocks}, got {result}"
+        )
 
 
 class TestNvmBootstrapGuard:
