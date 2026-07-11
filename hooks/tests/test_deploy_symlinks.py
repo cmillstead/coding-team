@@ -5,6 +5,7 @@ copying files, that the deployment is idempotent, that _lib/ is linked as a
 directory, and that no .gitignore is written.
 """
 
+import json
 import os
 import subprocess
 from pathlib import Path
@@ -12,6 +13,34 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent  # tests/ -> hooks/ -> repo root
 DEPLOY_SH = REPO_ROOT / "scripts" / "deploy.sh"
+
+# deploy.sh's registration check greps 5 sites for each deployed hook's basename:
+# $CLAUDE_DIR/settings.json plus the 4 dispatcher sources (prompt-, session-start-,
+# pretooluse-, posttooluse-dispatcher.py). Every hook EXCEPT these 4 dispatchers is
+# referenced by basename inside one of the dispatchers' own source (each dispatcher
+# hardcodes the paths of the hooks it routes to). The 4 dispatchers themselves are
+# registered only in the real ~/.claude/settings.json, which invokes them directly
+# as the top-level hook commands — so a hermetic settings.json fixture must name
+# exactly these 4 for the check to pass without reading the real $HOME.
+SETTINGS_ONLY_HOOKS = [
+    "prompt-dispatcher.py",
+    "session-start-dispatcher.py",
+    "pretooluse-dispatcher.py",
+    "posttooluse-dispatcher.py",
+]
+
+
+def seed_settings_json(claude_dir: Path, hook_names: list[str] = SETTINGS_ONLY_HOOKS) -> None:
+    """Write a minimal settings.json into claude_dir, registering hook_names as
+    hook commands. Mirrors the shape of the real ~/.claude/settings.json's
+    "hooks" block (event name -> [{"hooks": [{"type": "command", "command": ...}]}])
+    closely enough for deploy.sh's plain-text grep-based check to find each name."""
+    hooks_block = {
+        name: [{"hooks": [{"type": "command", "command": f"python3 ~/.claude/hooks/{name}"}]}]
+        for name in hook_names
+    }
+    settings_path = claude_dir / "settings.json"
+    settings_path.write_text(json.dumps({"hooks": hooks_block}, indent=2))
 
 
 def run_deploy(claude_dir: Path, *, dry_run: bool = False) -> subprocess.CompletedProcess:
@@ -300,10 +329,26 @@ class TestDeployRegistrationCheck:
     def test_all_hooks_registered_no_warnings(self, tmp_path: Path):
         claude_dir = tmp_path / "claude_dir"
         claude_dir.mkdir()
+        seed_settings_json(claude_dir)
         result = run_deploy(claude_dir)
         assert result.returncode == 0, result.stderr
         assert "All hooks registered." in result.stdout, result.stdout
         assert "deployed but not registered" not in result.stdout, result.stdout
+
+    def test_unregistered_hook_warns_and_withholds_success_line(self, tmp_path: Path):
+        """Omitting one settings-only hook from settings.json must surface its
+        specific WARNING and must NOT print 'All hooks registered.' — proves the
+        check is a real verification, not an unconditional success message."""
+        claude_dir = tmp_path / "claude_dir"
+        claude_dir.mkdir()
+        incomplete = [h for h in SETTINGS_ONLY_HOOKS if h != "posttooluse-dispatcher.py"]
+        seed_settings_json(claude_dir, incomplete)
+        result = run_deploy(claude_dir)
+        assert result.returncode == 0, result.stderr
+        assert (
+            "posttooluse-dispatcher.py deployed but not registered" in result.stdout
+        ), result.stdout
+        assert "All hooks registered." not in result.stdout, result.stdout
 
 
 class TestPaulReviewGateSymlinks:
@@ -340,6 +385,7 @@ class TestPaulReviewGateSymlinks:
     def test_no_unregistered_warning_for_paul_hooks(self, tmp_path: Path):
         claude_dir = tmp_path / "claude_dir"
         claude_dir.mkdir()
+        seed_settings_json(claude_dir)
         result = run_deploy(claude_dir)
         assert result.returncode == 0, result.stderr
         assert "paul-apply-review-guard.py deployed but not registered" not in result.stdout
