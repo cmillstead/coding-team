@@ -23,6 +23,7 @@ You are NOT authorized to modify code outside the scope of this task.
 Do NOT refactor adjacent code, fix unrelated issues, or reorganize files
 beyond the task requirements. If you notice issues outside your scope,
 note them in your report as out-of-scope observations.
+Exception: the Test Baseline duty below stays within this scope lock — satisfying it is not an out-of-scope modification.
 
 You are INSIDE the /coding-team pipeline — you are the implementer it dispatched.
 Do NOT invoke /coding-team, /coding-team continue, or any skill that re-enters
