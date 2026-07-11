@@ -16,29 +16,56 @@ DEPLOY_SH = REPO_ROOT / "scripts" / "deploy.sh"
 
 # deploy.sh's registration check greps 5 sites for each deployed hook's basename:
 # $CLAUDE_DIR/settings.json plus the 4 dispatcher sources (prompt-, session-start-,
-# pretooluse-, posttooluse-dispatcher.py). Every hook EXCEPT these 4 dispatchers is
-# referenced by basename inside one of the dispatchers' own source (each dispatcher
-# hardcodes the paths of the hooks it routes to). The 4 dispatchers themselves are
-# registered only in the real ~/.claude/settings.json, which invokes them directly
-# as the top-level hook commands — so a hermetic settings.json fixture must name
-# exactly these 4 for the check to pass without reading the real $HOME.
-SETTINGS_ONLY_HOOKS = [
-    "prompt-dispatcher.py",
-    "session-start-dispatcher.py",
-    "pretooluse-dispatcher.py",
-    "posttooluse-dispatcher.py",
-]
+# pretooluse-, posttooluse-dispatcher.py). Each dispatcher hardcodes the paths of
+# the hooks it routes to, so every non-dispatcher hook's basename is found inside
+# one of the 4 dispatcher sources. The dispatchers themselves are the real
+# settings.json's top-level entry points, registered one per CC event — this
+# fixture models that registration.
+#
+# CAVEAT (do not remove without fixing the underlying verifier — see follow-ups
+# below): the check is a whole-file `grep -q`, not a structural settings.json
+# parse. prompt-dispatcher.py currently passes the check NOT because anything
+# genuinely registers it, but because its basename happens to appear inside
+# session-start-dispatcher.py's docstring (a coincidental text match, not a
+# real routing reference). It is still listed below and given a real
+# UserPromptSubmit entry, for fidelity with the real settings.json — the
+# fixture should reflect genuine registration even where the current verifier
+# doesn't strictly require it.
+#
+# Known follow-ups (pre-existing deploy.sh verifier weaknesses; out of scope
+# for the CI-hermeticity fix carried in this test file):
+#   1. `grep -q "$hookname" <file>` is a whole-file substring match, not a
+#      structural parse — a basename appearing in a comment/docstring counts
+#      as "registered" (see the prompt-dispatcher.py caveat above). A correct
+#      fix needs structural settings.json parsing plus an explicit
+#      dispatcher-routing manifest.
+#   2. When $CLAUDE_DIR/settings.json is absent, the block prints
+#      "Verifying hook registration..." and then nothing else — neither
+#      "All hooks registered." nor a warning. A missing settings.json is
+#      silently indistinguishable from a fully-verified deploy.
+DISPATCHER_EVENTS: dict[str, str] = {
+    "prompt-dispatcher.py": "UserPromptSubmit",
+    "session-start-dispatcher.py": "SessionStart",
+    "pretooluse-dispatcher.py": "PreToolUse",
+    "posttooluse-dispatcher.py": "PostToolUse",
+}
+SETTINGS_ONLY_HOOKS = list(DISPATCHER_EVENTS)
 
 
 def seed_settings_json(claude_dir: Path, hook_names: list[str] = SETTINGS_ONLY_HOOKS) -> None:
-    """Write a minimal settings.json into claude_dir, registering hook_names as
-    hook commands. Mirrors the shape of the real ~/.claude/settings.json's
-    "hooks" block (event name -> [{"hooks": [{"type": "command", "command": ...}]}])
-    closely enough for deploy.sh's plain-text grep-based check to find each name."""
-    hooks_block = {
-        name: [{"hooks": [{"type": "command", "command": f"python3 ~/.claude/hooks/{name}"}]}]
-        for name in hook_names
-    }
+    """Write a genuinely-shaped settings.json into claude_dir: a top-level
+    "hooks" object keyed by real CC event names, each an array of
+    {"matcher": ..., "hooks": [{"type": "command", "command": ...}]} entries —
+    matching the structure of the real ~/.claude/settings.json. Command paths
+    point at the DEPLOYED dispatcher under claude_dir/hooks/, where deploy.sh's
+    symlink loop actually places it for this test's tmp CLAUDE_DIR."""
+    hooks_block: dict[str, list[dict]] = {}
+    for name in hook_names:
+        event = DISPATCHER_EVENTS[name]
+        command = f"python3 {claude_dir / 'hooks' / name}"
+        hooks_block.setdefault(event, []).append(
+            {"matcher": "", "hooks": [{"type": "command", "command": command}]}
+        )
     settings_path = claude_dir / "settings.json"
     settings_path.write_text(json.dumps({"hooks": hooks_block}, indent=2))
 
