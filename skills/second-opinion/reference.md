@@ -68,6 +68,34 @@ Please re-review. End with VERDICT: APPROVED or VERDICT: REVISE" \
 
 Max 5 rounds. If `resume` fails (session expired), fall back to a fresh `codex exec` with prior context in the prompt.
 
+### Record PAUL plan-review PASS
+
+**Trigger:** the Mode 1 review target is a PAUL plan file — path ends in `-PLAN.md` (PAUL plans live under `.paul/phases/<phase>/`) — AND the MOST RECENT Codex verdict is `PASS` or `APPROVED`. Skip entirely for diff reviews and for non-PAUL plans (no artifact needed in either case).
+
+**Precondition (freshness — MANDATORY):** the plan bytes on disk at record time MUST be byte-identical to the bytes Codex actually reviewed when it returned that PASS/APPROVED verdict — i.e. NO edit has been made to the plan since that approving review. If you applied ANY change to the plan after the approving review — including fixing "minor findings" Codex listed alongside an APPROVED verdict — you MUST re-dispatch Codex on the edited plan (see "Iterative revision (plan review only)" above) and obtain a clean PASS/APPROVED on the FINAL bytes BEFORE running the recorder. Never record a hash of content Codex did not review: the recorded `plan_sha256` must equal the exact bytes Codex approved, or the artifact silently re-attests unreviewed content and defeats the hash-freshness guarantee the `/paul:apply` gate relies on.
+
+**Action:** run the recorder exactly once, on the final converged PASS whose bytes satisfy the precondition above — never on an intermediate REVISE round, and never on a plan edited post-approval without a fresh re-review:
+
+```bash
+python3 ~/.claude/skills/coding-team/hooks/_lib/paul_review_record.py \
+  --plan "<ABS_PLAN_PATH>" \
+  --reviewer codex \
+  --rounds <N> \
+  --session "<id>" \
+  --detail "<one line>"
+```
+
+- `<ABS_PLAN_PATH>` — the absolute path of the plan file reviewed.
+- `<N>` — the number of Codex rounds this review actually took (1 if it passed on the first dispatch).
+- `<id>` — the current session/review id (e.g. `${REVIEW_ID}`).
+- `--detail` — a one-line summary of the verdict.
+
+The recorder computes the plan hash itself and writes `<plan-basename>.review.json` next to the plan. Exit 0 = success. Never hand-write the hash or the artifact — always invoke the script.
+
+**Why:** `/paul:apply` (via `hooks/paul-apply-review-guard.py`) requires this sibling `<plan>-PLAN.review.json` PASS artifact before it will apply the plan. Without this step the artifact never gets written and `/paul:apply` blocks the plan — this is fail-closed, not a false pass: skipping the step means the gate re-blocks on the next apply attempt, it never lets a bad plan through. Run it so `/paul:apply` can proceed.
+
+This is distinct from the coding-team `docs/plans/*.md` Completion Checklist step described in Rules below — that gate is for coding-team pipeline plans, not PAUL plans. A single review may need to satisfy neither, one, or both, depending on what kind of plan/diff was reviewed.
+
 ### Iterative revision (diff / code-fix review)
 
 When a diff/code review (`codex review --base main`, `codex review --uncommitted`, or a `codex exec` diff review) returns findings you intend to fix and re-review:
