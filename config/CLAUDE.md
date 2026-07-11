@@ -203,7 +203,7 @@ coding-team agents receive `~/.claude/code-style.md` when working on Python, Typ
 
 ## Command Hygiene
 
-Applies to you AND coding-team agents. Issue shell commands as **one command per Bash call** — the Bash tool already returns exit code and output, so never wrap verification in `set +e` / `$?` / `${PIPESTATUS}` / `| tail` / `/tmp` capture redirects. Compound commands (chaining, redirects, brace/`$?` expansions) defeat the per-command permission allowlist and prompt on every run. Full rule: `~/.claude/command-hygiene.md`.
+Applies to you AND coding-team agents. Issue shell commands as **one command per Bash call** — still RECOMMENDED for cleaner review and a per-command exit code and output. The compound BLOCK is operator-toggleable via `GIT_SAFETY_ALLOW_COMPOUND` and is currently disabled for **non-git** compounds on this machine (they fall through to CC's normal permission handling instead of being blocked); a command referencing a `git` token is not exempted and follows the hook's normal routing. Full rule: `~/.claude/command-hygiene.md`.
 
 ## Golden Principles
 

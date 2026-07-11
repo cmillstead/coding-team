@@ -64,12 +64,17 @@ def pytest_configure(config):
 
 # Flags that, when set in the ambient process env, leak into every subprocess
 # spawned via _run()'s {**os.environ, **env} merge and silently bypass write-guard
-# "should block" tests. Popped at session start so the scrubbed os.environ is the
-# BASE every test inherits. Tests that explicitly pass env={"FLAG": "1"} still WIN
-# because the _run() merge layers their explicit values OVER the scrubbed base.
+# / git-safety-guard "should block" tests. Popped at session start so the scrubbed
+# os.environ is the BASE every test inherits. Tests that explicitly pass
+# env={"FLAG": "1"} still WIN because the _run() merge layers their explicit
+# values OVER the scrubbed base. GIT_SAFETY_ALLOW_COMPOUND ships enabled ("1") in
+# settings.json, so without scrubbing it a local run would inherit it and the
+# non-git compound-block tests (which assert the deny path fires) would silently
+# fall through instead.
 _WRITE_GUARD_AMBIENT_FLAGS = (
     "WRITE_GUARD_ALLOW_INSTRUCTION_EDIT",
     "WRITE_GUARD_ALLOW_MIGRATION_EDIT",
+    "GIT_SAFETY_ALLOW_COMPOUND",
 )
 
 
