@@ -24,6 +24,8 @@ You are INSIDE the /coding-team pipeline. Do NOT invoke /coding-team, /prompt-cr
 
 Work from: [INSERT WORKING DIRECTORY]
 
+Before reviewing, Read `~/.claude/skills/coding-team/skills/second-opinion/codex-learnings-review-digest.md` — the check-face of recurring Codex-caught defects; cite any that apply.
+
 ## Feature Context
 
 [INSERT FEATURE DESCRIPTION — what the user asked for, the plan summary, and the list of tasks that were executed]
@@ -80,6 +82,7 @@ Are the important behaviors tested?
 - For each edge case flagged above: is there a test that covers it?
 - Do NOT flag missing tests for trivial getters/setters or framework boilerplate
 - Use `mcp__codesight__query` with operation `search-references` to check if new symbols appear in test files
+- Flag any mock/patch/stub not justified by the physical-impossibility exemption or a `# mock-ok: <reason>` line — see `~/.claude/rules/test-files.md` (do not restate the criteria).
 
 ## Code Intelligence
 

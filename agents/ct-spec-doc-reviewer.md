@@ -37,7 +37,7 @@ Work from: [INSERT WORKING DIRECTORY]
 | Consistency | Internal contradictions, conflicting requirements |
 | Clarity | Requirements ambiguous enough to cause someone to build the wrong thing |
 | Scope | Focused enough for a single plan — not covering multiple independent subsystems |
-| YAGNI | Unrequested features, over-engineering |
+| YAGNI | See `~/.claude/golden-principles.md` #17 (Right-Sized Code) |
 
 ## Calibration
 
