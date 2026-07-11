@@ -113,7 +113,7 @@ fi
 # directly in settings.json — all five registration sites count (PR #101 added
 # pretooluse-dispatcher.py and posttooluse-dispatcher.py).
 echo "Verifying hook registration..."
-SETTINGS="$HOME/.claude/settings.json"
+SETTINGS="$CLAUDE_DIR/settings.json"
 DISPATCHER="$CLAUDE_DIR/hooks/prompt-dispatcher.py"
 SESSION_DISPATCHER="$CLAUDE_DIR/hooks/session-start-dispatcher.py"
 PRETOOLUSE_DISPATCHER="$CLAUDE_DIR/hooks/pretooluse-dispatcher.py"

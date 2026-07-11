@@ -5,6 +5,7 @@ copying files, that the deployment is idempotent, that _lib/ is linked as a
 directory, and that no .gitignore is written.
 """
 
+import json
 import os
 import subprocess
 from pathlib import Path
@@ -12,6 +13,61 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent  # tests/ -> hooks/ -> repo root
 DEPLOY_SH = REPO_ROOT / "scripts" / "deploy.sh"
+
+# deploy.sh's registration check greps 5 sites for each deployed hook's basename:
+# $CLAUDE_DIR/settings.json plus the 4 dispatcher sources (prompt-, session-start-,
+# pretooluse-, posttooluse-dispatcher.py). Each dispatcher hardcodes the paths of
+# the hooks it routes to, so every non-dispatcher hook's basename is found inside
+# one of the 4 dispatcher sources. The dispatchers themselves are the real
+# settings.json's top-level entry points, registered one per CC event — this
+# fixture models that registration.
+#
+# CAVEAT (do not remove without fixing the underlying verifier — see follow-ups
+# below): the check is a whole-file `grep -q`, not a structural settings.json
+# parse. prompt-dispatcher.py currently passes the check NOT because anything
+# genuinely registers it, but because its basename happens to appear inside
+# session-start-dispatcher.py's docstring (a coincidental text match, not a
+# real routing reference). It is still listed below and given a real
+# UserPromptSubmit entry, for fidelity with the real settings.json — the
+# fixture should reflect genuine registration even where the current verifier
+# doesn't strictly require it.
+#
+# Known follow-ups (pre-existing deploy.sh verifier weaknesses; out of scope
+# for the CI-hermeticity fix carried in this test file):
+#   1. `grep -q "$hookname" <file>` is a whole-file substring match, not a
+#      structural parse — a basename appearing in a comment/docstring counts
+#      as "registered" (see the prompt-dispatcher.py caveat above). A correct
+#      fix needs structural settings.json parsing plus an explicit
+#      dispatcher-routing manifest.
+#   2. When $CLAUDE_DIR/settings.json is absent, the block prints
+#      "Verifying hook registration..." and then nothing else — neither
+#      "All hooks registered." nor a warning. A missing settings.json is
+#      silently indistinguishable from a fully-verified deploy.
+DISPATCHER_EVENTS: dict[str, str] = {
+    "prompt-dispatcher.py": "UserPromptSubmit",
+    "session-start-dispatcher.py": "SessionStart",
+    "pretooluse-dispatcher.py": "PreToolUse",
+    "posttooluse-dispatcher.py": "PostToolUse",
+}
+SETTINGS_ONLY_HOOKS = list(DISPATCHER_EVENTS)
+
+
+def seed_settings_json(claude_dir: Path, hook_names: list[str] = SETTINGS_ONLY_HOOKS) -> None:
+    """Write a genuinely-shaped settings.json into claude_dir: a top-level
+    "hooks" object keyed by real CC event names, each an array of
+    {"matcher": ..., "hooks": [{"type": "command", "command": ...}]} entries —
+    matching the structure of the real ~/.claude/settings.json. Command paths
+    point at the DEPLOYED dispatcher under claude_dir/hooks/, where deploy.sh's
+    symlink loop actually places it for this test's tmp CLAUDE_DIR."""
+    hooks_block: dict[str, list[dict]] = {}
+    for name in hook_names:
+        event = DISPATCHER_EVENTS[name]
+        command = f"python3 {claude_dir / 'hooks' / name}"
+        hooks_block.setdefault(event, []).append(
+            {"matcher": "", "hooks": [{"type": "command", "command": command}]}
+        )
+    settings_path = claude_dir / "settings.json"
+    settings_path.write_text(json.dumps({"hooks": hooks_block}, indent=2))
 
 
 def run_deploy(claude_dir: Path, *, dry_run: bool = False) -> subprocess.CompletedProcess:
@@ -291,3 +347,74 @@ class TestDeploySymlinks:
         assert "dry-run" in result.stdout.lower(), (
             "dry-run stdout must indicate no-op mode"
         )
+
+
+class TestDeployRegistrationCheck:
+    """deploy.sh's registration check greps all 5 sites, so every deployed hook
+    is recognized: 'All hooks registered.' prints and no hook warns."""
+
+    def test_all_hooks_registered_no_warnings(self, tmp_path: Path):
+        claude_dir = tmp_path / "claude_dir"
+        claude_dir.mkdir()
+        seed_settings_json(claude_dir)
+        result = run_deploy(claude_dir)
+        assert result.returncode == 0, result.stderr
+        assert "All hooks registered." in result.stdout, result.stdout
+        assert "deployed but not registered" not in result.stdout, result.stdout
+
+    def test_unregistered_hook_warns_and_withholds_success_line(self, tmp_path: Path):
+        """Omitting one settings-only hook from settings.json must surface its
+        specific WARNING and must NOT print 'All hooks registered.' — proves the
+        check is a real verification, not an unconditional success message."""
+        claude_dir = tmp_path / "claude_dir"
+        claude_dir.mkdir()
+        incomplete = [h for h in SETTINGS_ONLY_HOOKS if h != "posttooluse-dispatcher.py"]
+        seed_settings_json(claude_dir, incomplete)
+        result = run_deploy(claude_dir)
+        assert result.returncode == 0, result.stderr
+        assert (
+            "posttooluse-dispatcher.py deployed but not registered" in result.stdout
+        ), result.stdout
+        assert "All hooks registered." not in result.stdout, result.stdout
+
+
+class TestPaulReviewGateSymlinks:
+    def test_review_guard_symlinked(self, tmp_path: Path):
+        claude_dir = tmp_path / "claude_dir"
+        claude_dir.mkdir()
+        result = run_deploy(claude_dir)
+        assert result.returncode == 0, result.stderr
+        link = claude_dir / "hooks" / "paul-apply-review-guard.py"
+        assert os.path.islink(link), f"{link} must be a symlink"
+        expected = REPO_ROOT / "hooks" / "paul-apply-review-guard.py"
+        assert link.resolve() == expected.resolve()
+
+    def test_agent_guard_symlinked(self, tmp_path: Path):
+        claude_dir = tmp_path / "claude_dir"
+        claude_dir.mkdir()
+        result = run_deploy(claude_dir)
+        assert result.returncode == 0, result.stderr
+        link = claude_dir / "hooks" / "paul-apply-agent-guard.py"
+        assert os.path.islink(link), f"{link} must be a symlink"
+        expected = REPO_ROOT / "hooks" / "paul-apply-agent-guard.py"
+        assert link.resolve() == expected.resolve()
+
+    def test_paul_review_lib_reachable(self, tmp_path: Path):
+        claude_dir = tmp_path / "claude_dir"
+        claude_dir.mkdir()
+        result = run_deploy(claude_dir)
+        assert result.returncode == 0, result.stderr
+        lib = claude_dir / "hooks" / "_lib"
+        assert (lib / "paul_review.py").exists()
+        assert (lib / "paul_review_record.py").exists()
+        assert (lib / "paul_review_check.py").exists()
+
+    def test_no_unregistered_warning_for_paul_hooks(self, tmp_path: Path):
+        claude_dir = tmp_path / "claude_dir"
+        claude_dir.mkdir()
+        seed_settings_json(claude_dir)
+        result = run_deploy(claude_dir)
+        assert result.returncode == 0, result.stderr
+        assert "paul-apply-review-guard.py deployed but not registered" not in result.stdout
+        assert "paul-apply-agent-guard.py deployed but not registered" not in result.stdout
+        assert "All hooks registered." in result.stdout, result.stdout

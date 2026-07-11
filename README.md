@@ -321,13 +321,13 @@ This deploys hooks to `~/.claude/hooks/`, agents to `~/.claude/agents/`, rules t
 
 ### Hook execution path
 
-`~/.claude/settings.json` does not register the 9 individual hook scripts directly. It registers **4 dispatchers**, each consolidating the per-event hook set into a single matcher="" entry that routes internally by tool name (or, for SessionStart, by subprocess):
+`~/.claude/settings.json` does not register the 11 individual hook scripts directly. It registers **4 dispatchers**, each consolidating the per-event hook set into a single matcher="" entry that routes internally by tool name (or, for SessionStart, by subprocess):
 
 | Dispatcher | Event | Routes to |
 |---|---|---|
-| `pretooluse-dispatcher.py` | PreToolUse | `write-guard.py` (blocking — instruction-file edit guard), `git-safety-guard.py` (blocking — force-push/main-branch guard), `codesight-hooks.py` (prompt injection) |
+| `pretooluse-dispatcher.py` | PreToolUse | `paul-apply-agent-guard.py` (blocking — PAUL plan-review gate, Agent branch, runs first), `write-guard.py` (blocking — instruction-file edit guard), `git-safety-guard.py` (blocking — force-push/main-branch guard), `codesight-hooks.py` (prompt injection) |
 | `posttooluse-dispatcher.py` | PostToolUse | `loop-detection.py`, `lint-warning-enforcer.py`, `coding-team-lifecycle.py`, `codesight-hooks.py`, `builder-self-check.py` |
-| `prompt-dispatcher.py` | UserPromptSubmit | the prompt-time hook set, run in-process via `runpy` (not subprocessed) |
+| `prompt-dispatcher.py` | UserPromptSubmit | `paul-apply-review-guard.py` (PAUL plan-review gate, `/paul:apply` prompts, runs first), then the prompt-time hook set, run in-process via `runpy` (not subprocessed) |
 | `session-start-dispatcher.py` | SessionStart | `hook-health-check.py`, `deploy-drift-check.py`, `ci-orphan-detector.sh`, and other session-start checks, each run as its own subprocess in its own interpreter |
 
 Blocking hooks (`write-guard.py`, `git-safety-guard.py`) have their stdout/exit code forwarded verbatim by the dispatcher — no rewriting or re-serialization, so the block decision reaches Claude Code byte-identical to running the handler directly.
@@ -439,9 +439,9 @@ cookbook/                         # historical / narrative material (2 files, no
   case-studies.md                 #   worked examples and retrospective case studies
   context-inheritance-matrix.md   #   point-in-time verification artifact — historical content, not maintained
 hooks/                            # Claude Code hooks, deployed to ~/.claude/hooks/
-  pretooluse-dispatcher.py        #   PreToolUse dispatcher — routes to write-guard, git-safety-guard, codesight-hooks
+  pretooluse-dispatcher.py        #   PreToolUse dispatcher — routes to paul-apply-agent-guard, write-guard, git-safety-guard, codesight-hooks
   posttooluse-dispatcher.py       #   PostToolUse dispatcher — routes to loop-detection, lint-warning-enforcer, coding-team-lifecycle, codesight-hooks, builder-self-check
-  prompt-dispatcher.py            #   UserPromptSubmit dispatcher — runs the prompt-time hook set in-process via runpy
+  prompt-dispatcher.py            #   UserPromptSubmit dispatcher — routes to paul-apply-review-guard, then runs the prompt-time hook set in-process via runpy
   session-start-dispatcher.py     #   SessionStart dispatcher — runs hook-health-check, deploy-drift-check, ci-orphan-detector.sh, and related checks as subprocesses
   builder-self-check.py           #   validates implementer agent output quality
   codesight-hooks.py              #   codesight indexing integration
@@ -451,6 +451,8 @@ hooks/                            # Claude Code hooks, deployed to ~/.claude/hoo
   hook-health-check.py            #   SessionStart — verifies all Python hooks are healthy
   lint-warning-enforcer.py        #   treats lint warnings as errors
   loop-detection.py               #   detects and breaks agent retry loops
+  paul-apply-agent-guard.py       #   Path B fence — blocks an Agent dispatch that executes a PAUL plan lacking a fresh Codex PASS
+  paul-apply-review-guard.py      #   Path A fence — blocks /paul:apply when no fresh Codex PASS exists
   write-guard.py                  #   blocks orchestrator edits to instruction files during Phase 5
   ci-orphan-detector.sh           #   SessionStart — detects and flags orphaned CI runs
   _lib/                           #   shared hook utilities
@@ -464,6 +466,9 @@ hooks/                            # Claude Code hooks, deployed to ~/.claude/hoo
     compound_allow.py             #     compound-command allowlist evaluation
     c5_detect.py                  #     C5-tier risk signal detection
     active_plan.py                #     active plan file resolution
+    paul_review.py                #     PAUL plan-review PASS validation (shared by both fences)
+    paul_review_check.py          #     PAUL plan-review status check helper
+    paul_review_record.py         #     PAUL plan-review PASS artifact recorder
   tests/                          #   hook test suite (pytest)
 scripts/                          # deployment and infrastructure scripts
   deploy.sh                       #   sync hooks, agents, rules, config from repo to ~/.claude/

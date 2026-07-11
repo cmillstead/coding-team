@@ -25,7 +25,7 @@ Blocking contract (CRITICAL):
   the handler directly.
 
 Routing:
-  - Agent     → codesight-hooks.py (prompt injection via updatedInput)
+  - Agent     → paul-apply-agent-guard.py (Path B fence, blocking, first), then codesight-hooks.py (prompt injection)
   - Edit|Write → write-guard.py (blocking guard — verbatim passthrough)
   - Bash       → git-safety-guard.py (blocking guard — verbatim passthrough), then
                   rtk hook claude (only if git-safety-guard produced no output)
@@ -55,6 +55,7 @@ HOOKS = HOME / ".claude" / "hooks"
 WRITE_GUARD = str(HOOKS / "write-guard.py")
 GIT_SAFETY_GUARD = str(HOOKS / "git-safety-guard.py")
 CODESIGHT_HOOKS = str(HOOKS / "codesight-hooks.py")
+PAUL_AGENT_GUARD = str(HOOKS / "paul-apply-agent-guard.py")
 
 
 def _skip_names() -> set[str]:
@@ -154,8 +155,17 @@ def main() -> None:
     tool_name = event.get("tool_name", "")
 
     if tool_name == "Agent":
+        # Path B fence (blocking): runs FIRST. If it blocks (stdout JSON or a
+        # non-zero exit), pass through and STOP — codesight injection does not
+        # run on a blocked dispatch. A missing or silent guard falls through
+        # (_run_handler returns ("", "", 0) on FileNotFoundError / no output).
+        if not _is_skipped(PAUL_AGENT_GUARD, skip):
+            stdout, stderr, rc = _run_handler([sys.executable, PAUL_AGENT_GUARD], payload)
+            if stdout.strip() or rc != 0:
+                _passthrough(stdout, stderr, rc, Path(PAUL_AGENT_GUARD).name)
+
         # Codesight prompt injection: injects CODESIGHT_INSTRUCTION into the
-        # Agent prompt via the updatedInput shape.
+        # Agent prompt via the updatedInput shape (runs only if guard was silent).
         if not _is_skipped(CODESIGHT_HOOKS, skip):
             stdout, stderr, rc = _run_handler([sys.executable, CODESIGHT_HOOKS], payload)
             if stdout.strip() or rc != 0:
