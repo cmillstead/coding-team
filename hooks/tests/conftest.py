@@ -69,8 +69,9 @@ def pytest_configure(config):
 # env={"FLAG": "1"} still WIN because the _run() merge layers their explicit
 # values OVER the scrubbed base. GIT_SAFETY_ALLOW_COMPOUND ships enabled ("1") in
 # settings.json, so without scrubbing it a local run would inherit it and the
-# non-git compound-block tests (which assert the deny path fires) would silently
-# fall through instead.
+# compound-block tests (which assert the deny path fires) would silently fall
+# through instead — the override disables the block unconditionally, not just
+# for non-git compounds.
 _WRITE_GUARD_AMBIENT_FLAGS = (
     "WRITE_GUARD_ALLOW_INSTRUCTION_EDIT",
     "WRITE_GUARD_ALLOW_MIGRATION_EDIT",
