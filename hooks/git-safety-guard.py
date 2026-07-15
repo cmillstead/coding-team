@@ -744,12 +744,13 @@ def _has_gated_git_op(command: str) -> bool:
 
 # Operator toggle for compound-command hygiene. When set to a truthy value
 # (1/true/yes/on), the multi-statement compound BLOCK in
-# _deny_compound_unless_blessed is disabled FOR NON-GIT COMPOUNDS ONLY, which then
-# fall through to CC's normal permission handling (allowlist prompt or pass) — NOT
-# a silent auto-allow. A command referencing a git token does NOT take this
-# override; it follows the normal routing below (recognized git ops defer to the
-# earlier main() guards; parser-miss global-option forms like `git -C /repo add
-# .env` that those guards' parser misses are still caught by the compound block).
+# _deny_compound_unless_blessed is disabled UNCONDITIONALLY: every multi-statement
+# compound falls through to CC's normal permission handling (allowlist prompt or
+# pass) — NOT a silent auto-allow, and NOT re-blocked just because the command
+# contains a literal "git" token somewhere (including inside a quoted free-text
+# argument, e.g. a `codex exec "...review the git plan..."` prompt). Recognized
+# gated git ops (add/commit/push/merge) remain owned by the earlier
+# secret/branch/verify guards in main(), which this toggle does not affect.
 # Mirrors write-guard.py's INSTRUCTION_EDIT_OVERRIDE_ENV idiom.
 COMPOUND_ALLOW_OVERRIDE_ENV = "GIT_SAFETY_ALLOW_COMPOUND"
 
@@ -761,24 +762,6 @@ def _compound_allow_overridden() -> bool:
     )
 
 
-def _mentions_git(command: str) -> bool:
-    """True if the command references a literal git token (conservative).
-
-    A git token stops the override from firing, so the command follows the normal
-    routing (recognized git ops defer to the earlier guards; parser-miss forms like
-    `git -C /repo add .env` that those guards miss are caught by the compound
-    block). Matched case-insensitively; over-matches benign text like a `git-repos`
-    path — the safe direction.
-
-    KNOWN LIMITATION (accepted): matches `$GIT`/`${GIT}` (word boundary before
-    `git`) but NOT a differently-named var (`$MY_GIT`, `$CMD`) or a backslash form
-    (`g\it`) — deliberate obfuscation is the git-parser arms race the harness
-    declines to enter, is also missed by the primary guards, and is out of scope
-    on the operator's own machine.
-    """
-    return bool(re.search(r"\bgit\b", command, re.IGNORECASE))
-
-
 def _deny_compound_unless_blessed(command: str) -> bool:
     """Deny multi-statement compounds; let value-captures fall through to a prompt.
 
@@ -786,9 +769,12 @@ def _deny_compound_unless_blessed(command: str) -> bool:
     to fall through to CC's normal permission handling (allowlist prompt or pass).
 
     Routing:
-      - Override ``GIT_SAFETY_ALLOW_COMPOUND`` truthy AND command has no ``git``
-        token: returns False (non-git compound falls through to normal handling).
-        A command with a git token is NOT exempted — it follows the routing below.
+      - Override ``GIT_SAFETY_ALLOW_COMPOUND`` truthy: returns False immediately —
+        ALL multi-statement compounds fall through to CC's normal permission
+        handling, regardless of any ``git`` token appearing anywhere in the
+        command (including inside a quoted free-text argument). Gated git ops
+        (add/commit/push/merge) are still owned by the earlier secret/branch/
+        verify guards in main(), which this override does not affect.
       - Gated git ops (add/commit/push/merge): returns False immediately —
         owned by the secret/branch/verify checks earlier in main().
       - Single command (not multi-statement): returns False — CC's normal
@@ -802,12 +788,13 @@ def _deny_compound_unless_blessed(command: str) -> bool:
     never block-closed.
     """
     try:
-        if _compound_allow_overridden() and not _mentions_git(command):
-            # Operator disabled compound hygiene for NON-GIT compounds only. These
-            # fall through to CC's normal permission handling. A command referencing
-            # a git token skips this override and follows the normal routing below
-            # (recognized git ops defer to the earlier guards; parser-miss forms
-            # like `git -C /repo add .env && ...` are caught by the compound block).
+        if _compound_allow_overridden():
+            # Operator disabled compound hygiene entirely. ALL multi-statement
+            # compounds fall through to CC's normal permission handling regardless
+            # of any "git" token appearing anywhere in the command (including
+            # inside a quoted free-text argument). Gated git ops (add/commit/push/
+            # merge) are still owned by the earlier secret/branch/verify guards in
+            # main() — this override does not affect them.
             return False
         if _has_gated_git_op(command):
             return False  # git ops are owned by the secret/branch/verify checks

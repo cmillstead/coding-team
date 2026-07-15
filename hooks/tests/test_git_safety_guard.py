@@ -2003,13 +2003,14 @@ def _env_override(key: str, value: str | None):
 
 
 class TestCompoundAllowOverride:
-    """GIT_SAFETY_ALLOW_COMPOUND disables the compound block for NON-GIT compounds.
+    """GIT_SAFETY_ALLOW_COMPOUND disables the compound block UNCONDITIONALLY.
 
-    Non-git compounds fall through to CC's normal permission handling. A command
-    with a git token does NOT take the override — it follows the normal routing
-    (recognized git ops defer to the earlier guards; parser-miss forms stay
-    blocked by the compound deny). The git-op guards (secret/branch/verify/format)
-    that run earlier in main() are untouched.
+    Every multi-statement compound falls through to CC's normal permission
+    handling when the flag is set — including a command that references a literal
+    "git" token anywhere (e.g. inside a quoted free-text argument, or a plain
+    `git status ... | head`). The git-op guards (secret/branch/verify/format) that
+    run earlier in main() are untouched and still gate add/commit/push/merge
+    regardless of this flag.
     """
 
     def _fn(self):
@@ -2035,19 +2036,70 @@ class TestCompoundAllowOverride:
             f"got block: {result.stdout!r}"
         )
 
-    @pytest.mark.parametrize("cmd", [
-        "git -C /repo add .env && echo done",
-        "GIT -C /repo add .env && echo done",
-    ])
-    def test_parsermiss_git_compound_still_blocked_when_flag_set(self, cmd):
+    def test_flag_set_codex_exec_quoted_git_mention_falls_through(self):
+        """REGRESSION: a `codex exec` prompt with a quoted 'git' mention must not
+        re-block when the override is set. This is the exact shape that defeated
+        the operator's opt-out: a git token inside a quoted free-text argument."""
+        cmd = (
+            'codex exec -C /some/path "Review the plan; check git history; '
+            'Focus on: 1. correctness (handles X)"'
+        )
         buf = io.StringIO()
         with _env_override("GIT_SAFETY_ALLOW_COMPOUND", "1"):
             with contextlib.redirect_stdout(buf):
                 result = self._fn()(cmd)
-        assert result is True, f"git-referencing compound must stay blocked with flag set: {cmd!r}"
-        parsed = json.loads(buf.getvalue())
-        assert parsed["decision"] == "block"
-        assert "One command per Bash call" in parsed["reason"]
+        assert result is False, "quoted git mention must not re-trigger the deny path"
+        assert buf.getvalue().strip() == "", (
+            f"no block output expected when override active, got: {buf.getvalue()!r}"
+        )
+
+    def test_flag_set_git_status_pipe_falls_through(self):
+        """REGRESSION: `git status --short --branch | head -5` with the override set
+        must fall through — the exact command shape that failed for the operator
+        (a real git token plus a non-gated pipe)."""
+        cmd = "git status --short --branch | head -5"
+        buf = io.StringIO()
+        with _env_override("GIT_SAFETY_ALLOW_COMPOUND", "1"):
+            with contextlib.redirect_stdout(buf):
+                result = self._fn()(cmd)
+        assert result is False, (
+            "git-mentioning non-gated compound must fall through when override is set"
+        )
+        assert buf.getvalue().strip() == "", (
+            f"no block output expected when override active, got: {buf.getvalue()!r}"
+        )
+
+    def test_flag_set_git_status_pipe_falls_through_subprocess(self, run_hook, make_event):
+        """Integration: same as above, via the real subprocess hook invocation."""
+        with _env_override("GIT_SAFETY_ALLOW_COMPOUND", "1"):
+            result = run_hook(
+                "git-safety-guard.py",
+                make_event("Bash", command="git status --short --branch | head -5"),
+            )
+        assert result.returncode == 0, f"hook must exit 0, got {result.returncode}; stderr={result.stderr!r}"
+        assert result.stdout.strip() == "", f"fall-through must emit no output, got: {result.stdout!r}"
+        assert result.parsed is None, (
+            f"git-mentioning compound must fall through in subprocess with flag set, "
+            f"got block: {result.stdout!r}"
+        )
+
+    @pytest.mark.parametrize("cmd", [
+        "git -C /repo add .env && echo done",
+        "GIT -C /repo add .env && echo done",
+    ])
+    def test_parsermiss_git_compound_falls_through_when_flag_set(self, cmd):
+        """FLIPPED: the override is now unconditional — a git token (even one the
+        gated-op regex misses, e.g. `git -C /repo add`) no longer re-triggers the
+        deny path. Real protection for this parser-miss shape is a documented,
+        accepted gap (see COMPOUND_ALLOW_OVERRIDE_ENV docstring), not this hook."""
+        buf = io.StringIO()
+        with _env_override("GIT_SAFETY_ALLOW_COMPOUND", "1"):
+            with contextlib.redirect_stdout(buf):
+                result = self._fn()(cmd)
+        assert result is False, f"override is unconditional; must fall through: {cmd!r}"
+        assert buf.getvalue().strip() == "", (
+            f"no block output expected when override active, got: {buf.getvalue()!r}"
+        )
 
     @pytest.mark.parametrize("flag", ["1", None])
     def test_gated_git_op_compound_is_flag_independent(
