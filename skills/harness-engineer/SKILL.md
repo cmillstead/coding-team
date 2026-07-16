@@ -71,7 +71,7 @@ Adjudicate prior harness-edit predictions against accumulated evidence.
 **What it does:**
 - Runs `python3 ~/.claude/bin/harness decisions --pending` to list predictions awaiting a verdict
 - For each prediction, gathers evidence: `harness metrics` trends, `python3 ~/.claude/bin/harness verify --attribution` (plus `--phi`/`--overview` as relevant) to ground the verdict in failure-attribution and loop-risk data rather than metrics trends alone, the git/file diff of the edited component, and direct observation of behavior since the edit
-- Adjudicates each against its `predicted_impact`, then records the verdict: run `mktemp /tmp/verify-note-XXXXXX.txt`, write the note to that literal path with the Write tool, then run `python3 ~/.claude/bin/harness decisions --verify "<id>" --status verified|refuted --note "$(cat <literal-path>)"` (id must match `^[A-Za-z0-9_-]+$`) with the literal path substituted
+- Adjudicates each against its `predicted_impact`, then records the verdict: run `mktemp /tmp/verify-note-XXXXXX`, write the note to that literal path with the Write tool, then run `python3 ~/.claude/bin/harness decisions --verify "<id>" --status verified|refuted --note "$(cat <literal-path>)"` (id must match `^[A-Za-z0-9_-]+$`) with the literal path substituted
 - If evidence is insufficient, leaves the prediction pending with a noted reason — never guesses a verdict
 
 **Documented limitation:** hard auto-verification against per-component failure data is a later collector step. Until then, verdicts use trends + diffs + direct observation, not automated failure-rate comparison.
@@ -80,7 +80,7 @@ Adjudicate prior harness-edit predictions against accumulated evidence.
 
 ## Decision Observability
 
-You are running a predict→verify loop, not guess-and-tweak. Every harness edit `/harness-engineer` proposes MUST emit a prediction row BEFORE the edit ships, capturing `{failure_evidence, root_cause, targeted_fix, predicted_impact, verify_by_session}` (plus `id`, `date`, `component`). Never inline free-text field values inside shell quotes — run `mktemp /tmp/decision-XXXXXX.json`, write the JSON to that literal path with the Write tool, then run `python3 ~/.claude/bin/harness decisions --log "$(cat <literal-path>)"` with the literal path substituted.
+You are running a predict→verify loop, not guess-and-tweak. Every harness edit `/harness-engineer` proposes MUST emit a prediction row BEFORE the edit ships, capturing `{failure_evidence, root_cause, targeted_fix, predicted_impact, verify_by_session}` (plus `id`, `date`, `component`). Never inline free-text field values inside shell quotes — run `mktemp /tmp/decision-XXXXXX`, write the JSON to that literal path with the Write tool, then run `python3 ~/.claude/bin/harness decisions --log "$(cat <literal-path>)"` with the literal path substituted.
 
 The prediction is the contract: it states what failure the edit fixes and how you will know it worked. A later `/harness-engineer verify` run adjudicates it. An edit with no prediction is unverifiable — exactly the guess-and-tweak this loop removes.
 
