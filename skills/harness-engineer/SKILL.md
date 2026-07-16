@@ -29,8 +29,8 @@ Full harness audit against the CIVC six-verb × surface grid and maturity model.
 **Division of labor:** harness-map collects and flags; harness-engineer judges and designs; coding-team implements.
 
 **What it does:**
-- Inventories all hooks, rules, settings, instruction files
-- Classifies each by verb (afford/inform/constrain/verify/correct/evolve)
+- Consumes the harness-map inventory (hooks, rules, settings, instruction files) rather than re-inventorying by hand
+- Classifies each by verb × surface (the CIVC six-verb × six-surface grid)
 - Checks feedback memories for promotion gaps (prompt fix → hook)
 - Assesses maturity level (0-4) and identifies the bridge to next level
 - Produces a prioritized findings report
