@@ -71,7 +71,7 @@ Adjudicate prior harness-edit predictions against accumulated evidence.
 **What it does:**
 - Runs `python3 ~/.claude/bin/harness decisions --pending` to list predictions awaiting a verdict
 - For each prediction, gathers evidence: `harness metrics` trends, `python3 ~/.claude/bin/harness verify --attribution` (plus `--phi`/`--overview` as relevant) to ground the verdict in failure-attribution and loop-risk data rather than metrics trends alone, the git/file diff of the edited component, and direct observation of behavior since the edit
-- Adjudicates each against its `predicted_impact`, then records the verdict: write the note to a file with the Write tool first, then run `python3 ~/.claude/bin/harness decisions --verify <id> --status verified|refuted --note "$(cat <file>)"`
+- Adjudicates each against its `predicted_impact`, then records the verdict: run `mktemp /tmp/verify-note-XXXXXX.txt`, write the note to that literal path with the Write tool, then run `python3 ~/.claude/bin/harness decisions --verify <id> --status verified|refuted --note "$(cat <literal-path>)"` with the literal path substituted
 - If evidence is insufficient, leaves the prediction pending with a noted reason — never guesses a verdict
 
 **Documented limitation:** hard auto-verification against per-component failure data is a later collector step. Until then, verdicts use trends + diffs + direct observation, not automated failure-rate comparison.
@@ -80,11 +80,11 @@ Adjudicate prior harness-edit predictions against accumulated evidence.
 
 ## Decision Observability
 
-You are running a predict→verify loop, not guess-and-tweak. Every harness edit `/harness-engineer` proposes MUST emit a prediction row BEFORE the edit ships, capturing `{failure_evidence, root_cause, targeted_fix, predicted_impact, verify_by_session}` (plus `id`, `date`, `component`). Never inline free-text field values inside shell quotes — write the JSON to a file with the Write tool first, then run `python3 ~/.claude/bin/harness decisions --log "$(cat <file>)"`.
+You are running a predict→verify loop, not guess-and-tweak. Every harness edit `/harness-engineer` proposes MUST emit a prediction row BEFORE the edit ships, capturing `{failure_evidence, root_cause, targeted_fix, predicted_impact, verify_by_session}` (plus `id`, `date`, `component`). Never inline free-text field values inside shell quotes — run `mktemp /tmp/decision-XXXXXX.json`, write the JSON to that literal path with the Write tool, then run `python3 ~/.claude/bin/harness decisions --log "$(cat <literal-path>)"` with the literal path substituted.
 
 The prediction is the contract: it states what failure the edit fixes and how you will know it worked. A later `/harness-engineer verify` run adjudicates it. An edit with no prediction is unverifiable — exactly the guess-and-tweak this loop removes.
 
-Named rationalization: "this change is small/obvious — no prediction needed." No harness edit ships without a prediction. A batch of trivial mechanical edits — each meeting `phases/task-weight.md`'s Trivial tier, max 5 edits per row — MAY share ONE prediction row enumerating every edit's file:line, but the ABSENCE of a prediction is never permitted. Small edits are the ones most often shipped on a hunch and never checked — that risk is why the invariant holds even under the batch escape.
+Named rationalization: "this change is small/obvious — no prediction needed." No harness edit ships without a prediction. A batch of mechanical edits — each ≤1 file, ≤20 lines, no behavior/logic change, max 5 edits per row — MAY share ONE prediction row enumerating every edit's file:line, but the ABSENCE of a prediction is never permitted and the shared row never changes the task's review tier below Medium. Small edits are the ones most often shipped on a hunch and never checked — that risk is why the invariant holds even under the batch escape.
 
 Never paste raw secrets, tokens, or credentials into any prediction field or `--note` — the decisions log is git-tracked and remotely backed up; reference the secret's location instead (e.g. "the token in settings.json env").
 

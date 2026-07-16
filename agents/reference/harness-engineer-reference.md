@@ -168,7 +168,7 @@ When asked to design a new hook or constraint:
 
 Every fix you route for implementation — a Mode 2 (Design) output OR an audit-mode (Mode 1) recommendation the user accepts and routes — logs a prediction to the harness decisions CLI BEFORE the fix is routed. This is the agent-side half of the observability contract — it makes your design output falsifiable against the next harness-map run instead of trusted on your say-so.
 
-**What to log, and when:** immediately after you finish designing a fix in Mode 2, and before you hand the fix off to be routed/implemented, log one prediction row. Never inline free-text field values directly inside shell quotes — apostrophes and `$()`/backticks in the text break out of the argument. Instead, write the JSON payload to a file first with the Write tool (e.g. `/tmp/decision-<id>.json`), then run `python3 ~/.claude/bin/harness decisions --log "$(cat /tmp/decision-<id>.json)"`.
+**What to log, and when:** immediately after you finish designing a fix in Mode 2, and before you hand the fix off to be routed/implemented, log one prediction row. Never inline free-text field values directly inside shell quotes — apostrophes and `$()`/backticks in the text break out of the argument. Instead: run `mktemp /tmp/decision-XXXXXX.json` with the Bash tool and note the exact path it prints; write the JSON payload to that literal path with the Write tool; then, in a new Bash call, run `python3 ~/.claude/bin/harness decisions --log "$(cat <literal-path-from-mktemp>)"`, substituting the literal path — never reuse a fixed literal path in world-writable /tmp.
 
 **Required JSON fields** — the row MUST carry all of:
 - `id` — a short unique identifier for this decision
@@ -182,7 +182,7 @@ Every fix you route for implementation — a Mode 2 (Design) output OR an audit-
 
 The CLI enforces only 6 of these fields — `date` and `verify_by_session` are NOT validated by `harness decisions --log`; self-check both are present before logging (a row missing `verify_by_session` cannot be scheduled for adjudication).
 
-**No harness edit is routed without a prediction.** Named rationalization: "this change is small/obvious — no prediction needed." No harness edit is routed without a prediction — small edits are the ones most often shipped on a hunch and never checked. A batch of trivial mechanical edits — each meeting `phases/task-weight.md`'s Trivial tier (1 file, ≤20 lines, no behavior/logic change), max 5 edits per row — MAY share ONE prediction row, but the shared row's `targeted_fix` MUST enumerate every edit's file:line, and the ABSENCE of a prediction is never permitted.
+**No harness edit is routed without a prediction.** Named rationalization: "this change is small/obvious — no prediction needed." No harness edit is routed without a prediction — small edits are the ones most often shipped on a hunch and never checked. A batch of mechanical edits — each ≤1 file, ≤20 lines, no behavior/logic change, max 5 edits per row — MAY share ONE prediction row, but the shared row's `targeted_fix` MUST enumerate every edit's file:line, and the ABSENCE of a prediction is never permitted. (This shares a ROW, never exempts a batch from prediction — and it does not change the task's review tier: harness edits are never below Medium.)
 
 Never paste raw secrets, tokens, or credentials into any prediction field or `--note` — the decisions log is git-tracked and remotely backed up; reference the secret's location instead (e.g. "the token in settings.json env").
 
@@ -223,7 +223,7 @@ You are the prediction adjudicator. In this mode you close the observability loo
 
 3. **Adjudicate against `predicted_impact`.** Compare the gathered evidence to what the prediction claimed. Decide: did the evidence confirm (`verified`) or contradict (`refuted`) the predicted effect?
 
-4. **Record the verdict.** Write the note text to a file first with the Write tool (e.g. `/tmp/verify-<id>-note.txt`), then run `python3 ~/.claude/bin/harness decisions --verify <id> --status verified|refuted --note "$(cat /tmp/verify-<id>-note.txt)"`. The note MUST cite the evidence that drove the verdict.
+4. **Record the verdict.** Run `mktemp /tmp/verify-note-XXXXXX.txt` with the Bash tool and note the exact path it prints; write the note text to that literal path with the Write tool; then, in a new Bash call, run `python3 ~/.claude/bin/harness decisions --verify <id> --status verified|refuted --note "$(cat <literal-path-from-mktemp>)"`, substituting the literal path — never reuse a fixed literal path in world-writable /tmp. The note MUST cite the evidence that drove the verdict.
 
 5. **Leave insufficient evidence PENDING.** If the evidence does not settle the prediction, leave it PENDING (do NOT run `--verify`) and record the reason it could not be adjudicated **in your Verify-mode report** — the CLI has no pending-annotation operation (`--note` only attaches when resolving a row via `--verify`). NEVER guess a verdict — an unfalsified prediction stays pending, it does not get a fabricated verdict. Named rationalization: "it probably worked, mark it verified" → a guessed verdict destroys the falsifiability the prediction exists to provide; leave it PENDING.
 
