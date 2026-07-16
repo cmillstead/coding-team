@@ -22,6 +22,12 @@ def pytest_addoption(parser):
         default=False,
         help="Run expensive LLM-as-judge agent quality tests (~$0.05 each)",
     )
+    parser.addoption(
+        "--run-llm-eval",
+        action="store_true",
+        default=False,
+        help="Run llm_eval skill-routing tests that shell out to the real claude CLI",
+    )
 
 
 def pytest_configure(config):
@@ -56,6 +62,45 @@ def pytest_configure(config):
         base = HOOKS_DIR.parent / ".pytest-tmp"
         base.mkdir(exist_ok=True)
         config.option.basetemp = str(base)
+
+
+# ---------------------------------------------------------------------------
+# Default-skip gate for expensive markers (llm_eval, llm_judge)
+# ---------------------------------------------------------------------------
+
+# Marker name -> the opt-in CLI flag (as registered in pytest_addoption above)
+# that unlocks it. Both markers are documented as "skipped by default" (see
+# pytest.ini for llm_eval, conftest's --run-llm-judge help text) but neither
+# marker had an actual collection-time skip mechanism wired up, so a bare
+# `pytest` collected AND RAN them, spawning the real `claude` CLI.
+_GATED_MARKERS = {
+    "llm_eval": "run_llm_eval",
+    "llm_judge": "run_llm_judge",
+}
+
+
+def pytest_collection_modifyitems(config, items):
+    """Skip llm_eval/llm_judge tests by default unless explicitly opted in.
+
+    A test is left ungated (allowed to run) if the caller passed the marker's
+    matching `--run-<marker>` flag, or explicitly requested the marker via
+    `-m <marker>` (e.g. `pytest -m llm_eval`), which is an unambiguous signal
+    the caller wants those tests to execute.
+    """
+    markexpr = config.option.markexpr or ""
+    for marker_name, flag_dest in _GATED_MARKERS.items():
+        opted_in = config.getoption(flag_dest, default=False) or marker_name in markexpr
+        if opted_in:
+            continue
+        skip_marker = pytest.mark.skip(
+            reason=(
+                f"{marker_name}: needs real claude CLI; pass --run-{marker_name.replace('_', '-')} "
+                f"or -m {marker_name} to run"
+            )
+        )
+        for item in items:
+            if item.get_closest_marker(marker_name) is not None:
+                item.add_marker(skip_marker)
 
 
 # ---------------------------------------------------------------------------
