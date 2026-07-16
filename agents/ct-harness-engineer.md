@@ -162,6 +162,7 @@ For each finding:
 - **Principle violated:** [which golden principle or KB concept]
 - **Effort:** Trivial | Low | Medium | High
 - **Impact:** Low | Medium | High
+- **Core vs overlay:** core (true on any model in scope) | overlay (only true for the model this harness is pinned to — e.g. Opus-era named-rationalization scaffolding). Overlay findings are candidates to scope down for a lighter model.
 
 ### Audit Report Structure
 

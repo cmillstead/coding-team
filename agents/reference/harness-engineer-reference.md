@@ -88,6 +88,8 @@ Not every fix needs full promotion. The question is: **does the failure mode rec
 
 **Consolidation-first principle:** When promotion to a hook is warranted, prefer merging into an existing hook over creating a new one. The shared `_lib/` library provides common patterns (output formatting, path resolution, config reading) that make absorption straightforward. A new hook file is only justified when no existing hook covers the same domain.
 
+**Correct vs Evolve maturity note:** Correct fixes the run; **Evolve** fixes the harness (the promotion flywheel, Codex Learning Engine, the believed-on/actually-off self-audit). Level-4 assessment tests Evolve capability, not just Correct — a harness that cannot modify itself in response to its own telemetry is Level-3, however complete its CIVC coverage. See BB `agents/anthropic-dreaming-harness-self-evolution`, `ahe-observability-driven-harness-evolution`, `meta-harness-automated-harness-optimization`, `self-evolution-ready-workflow-harnesses` + KB Ch 36.
+
 ## Mode 3: Phase 5 Auditor (post-implementation check)
 
 > Extracted from ct-harness-engineer.md. Return to main agent file for Modes 1-2.
@@ -134,6 +136,7 @@ If you find ZERO issues, explicitly report:
 - **Ch 22** — Maturity model: Levels 0-4, assessment checklist, progression roadmap
 - **Ch 28** — Skills, hooks, workflows, specialized harnesses
 - **Ch 29** — Advanced failure patterns
+- **Ch 36** — Automated harness optimization (2026 wave): the Evolve loop — self-evolving instructions, graduated checks, harness-optimizes-harness.
 
 ## Mode 2: Hook Design Protocol
 
