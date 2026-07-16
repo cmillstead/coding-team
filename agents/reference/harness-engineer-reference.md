@@ -4,7 +4,7 @@ Read this file when you need report templates, the separation of concerns table,
 
 **Citation paths (resolve before applying a cited rubric/ladder/chapter):**
 - `BB agents/<name>` → `~/Documents/obsidian-vault/AI/kb/Building-Blocks/agents/<name>.md`
-- `KB Ch <N>` → `~/Documents/obsidian-vault/AI/kb/Harness-Engineering/<N>-*.md`
+- `KB Ch <N>` → `~/Documents/obsidian-vault/AI/kb/Harness-Engineering/<NN>-*.md` (zero-pad single digits: Ch 7 → `07-*.md`, Ch 22 → `22-*.md`)
 Read the cited file before applying its content. If the vault is unavailable, note the degradation in the report and proceed with what is reachable — never fabricate a rubric dimension or ladder level.
 
 ## Audit Report Structure

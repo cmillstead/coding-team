@@ -5,7 +5,7 @@ description: "Use when designing or auditing Claude Code harness infrastructure 
 
 # /harness-engineer — Harness Infrastructure Design & Audit
 
-Designs and audits the infrastructure that governs AI agent behavior: hooks, rules, settings, observability, constraint promotion, and maturity progression. Born from the CIVC six-verb × surface grid (afford, inform, constrain, verify, correct, evolve) and trained on the Harness Engineering knowledge base (36 chapters).
+Designs and audits the infrastructure that governs AI agent behavior: hooks, rules, settings, observability, constraint promotion, and maturity progression. Born from the CIVC six-verb × surface grid (afford, inform, constrain, verify, correct, evolve) and trained on the Harness Engineering knowledge base.
 
 ## When to Use
 
@@ -53,13 +53,14 @@ Design a new hook, rule, or constraint for a specific failure mode.
 
 ### 3. Assess
 
-Quick maturity assessment without a full audit.
+Maturity assessment — places the harness on both maturity ladders with a quantitative, per-dimension score (lighter than a full audit, but not a one-number label).
 
 **What it does:**
 - Reads current harness state
-- Maps against Level 0-4 indicators from Ch 22
-- Reports current level with evidence
-- Lists 3 highest-leverage gaps for next level
+- Maps against BOTH the infra Level 0-4 ladder (Ch 22) and the vibe-coding spec-maturity ladder
+- Scores each dimension with the quantitative rubric — the per-dimension scores are the deliverable, not a single level label
+- Judges steering density model-conditionally; scopes findings core vs overlay
+- Applies the Evolve test before any Level-4 claim
 
 **Invoke:** `/harness-engineer assess`
 
@@ -73,7 +74,7 @@ Adjudicate prior harness-edit predictions against accumulated evidence.
 - Adjudicates each against its `predicted_impact`, then records the verdict via `python3 ~/.claude/bin/harness decisions --verify <id> --status verified|refuted --note "..."`
 - If evidence is insufficient, leaves the prediction pending with a noted reason — never guesses a verdict
 
-**Documented limitation:** hard auto-verification against per-component failure data arrives in Step 3 of the harness audit. Until then, verdicts use trends + diffs + direct observation, not automated failure-rate comparison.
+**Documented limitation:** hard auto-verification against per-component failure data is a later collector step. Until then, verdicts use trends + diffs + direct observation, not automated failure-rate comparison.
 
 **Invoke:** `/harness-engineer verify`
 
