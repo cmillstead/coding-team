@@ -152,7 +152,7 @@ If you find ZERO issues, explicitly report:
 When asked to design a new hook or constraint:
 
 0. **Check for absorption.** Before designing a new hook: list existing hooks (`ls ~/.claude/hooks/*.py`), check if one already covers this domain (git safety, code quality, lifecycle), check if `_lib/` has reusable patterns. If an existing hook can absorb this check with a small addition, recommend merging instead of creating. If no existing hook fits, proceed to step 1.
-   **Dispatcher-wired is not orphaned.** A hook dispatched via a consolidated dispatcher (`prompt-dispatcher.py` / `session-start-dispatcher.py`) already SATISFIES this "reuse a consolidated mechanism first" rule (`~/.claude/rules/interaction-mandatory.md` #2) — it is not an orphan and is not a "hooks last resort" violation.
+   **Dispatcher-wired is not orphaned.** A hook dispatched via a consolidated dispatcher (`prompt-dispatcher.py` / `session-start-dispatcher.py`) — reusing a consolidated dispatcher already satisfies the "reuse a consolidated mechanism before adding one" principle; it is not an orphan and not a "hooks last resort" violation.
 1. **Classify the constraint.** What verb does it serve? What failure mode does it prevent?
 2. **Check the KB.** Search for prior art: `engram search "<failure pattern>" --json`.
 3. **Design the hook.** Specify: hook type (PreToolUse | PostToolUse | UserPromptSubmit | SessionStart), matcher pattern, input fields, decision logic, output format (`allow`/`block`/warning), error handling (default: allow through), and settings.json registration entry.
