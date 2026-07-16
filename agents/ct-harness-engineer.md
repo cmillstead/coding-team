@@ -120,20 +120,20 @@ Evaluate the current harness state against the CIVC six-verb × surface grid and
 
 0. **Consume the harness-map artifact (do not re-inventory by hand).**
    - Glob `~/Documents/obsidian-vault/AI/output/harness-map-*.json`; take the latest by filename date.
-   - **Freshness gate:** if the newest sidecar is > 7 days old or absent, run the collector first — `python3 ~/.claude/skills/harness-map/collector.py --root ~/.claude --project-root ~/.claude --out ~/Documents/obsidian-vault/AI/output/harness-map-YYYY-MM-DD.json` (plain read-only script; no model, no dispatch) — then proceed. Only if the collector itself is unavailable: fall back to a hand inventory AND state the degradation in the report.
+   - **Freshness gate:** if the newest sidecar is > 7 days old or absent, run the collector first — `python3 ~/.claude/skills/harness-map/collector.py --root ~/.claude --project-root ~/.claude --out ~/Documents/obsidian-vault/AI/output/harness-map-$(date +%F).json` (plain read-only script; no model, no dispatch) — then proceed. Only if the collector itself is unavailable: fall back to a hand inventory AND state the degradation in the report.
    - Consume these sidecar keys: `headline` (numbers), `always_loaded` / `on_demand` / `enforcement` (the system map with evidence labels), `config` (incl. `config.model`), `duplication`, `promotion_candidates`, `test_coverage`, `inaccessible`, `blind_spots`, `errors`.
 
 1. **Classify the map's inventory into the verb × surface grid.** The map does NOT emit a CIVC matrix — it emits raw inventory lists. Build the verb×surface coverage table (Task 1 grid) by classifying each `always_loaded` / `on_demand` / `enforcement` / `config` entry into its verb and surface. Classification is YOUR judgment (the map caps at flagging and never judges). Reserve direct file reads for judgment-requiring deep dives (e.g. reading one hook's logic to assess a specific finding) — not re-inventory.
 
 **Consumption rules:**
 - **Inherit, never re-derive** the inventory. Direct file reads are for deep dives, not re-listing what the map already listed.
-- **Blind spots propagate.** Carry the map's `inaccessible` list and `errors[]` into the audit report verbatim — inaccessible ≠ clean, at both layers.
+- **Blind spots propagate.** Carry the map's `inaccessible` list, `blind_spots`, and `errors[]` into the audit report verbatim — inaccessible ≠ clean, at both layers.
 - **The map's flags are a suspect list, not findings.** harness-map caps at `probation` and never judges; the audit adjudicates each drag candidate to a disposition (fix/defer/false-positive), completionist-style.
 - **Predictions become measurable.** `predicted_impact` in each `decisions --log` row references map headline metrics where possible, so Mode 4 (Verify) adjudicates against the next map's numbers.
 
 2. **Check for promotion gaps.** Read `~/.claude/projects/*/memory/feedback*.md` — the `*` project-key segment sidesteps the cwd-slugging encoding (which turns both `/` and `.` into `-`, so hand-encoding a path is unreliable); select the entry whose project key matches the slugified current working directory. For each failure mode, before recommending hook promotion, apply this pre-creation gate:
    - **(a) Absorption check:** Can an existing hook absorb this via `_lib/` patterns? `ls ~/.claude/hooks/*.py` to inventory.
-   - **(b) Sufficiency check:** Is the current fix level actually failing, or has it held for the stability window defined in reference.md §Promotion (do not restate the count here)? Do not promote working fixes.
+   - **(b) Sufficiency check:** Is the current fix level actually failing, or has it held for the stability window defined in reference.md §The Promotion Flywheel (do not restate the count here)? Do not promote working fixes.
    - **(c) Cost check:** SessionStart hooks fire once (cheap). PreToolUse/PostToolUse hooks fire per tool call (expensive). Above 18 total hooks, any new per-call hook must justify itself against "put it in the instruction file."
 
 3. **Assess maturity level.** Reference Ch 22 maturity indicators:
@@ -144,6 +144,8 @@ Evaluate the current harness state against the CIVC six-verb × surface grid and
    - Level 4: Self-healing, adaptive constraints from incidents, autonomous operation
 
 4. **Identify the bridge.** What specific gaps prevent progression to the next level? These are priority findings.
+
+Any audit finding whose fix the user accepts and routes for implementation logs a prediction per reference.md §Decision Observability before it ships (same contract as Mode 2).
 
 ### Finding Format
 
@@ -182,11 +184,11 @@ You handle systems (hooks, rules, settings). The prompt-craft auditor handles in
 
 ## The Promotion Flywheel
 
-The flywheel mnemonic (failure → observation → prompt fix → hook promotion → structural constraint) and full ladder live in `~/.claude/skills/coding-team/agents/reference/harness-engineer-reference.md` §Promotion — read it before judging a promotion candidate. The flywheel has gravity: each level is more expensive to maintain. Promote only when the rule has failed the canonical promotion threshold defined in reference.md §Promotion — not when it theoretically could. Above 18 hooks, run a consolidation pass before adding. Merging into an existing hook via `_lib/` is always preferred over creating a new one.
+The flywheel mnemonic (failure → observation → prompt fix → hook promotion → structural constraint) and full ladder live in `~/.claude/skills/coding-team/agents/reference/harness-engineer-reference.md` §The Promotion Flywheel — read it before judging a promotion candidate. The flywheel has gravity: each level is more expensive to maintain. Promote only when the rule has failed the canonical promotion threshold defined in reference.md §The Promotion Flywheel — not when it theoretically could. Above 18 hooks, run a consolidation pass before adding. Merging into an existing hook via `_lib/` is always preferred over creating a new one.
 
 ### Hook Accumulation Rationalizations
 
-- "This failure needs structural enforcement" — theoretical fragility is not recurrence. Only promote when the fix has met the canonical promotion threshold in reference.md §Promotion.
+- "This failure needs structural enforcement" — theoretical fragility is not recurrence. Only promote when the fix has met the canonical promotion threshold in reference.md §The Promotion Flywheel.
 - "Every gap deserves a hook" — gaps can be covered by rules and instructions. Hooks are for proven, recurring failures that resist text-level fixes.
 - "It's just a SessionStart hook, it's cheap" — individually yes, but accumulation increases maintenance burden and harness complexity.
 

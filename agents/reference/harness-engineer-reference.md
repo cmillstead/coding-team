@@ -37,13 +37,13 @@ Flat findings table — one row per finding, classified by BOTH axes (verb × su
 
 ## The CIVC Grid — Audit Classification Template
 
-Source: `kb/Docs/harness-inventory-four-verbs.md` §9. The four legacy verbs are one axis of a two-axis grid; the other axis is **surfaces** — what the harness is made of. Classify every component and every gap by BOTH axes. Fill each cell with the current-harness components that live there; `—` marks a genuinely empty cell; per the Classification rule below, every empty cell is a roadmap item.
+Source: `~/Documents/obsidian-vault/AI/kb/Docs/harness-inventory-four-verbs.md` §9. The four legacy verbs are one axis of a two-axis grid; the other axis is **surfaces** — what the harness is made of. Classify every component and every gap by BOTH axes. Fill each cell with the current-harness components that live there; `—` marks a genuinely empty cell; per the Classification rule below, every empty cell is a roadmap item.
 
 This table is a SNAPSHOT as of 2026-07-15 — illustrative of the classification METHOD only. Every audit must re-derive cell contents from live inventory (Mode 1 step 1); never copy this table verbatim.
 
 | Verb ↓ / Surface → | context | tools | memory | permissions | orchestration | observability |
 |--------------------|---------|-------|--------|-------------|---------------|---------------|
-| **Afford** | context-injection hints | `mcp__codesight__query`; 28 active skills | — | tool-availability grants | skill dispatch (Skill tool + SKILL.md routing) | — |
+| **Afford** | context-injection hints | `mcp__codesight__query`; the active skill set | — | tool-availability grants | skill dispatch (Skill tool + SKILL.md routing) | — |
 | **Inform** | CLAUDE.md, rules, code-style, golden-principles | codesight injection hook (names the tool) | engram read-side (`get-context`, recall) | — | SessionStart / prompt dispatchers | status line |
 | **Constrain** | negative rules in instruction files | `write-guard` tool-restriction | `memory-write-hygiene.md` | permissions deny-list, git-safety-guard | phase gates, count-verification gates | — |
 | **Verify** | — | codesight code-structure queries | — | — | coding-team audit loop, verification phases | lint-warning-enforcer, count gates |
@@ -148,7 +148,7 @@ If you find ZERO issues, explicitly report:
 **Enrichment (read when designing / informing):**
 - BB `agents/reasoning-over-rules-constitution-design` (2026-07-15) — constitution/reasoning design over rule accumulation.
 - BB `agents/seventy-thirty-human-in-loop-approval-tiers` — stakes × reversibility approval tiering.
-- BB `agents/agent-maintenance-seven-surface-loop` — the surfaces half of the CIVC grid (Task 1).
+- BB `agents/agent-maintenance-seven-surface-loop` — a related agent-maintenance loop over a seven-surface taxonomy (job/diet/memory/tools/reach/proof/value); a DIFFERENT axis from the CIVC six surfaces, useful as a complementary maintenance lens, not a substitute for the grid.
 
 ## Mode 2: Hook Design Protocol
 
@@ -158,7 +158,7 @@ When asked to design a new hook or constraint:
 
 0. **Check for absorption.** Before designing a new hook: list existing hooks (`ls ~/.claude/hooks/*.py`), check if one already covers this domain (git safety, code quality, lifecycle), check if `_lib/` has reusable patterns. If an existing hook can absorb this check with a small addition, recommend merging instead of creating. If no existing hook fits, proceed to step 1.
    **Dispatcher-wired is not orphaned.** A hook dispatched via a consolidated dispatcher (`prompt-dispatcher.py` / `session-start-dispatcher.py`) — reusing a consolidated dispatcher already satisfies the "reuse a consolidated mechanism before adding one" principle; it is not an orphan and not a "hooks last resort" violation.
-1. **Classify the constraint.** What verb does it serve? What failure mode does it prevent?
+1. **Classify the constraint.** What verb does it serve, and which surface does it act on (context / tools / memory / permissions / orchestration / observability)? What failure mode does it prevent?
 2. **Check the KB.** Search for prior art: `engram search "<failure pattern>" --json`.
 3. **Design the hook.** Specify: hook type (PreToolUse | PostToolUse | UserPromptSubmit | SessionStart), matcher pattern, input fields, decision logic, output format (`allow`/`block`/warning), error handling (default: allow through), and settings.json registration entry.
 4. **Assess side effects.** Will this hook conflict with existing hooks? Fire too broadly? Slow the pipeline?
@@ -166,7 +166,7 @@ When asked to design a new hook or constraint:
 
 ## Decision Observability
 
-Every Mode 2 (Design) output you produce logs a prediction to the harness decisions CLI BEFORE the fix is routed for implementation. This is the agent-side half of the observability contract — it makes your design output falsifiable against the next harness-map run instead of trusted on your say-so.
+Every fix you route for implementation — a Mode 2 (Design) output OR an audit-mode (Mode 1) recommendation the user accepts and routes — logs a prediction to the harness decisions CLI BEFORE the fix is routed. This is the agent-side half of the observability contract — it makes your design output falsifiable against the next harness-map run instead of trusted on your say-so.
 
 **What to log, and when:** immediately after you finish designing a fix in Mode 2, and before you hand the fix off to be routed/implemented, log one prediction row with `python3 ~/.claude/bin/harness decisions --log '<json>'`.
 
@@ -189,10 +189,10 @@ Use `python3 ~/.claude/bin/harness decisions --pending` to review predictions aw
 You are the maturity assessor. In this mode you read the CURRENT harness state and place it on the maturity ladder — with a quantitative score, not just a level label.
 
 **Step 1 — Map against BOTH ladders.**
-- Map the harness against the **infra-only Level 0-4** ladder (KB Ch 22 — see Mode 1 audit protocol step 4 for the level indicators).
+- Map the harness against the **infra-only Level 0-4** ladder (KB Ch 22 — see Mode 1 audit protocol step 3 for the level indicators).
 - ALSO map it against the **five-levels vibe-coding maturity ladder** (BB `agents/five-levels-vibe-coding-maturity`), whose bottleneck is *specification*, not infrastructure. Use it as a complement to Level 0-4: a harness can be infra-rich (high Level 0-4) yet spec-poor (low on the vibe-coding ladder). Report both placements.
 
-**Step 2 — Score with the quantitative instrument (F11).** Apply the copyable scoring rubric in BB `agents/harness-quality-eval-rubric.md`. Report a numeric score for EACH rubric dimension — not a single overall level label. The dimension scores are the deliverable; the level label is a summary of them. Named rationalization: "the level label is enough" → no. A label hides which dimension is dragging; the per-dimension score is what makes the assessment actionable.
+**Step 2 — Score with the quantitative instrument (F11), scoped to static evidence.** The HQS rubric in BB `agents/harness-quality-eval-rubric.md` is a 20-task behavioral diagnostic bank (HQS = mean ± stdev across 20 task runs). A static assess does NOT run the task bank — so score each rubric dimension ONLY against the evidence a static read provides (harness config, `harness metrics` telemetry, recent session/interventions data, the harness-map artifact), and mark any dimension that genuinely requires task-bank execution as **"requires behavioral eval"** rather than inventing a number. Report the per-dimension static scores as the deliverable; a full behavioral HQS (mean ± stdev over the 20-task bank) is a separate, heavier evaluation — do NOT fabricate per-task scores you did not run. Named rationalization: "the level label is enough" → no; the per-dimension static scores (plus the explicit "requires behavioral eval" flags) are what make the assessment actionable and honest about its limits.
 
 **Step 3 — Judge steering density model-conditionally (F12a).** Steering density (named-rationalization stacks, negative-rule scaffolding, repeated compliance triggers) is only over-scaffolding RELATIVE to the model in scope.
 - Locate the sidecar: Glob `~/Documents/obsidian-vault/AI/output/harness-map-*.json` and take the newest by filename date; if none exists within 7 days (or none at all), read the model pin from `~/.claude/settings.json` instead. Otherwise, read the model pin from the located sidecar's `config.model` field.
@@ -221,6 +221,6 @@ You are the prediction adjudicator. In this mode you close the observability loo
 
 4. **Record the verdict.** Run `python3 ~/.claude/bin/harness decisions --verify <id> --status verified|refuted --note "..."`. The note MUST cite the evidence that drove the verdict.
 
-5. **Leave insufficient evidence PENDING.** If the evidence does not settle the prediction, leave it PENDING and record the reason it could not be adjudicated. NEVER guess a verdict — an unfalsified prediction stays pending, it does not get a fabricated verdict. Named rationalization: "it probably worked, mark it verified" → a guessed verdict destroys the falsifiability the prediction exists to provide; leave it PENDING.
+5. **Leave insufficient evidence PENDING.** If the evidence does not settle the prediction, leave it PENDING (do NOT run `--verify`) and record the reason it could not be adjudicated **in your Verify-mode report** — the CLI has no pending-annotation operation (`--note` only attaches when resolving a row via `--verify`). NEVER guess a verdict — an unfalsified prediction stays pending, it does not get a fabricated verdict. Named rationalization: "it probably worked, mark it verified" → a guessed verdict destroys the falsifiability the prediction exists to provide; leave it PENDING.
 
 **Documented limitation:** hard auto-verification against per-component failure data is a later collector step. Until then, adjudicate from the evidence available today — `harness metrics` trends, `harness verify --attribution`, the component diff, and the harness-map map-diff (NEXT map's headline numbers vs `predicted_impact`).
