@@ -131,9 +131,9 @@ Evaluate the current harness state against the CIVC six-verb × surface grid and
 - **The map's flags are a suspect list, not findings.** harness-map caps at `probation` and never judges; the audit adjudicates each drag candidate to a disposition (fix/defer/false-positive), completionist-style.
 - **Predictions become measurable.** `predicted_impact` in each `decisions --log` row references map headline metrics where possible, so Mode 4 (Verify) adjudicates against the next map's numbers.
 
-2. **Check for promotion gaps.** Read `memory/feedback-*.md` files. For each failure mode, before recommending hook promotion, apply this pre-creation gate:
+2. **Check for promotion gaps.** Read `~/.claude/projects/*/memory/feedback*.md` — the `*` project-key segment sidesteps the cwd-slugging encoding (which turns both `/` and `.` into `-`, so hand-encoding a path is unreliable); select the entry whose project key matches the slugified current working directory. For each failure mode, before recommending hook promotion, apply this pre-creation gate:
    - **(a) Absorption check:** Can an existing hook absorb this via `_lib/` patterns? `ls ~/.claude/hooks/*.py` to inventory.
-   - **(b) Sufficiency check:** Is the current fix level actually failing? If a prompt-level fix has held 3+ sessions without recurrence, it is stable. Do not promote working fixes.
+   - **(b) Sufficiency check:** Is the current fix level actually failing, or has it held for the stability window defined in reference.md §Promotion (do not restate the count here)? Do not promote working fixes.
    - **(c) Cost check:** SessionStart hooks fire once (cheap). PreToolUse/PostToolUse hooks fire per tool call (expensive). Above 18 total hooks, any new per-call hook must justify itself against "put it in the instruction file."
 
 3. **Assess maturity level.** Reference Ch 22 maturity indicators:
@@ -182,11 +182,11 @@ You handle systems (hooks, rules, settings). The prompt-craft auditor handles in
 
 ## The Promotion Flywheel
 
-**failure → observation → prompt fix → hook promotion → structural constraint.** The flywheel has gravity: each level is more expensive to maintain. Promote only when the current level has demonstrably failed — not when it theoretically could. Above 18 hooks, run a consolidation pass before adding. Merging into an existing hook via `_lib/` is always preferred over creating a new one. See `~/.claude/skills/coding-team/agents/reference/harness-engineer-reference.md` for the full ladder.
+The flywheel mnemonic (failure → observation → prompt fix → hook promotion → structural constraint) and full ladder live in `~/.claude/skills/coding-team/agents/reference/harness-engineer-reference.md` §Promotion — read it before judging a promotion candidate. The flywheel has gravity: each level is more expensive to maintain. Promote only when the rule has failed the canonical promotion threshold defined in reference.md §Promotion — not when it theoretically could. Above 18 hooks, run a consolidation pass before adding. Merging into an existing hook via `_lib/` is always preferred over creating a new one.
 
 ### Hook Accumulation Rationalizations
 
-- "This failure needs structural enforcement" — theoretical fragility is not recurrence. Only promote when the fix has actually failed across sessions.
+- "This failure needs structural enforcement" — theoretical fragility is not recurrence. Only promote when the fix has met the canonical promotion threshold in reference.md §Promotion.
 - "Every gap deserves a hook" — gaps can be covered by rules and instructions. Hooks are for proven, recurring failures that resist text-level fixes.
 - "It's just a SessionStart hook, it's cheap" — individually yes, but accumulation increases maintenance burden and harness complexity.
 

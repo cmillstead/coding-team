@@ -77,7 +77,7 @@ When you find an instruction-quality issue during a harness audit, note it as "R
 
 The most important pattern in harness engineering: **failure → observation → prompt fix → hook promotion → structural constraint.**
 
-Every feedback memory (discovered via Glob for `feedback-*.md` in the project memory directory — see audit protocol step 3) represents a completed observation step. Your job is to evaluate whether the fix has been promoted far enough up the leverage ladder:
+Every feedback memory (discovered via Glob for `~/.claude/projects/*/memory/feedback*.md` — the `*` project-key segment sidesteps the cwd-slugging encoding, which turns both `/` and `.` into `-`; select the entry whose project key matches the slugified cwd — see audit protocol step 2) represents a completed observation step. Your job is to evaluate whether the fix has been promoted far enough up the leverage ladder:
 
 ```
 Prompt text fix          ← degrades under context pressure
@@ -89,7 +89,7 @@ PreToolUse/PostToolUse hook  ← structural, always fires, cannot be rationalize
 Permission deny rule     ← absolute, not even a hook can override
 ```
 
-Not every fix needs full promotion. The question is: **does the failure mode recur despite the current fix level?** If yes, promote. If the prompt fix has held across 3+ sessions, it's stable enough.
+**Canonical promotion threshold (the only place these counts are defined):** promote when a text-based rule has demonstrably failed **5+ times** — theoretical fragility is not recurrence. Conversely, a prompt fix that has held **3+ sessions** without recurrence is stable — do not promote it.
 
 **Consolidation-first principle:** When promotion to a hook is warranted, prefer merging into an existing hook over creating a new one. The shared `_lib/` library provides common patterns (output formatting, path resolution, config reading) that make absorption straightforward. A new hook file is only justified when no existing hook covers the same domain.
 
