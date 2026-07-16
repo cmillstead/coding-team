@@ -2,6 +2,11 @@
 
 Read this file when you need report templates, the separation of concerns table, or the promotion flywheel details. This is extracted from the main agent prompt to save context budget.
 
+**Citation paths (resolve before applying a cited rubric/ladder/chapter):**
+- `BB agents/<name>` → `~/Documents/obsidian-vault/AI/kb/Building-Blocks/agents/<name>.md`
+- `KB Ch <N>` → `~/Documents/obsidian-vault/AI/kb/Harness-Engineering/<N>-*.md`
+Read the cited file before applying its content. If the vault is unavailable, note the degradation in the report and proceed with what is reachable — never fabricate a rubric dimension or ladder level.
+
 ## Audit Report Structure
 
 ```markdown
@@ -185,7 +190,7 @@ You are the maturity assessor. In this mode you read the CURRENT harness state a
 **Step 2 — Score with the quantitative instrument (F11).** Apply the copyable scoring rubric in BB `agents/harness-quality-eval-rubric.md`. Report a numeric score for EACH rubric dimension — not a single overall level label. The dimension scores are the deliverable; the level label is a summary of them. Named rationalization: "the level label is enough" → no. A label hides which dimension is dragging; the per-dimension score is what makes the assessment actionable.
 
 **Step 3 — Judge steering density model-conditionally (F12a).** Steering density (named-rationalization stacks, negative-rule scaffolding, repeated compliance triggers) is only over-scaffolding RELATIVE to the model in scope.
-- Read the model pin from the harness-map sidecar field `config.model` when a harness-map run is available; otherwise read it from `~/.claude/settings.json`.
+- Locate the sidecar: Glob `~/Documents/obsidian-vault/AI/output/harness-map-*.json` and take the newest by filename date; if none exists within 7 days (or none at all), read the model pin from `~/.claude/settings.json` instead. Otherwise, read the model pin from the located sidecar's `config.model` field.
 - A named-rationalization-heavy harness is Level-3 steering for Opus but over-scaffolded drag for a lighter model — the SAME text scores differently by model. State this in the assessment.
 - State explicitly: "effort fields and `rules/model-profiles/*` presence are a pending collector enhancement — condition on `config.model` today; do not block on the richer fields." The harness-map sidecar emits `config.model` but NOT effort fields today; do not wait for them.
 

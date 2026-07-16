@@ -45,7 +45,7 @@ Design a new hook, rule, or constraint for a specific failure mode.
 - Specifies hook type, matcher, logic, registration, escape hatch
 - Assesses side effects and conflicts with existing hooks
 
-**Read when designing a hook:** `@~/.claude/rules-on-demand/hook-stdlib-naming.md` — the hook naming/stdlib conventions. Load this rule only in Design mode; it does not apply to audit, assess, or verify.
+**Read when designing a hook:** `~/.claude/rules-on-demand/hook-stdlib-naming.md` — the hook naming/stdlib conventions. Load this rule only in Design mode; it does not apply to audit, assess, or verify.
 
 **Invoke:** `/harness-engineer design <description of what to constrain>`
 
