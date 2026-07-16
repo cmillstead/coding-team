@@ -12,23 +12,15 @@ Read this file when you need report templates, the separation of concerns table,
 
 ## Findings
 
-### Constrain
-#### 1. [Finding title]
-- Gap: ...
-- Risk: ...
-- Fix: ...
+Flat findings table — one row per finding, classified by BOTH axes (verb × surface):
 
-### Inform
-...
-
-### Verify
-...
-
-### Correct
-...
+| # | Finding | Verb | Surface | Gap | Risk | Fix |
+|---|---------|------|---------|-----|------|-----|
+| 1 | [title] | Constrain | permissions | ... | ... | ... |
+| 2 | [title] | Afford | tools | ... | ... | ... |
 
 ## Priority Order
-| # | Finding | Verb | Effort | Impact |
+| # | Finding | Verb | Surface | Effort | Impact |
 
 ## Maturity Assessment
 - Current: Level N
@@ -37,6 +29,23 @@ Read this file when you need report templates, the separation of concerns table,
 ## Meta-Observation
 [Pattern across findings — what systemic issue do they reveal?]
 ```
+
+## The CIVC Grid — Audit Classification Template
+
+Source: `kb/Docs/harness-inventory-four-verbs.md` §9. The four legacy verbs are one axis of a two-axis grid; the other axis is **surfaces** — what the harness is made of. Classify every component and every gap by BOTH axes. Fill each cell with the current-harness components that live there; `—` marks a genuinely empty cell (label it "roadmap").
+
+| Verb ↓ / Surface → | context | tools | memory | permissions | orchestration | observability |
+|--------------------|---------|-------|--------|-------------|---------------|---------------|
+| **Afford** | context-injection hints | `mcp__codesight__query`; 28 active skills | — (roadmap) | tool-availability grants | skill routing (`skill-taxonomy.yml`) | — (roadmap) |
+| **Inform** | CLAUDE.md, rules, code-style, golden-principles | codesight injection hook (names the tool) | engram read-side (`get-context`, recall) | — | SessionStart / prompt dispatchers | status line |
+| **Constrain** | negative rules in instruction files | `write-guard` tool-restriction | `memory-write-hygiene.md` | permissions deny-list, git-safety-guard | phase gates, count-verification gates | — (roadmap) |
+| **Verify** | — | codesight code-structure queries | — | — | coding-team audit loop, verification phases | lint-warning-enforcer, count gates |
+| **Correct** | error enrichment | — | weekly-synthesis (memory repair) | — | bounded iteration, escalation | — |
+| **Evolve** | self-evolving instructions | — | engram consolidation | — | Codex Learning Engine (v0.5, advisory), promotion flywheel, `graduated_checks.py` | believed-on/actually-off self-audit |
+
+**Positional note** — each verb sits at a fixed position relative to the model's action: *before* (shape the input → Inform), *bounding* (define the action space → Afford grants / Constrain subtracts), *after* (judge the output → Verify → Correct), *across* turns (carry state → memory surface), *parallel* (tap without gating → observability surface), *meta* (operate on the harness → Evolve).
+
+**Classification rule:** Empty cells are the roadmap. Afford gaps = missing grants (MCP/skill access); Evolve gaps = the harness cannot modify itself; memory-surface and observability-surface gaps are the ones four verbs structurally miss (memory scattered across three verbs, observability folded into Verify).
 
 ## Separation of Concerns
 
@@ -97,7 +106,8 @@ When dispatched as an auditor after implementation:
 
 For each finding:
 - **File:** [path]
-- **Verb:** Constrain | Inform | Verify | Correct
+- **Verb:** Afford | Inform | Constrain | Verify | Correct | Evolve
+- **Surface:** context | tools | memory | permissions | orchestration | observability
 - **Category:** gap | regression | promotion-opportunity | entropy
 - **Severity:** low | medium | high | critical
 - **Finding:** [what's wrong]
@@ -108,7 +118,7 @@ If you find ZERO issues, explicitly report:
 
 ## KB Key Chapters
 
-- **Ch 1** — Foundations: four verbs, formal definition, horse metaphor
+- **Ch 1** — Foundations: four verbs (the six-verb × surface grid in §CIVC — "The CIVC Grid — Audit Classification Template" above — supersedes the original four), formal definition, horse metaphor
 - **Ch 3** — Instruction files: CLAUDE.md, rules, progressive disclosure
 - **Ch 4** — Architectural constraints: hooks, sandboxing, tool restrictions
 - **Ch 5** — Entropy management: drift detection, garbage collection, freshness
