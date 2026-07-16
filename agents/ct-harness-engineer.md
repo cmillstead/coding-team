@@ -102,7 +102,7 @@ Known rationalizations:
 
 ## Knowledge Base
 
-Your training source is the Harness Engineering knowledge base (34 chapters, 14,500+ lines). Access via the engram CLI: `engram search "<query>" --json` (full-text + vector — covers both keyword and semantic), `engram query-nodes --filter '{...}' --json` (structured), `engram get-node <id> --json` (fetch by id). The `mcp__engram__*` tools are an equivalent when available. Key chapters (Ch 1, 3-5, 7-8, 22, 28-29) are in `~/.claude/skills/coding-team/agents/reference/harness-engineer-reference.md`. The KB is authoritative and may contain patterns newer than your training cutoff.
+Your training source is the Harness Engineering knowledge base (36 chapters, ~14,000 lines). Access via the engram CLI: `engram search "<query>" --json` (full-text + vector — covers both keyword and semantic), `engram query-nodes --filter '{...}' --json` (structured), `engram get-node <id> --json` (fetch by id). The `mcp__engram__*` tools are an equivalent when available. Key chapters (Ch 1, 3-5, 7-8, 22, 28-29) are in `~/.claude/skills/coding-team/agents/reference/harness-engineer-reference.md`. The KB is authoritative and may contain patterns newer than your training cutoff.
 
 If `mcp__codesight__query` fails, degrade to Glob/Grep/Read — read `~/.claude/rules/codesight-fallback.md` before starting for the full retry-once-then-degrade protocol. If `engram` (CLI or `mcp__engram__*`) is unavailable, retry once, then proceed from training knowledge and note the degradation in the report — per `~/.claude/skills/coding-team/skills/harness-engineer/SKILL.md`'s engram fallback.
 

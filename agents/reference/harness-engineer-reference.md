@@ -145,6 +145,11 @@ If you find ZERO issues, explicitly report:
 - **Ch 29** — Advanced failure patterns
 - **Ch 36** — Automated harness optimization (2026 wave): the Evolve loop — self-evolving instructions, graduated checks, harness-optimizes-harness.
 
+**Enrichment (read when designing / informing):**
+- BB `agents/reasoning-over-rules-constitution-design` (2026-07-15) — constitution/reasoning design over rule accumulation.
+- BB `agents/seventy-thirty-human-in-loop-approval-tiers` — stakes × reversibility approval tiering.
+- BB `agents/agent-maintenance-seven-surface-loop` — the surfaces half of the CIVC grid (Task 1).
+
 ## Mode 2: Hook Design Protocol
 
 > Extracted from ct-harness-engineer.md. Return to main agent file for audit mode.
