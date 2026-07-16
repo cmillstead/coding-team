@@ -32,18 +32,24 @@ Flat findings table — one row per finding, classified by BOTH axes (verb × su
 
 ## The CIVC Grid — Audit Classification Template
 
-Source: `kb/Docs/harness-inventory-four-verbs.md` §9. The four legacy verbs are one axis of a two-axis grid; the other axis is **surfaces** — what the harness is made of. Classify every component and every gap by BOTH axes. Fill each cell with the current-harness components that live there; `—` marks a genuinely empty cell (label it "roadmap").
+Source: `kb/Docs/harness-inventory-four-verbs.md` §9. The four legacy verbs are one axis of a two-axis grid; the other axis is **surfaces** — what the harness is made of. Classify every component and every gap by BOTH axes. Fill each cell with the current-harness components that live there; `—` marks a genuinely empty cell; per the Classification rule below, every empty cell is a roadmap item.
+
+This table is a SNAPSHOT as of 2026-07-15 — illustrative of the classification METHOD only. Every audit must re-derive cell contents from live inventory (Mode 1 step 1); never copy this table verbatim.
 
 | Verb ↓ / Surface → | context | tools | memory | permissions | orchestration | observability |
 |--------------------|---------|-------|--------|-------------|---------------|---------------|
-| **Afford** | context-injection hints | `mcp__codesight__query`; 28 active skills | — (roadmap) | tool-availability grants | skill routing (`skill-taxonomy.yml`) | — (roadmap) |
+| **Afford** | context-injection hints | `mcp__codesight__query`; 28 active skills | — | tool-availability grants | skill dispatch (Skill tool + SKILL.md routing) | — |
 | **Inform** | CLAUDE.md, rules, code-style, golden-principles | codesight injection hook (names the tool) | engram read-side (`get-context`, recall) | — | SessionStart / prompt dispatchers | status line |
-| **Constrain** | negative rules in instruction files | `write-guard` tool-restriction | `memory-write-hygiene.md` | permissions deny-list, git-safety-guard | phase gates, count-verification gates | — (roadmap) |
+| **Constrain** | negative rules in instruction files | `write-guard` tool-restriction | `memory-write-hygiene.md` | permissions deny-list, git-safety-guard | phase gates, count-verification gates | — |
 | **Verify** | — | codesight code-structure queries | — | — | coding-team audit loop, verification phases | lint-warning-enforcer, count gates |
 | **Correct** | error enrichment | — | weekly-synthesis (memory repair) | — | bounded iteration, escalation | — |
 | **Evolve** | self-evolving instructions | — | engram consolidation | — | Codex Learning Engine (v0.5, advisory), promotion flywheel, `graduated_checks.py` | believed-on/actually-off self-audit |
 
-**Positional note** — each verb sits at a fixed position relative to the model's action: *before* (shape the input → Inform), *bounding* (define the action space → Afford grants / Constrain subtracts), *after* (judge the output → Verify → Correct), *across* turns (carry state → memory surface), *parallel* (tap without gating → observability surface), *meta* (operate on the harness → Evolve).
+**Surface definitions:** context = static knowledge injected into the prompt; tools = callable capabilities (MCP servers, skills, CLIs); memory = state carried across turns/sessions; permissions = allow/deny gates on actions; orchestration = mechanisms that decide *which* instruction/tool/hook fires; observability = signals emitted for inspection without gating the action.
+
+**Positional note (verbs):** each verb sits at a fixed position relative to the model's action — *before* (shape the input → Inform), *bounding* (define the action space → Afford grants / Constrain subtracts), *after* (judge the output → Verify → Correct), *meta* (operate on the harness → Evolve).
+
+**Positional note (surfaces):** two surfaces are defined by *when* they act — memory carries state *across* turns; observability taps *in parallel* without gating.
 
 **Classification rule:** Empty cells are the roadmap. Afford gaps = missing grants (MCP/skill access); Evolve gaps = the harness cannot modify itself; memory-surface and observability-surface gaps are the ones four verbs structurally miss (memory scattered across three verbs, observability folded into Verify).
 
@@ -108,6 +114,7 @@ For each finding:
 - **File:** [path]
 - **Verb:** Afford | Inform | Constrain | Verify | Correct | Evolve
 - **Surface:** context | tools | memory | permissions | orchestration | observability
+  - Select exactly one Surface — the primary mechanism through which the fix would be applied; if a component spans surfaces, classify by where the *gap* lives, not where the component lives.
 - **Category:** gap | regression | promotion-opportunity | entropy
 - **Severity:** low | medium | high | critical
 - **Finding:** [what's wrong]
