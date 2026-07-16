@@ -71,7 +71,7 @@ Adjudicate prior harness-edit predictions against accumulated evidence.
 **What it does:**
 - Runs `python3 ~/.claude/bin/harness decisions --pending` to list predictions awaiting a verdict
 - For each prediction, gathers evidence: `harness metrics` trends, `python3 ~/.claude/bin/harness verify --attribution` (plus `--phi`/`--overview` as relevant) to ground the verdict in failure-attribution and loop-risk data rather than metrics trends alone, the git/file diff of the edited component, and direct observation of behavior since the edit
-- Adjudicates each against its `predicted_impact`, then records the verdict via `python3 ~/.claude/bin/harness decisions --verify <id> --status verified|refuted --note "..."`
+- Adjudicates each against its `predicted_impact`, then records the verdict: write the note to a file with the Write tool first, then run `python3 ~/.claude/bin/harness decisions --verify <id> --status verified|refuted --note "$(cat <file>)"`
 - If evidence is insufficient, leaves the prediction pending with a noted reason — never guesses a verdict
 
 **Documented limitation:** hard auto-verification against per-component failure data is a later collector step. Until then, verdicts use trends + diffs + direct observation, not automated failure-rate comparison.
