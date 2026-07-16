@@ -151,3 +151,23 @@ When asked to design a new hook or constraint:
 3. **Design the hook.** Specify: hook type (PreToolUse | PostToolUse | UserPromptSubmit | SessionStart), matcher pattern, input fields, decision logic, output format (`allow`/`block`/warning), error handling (default: allow through), and settings.json registration entry.
 4. **Assess side effects.** Will this hook conflict with existing hooks? Fire too broadly? Slow the pipeline?
 5. **Consider the escape hatch.** Every constraint needs a documented override for legitimate exceptions.
+
+## Decision Observability
+
+Every Mode 2 (Design) output you produce logs a prediction to the harness decisions CLI BEFORE the fix is routed for implementation. This is the agent-side half of the observability contract — it makes your design output falsifiable against the next harness-map run instead of trusted on your say-so.
+
+**What to log, and when:** immediately after you finish designing a fix in Mode 2, and before you hand the fix off to be routed/implemented, log one prediction row with `python3 ~/.claude/bin/harness decisions --log '<json>'`.
+
+**Required JSON fields** — the row MUST carry all of:
+- `id` — a short unique identifier for this decision
+- `date` — the date the prediction was logged
+- `component` — the hook/rule/file/mechanism the fix targets
+- `failure_evidence` — what observed failure or gap motivated the fix
+- `root_cause` — why the failure happens, not just what happened
+- `targeted_fix` — the specific change being routed
+- `predicted_impact` — the measurable effect you expect. Where possible, `predicted_impact` references harness-map headline metrics (e.g. "always-loaded tokens −800", "dup pairs 6→3") so Mode 4 (Verify) adjudicates against the next map's numbers, not vibes.
+- `verify_by_session` — when/how the prediction will be checked (e.g. "next harness-map run", "3 sessions from now")
+
+**No harness edit is routed without a prediction.** Named rationalization: "this change is small/obvious — no prediction needed." No harness edit is routed without a prediction — small edits are the ones most often shipped on a hunch and never checked. A batch of trivial mechanical edits MAY share ONE prediction row, but the ABSENCE of a prediction is never permitted.
+
+Use `python3 ~/.claude/bin/harness decisions --pending` to review predictions awaiting verification, and `python3 ~/.claude/bin/harness decisions --verify` to adjudicate them once evidence (e.g. a fresh harness-map) is available.
