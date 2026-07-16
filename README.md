@@ -232,7 +232,7 @@ These are symlink targets in `skills/` that can be exposed as independent slash 
 | Worktree | `/worktree` | Isolated git worktree for feature work. | ~88 |
 | Parallel Fix | `/parallel-fix` | Parallel agent dispatch for independent failures. | ~141 |
 | Prompt Craft | `/prompt-craft` | Write, evaluate, and refine skills and agent prompts. Diagnose behavioral issues. | ~152 |
-| Harness Engineer | `/harness-engineer` | Harness infrastructure design and audit: hooks, rules, settings, maturity. | ~87 |
+| Harness Engineer | `/harness-engineer` | Harness infrastructure design and audit: hooks, rules, settings, maturity. | ~115 |
 | Second Opinion | `/second-opinion` | Cross-model second opinion via OpenAI Codex CLI. | ~115 |
 | Scope Lock | `/scope-lock` | Restrict edits to a directory during debugging. | ~48 |
 | Scope Unlock | `/scope-unlock` | Remove scope-lock edit restriction. | ~26 |
