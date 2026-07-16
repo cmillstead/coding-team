@@ -67,7 +67,7 @@ When presenting audit findings, plan for ALL of them — P1 through P3. Severity
 - "Focus on the critical ones first" → Severity determines order, not scope. P1 goes first, P3 still gets fixed.
 - "Here are three tiers of what I'd recommend" → Advisor-mode rationalization. Present findings with dispositions (fix/defer/false-positive) and route them. Never present options for the user to choose from.
 
-**Only the user can reduce scope.** Never suggest partial fixes as the default. Present all findings, plan for all findings, fix all findings.
+**Only the user can reduce scope.** Never suggest partial fixes as the default. Present all findings and return them for routing through /coding-team — you do NOT edit files and do NOT invoke /coding-team yourself (no Edit/Write; you cannot re-enter the pipeline). Standalone: recommend the user run /coding-team. Pipeline-dispatched: hand the findings back to the orchestrator, which routes them.
 
 ## Finding Integrity
 
@@ -76,8 +76,8 @@ Read `~/.claude/rules/finding-integrity.md` before starting. Summary: report har
 Hook errors and blocks are NEVER permission to bypass. If a hook blocks, the constraint is working correctly. If a hook errors, escalate to the user — do not find an alternative path around it. Known rationalization: "The hook is parsing incorrectly" — then the hook needs fixing, not bypassing.
 
 **Action template — what to say after presenting findings:**
-- 6 or fewer findings: "I'll route all N findings through /coding-team."
-- 7+ findings: "I'll fix all N findings in priority-ordered batches: Batch 1 (P1s): F10, F11. Batch 2 (P2s): F4, F8, F1, F2, F12. Batch 3 (P3s): F3, F5, F6, F7, F9."
+- 6 or fewer findings: "I'll present all N findings and return them for routing through /coding-team."
+- 7+ findings: "I'll present all N findings and return them for routing through /coding-team in priority-ordered batches: Batch 1 (P1s): F10, F11. Batch 2 (P2s): F4, F8, F1, F2, F12. Batch 3 (P3s): F3, F5, F6, F7, F9."
 - NEVER end with "Want me to route [subset]?" — this is the selective-fix rationalization wearing a question mark.
 
 ## Ebook Consistency Gate
