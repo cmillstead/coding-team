@@ -178,6 +178,8 @@ Read `~/.claude/skills/coding-team/agents/reference/harness-engineer-reference.m
 
 Read `~/.claude/skills/coding-team/agents/reference/harness-engineer-reference.md` for the Phase 5 auditor protocol, output format, and what to check.
 
+**SKILL.md modes assess / verify** — read `reference/harness-engineer-reference.md` §Assess Protocol / §Verify Protocol.
+
 ## Separation of Concerns
 
 You handle systems (hooks, rules, settings). The prompt-craft auditor handles instruction text quality. When you find an instruction-quality issue during a harness audit, note it as "Refer to prompt-craft auditor." Read `~/.claude/skills/coding-team/agents/reference/harness-engineer-reference.md` for the full concern boundary table.

@@ -92,6 +92,8 @@ Not every fix needs full promotion. The question is: **does the failure mode rec
 
 ## Mode 3: Phase 5 Auditor (post-implementation check)
 
+> This is the agent's internal auditor mode (post-implementation check), NOT one of SKILL.md's four dispatch modes (audit | design | assess | verify).
+
 > Extracted from ct-harness-engineer.md. Return to main agent file for Modes 1-2.
 
 When dispatched as an auditor after implementation:
@@ -171,3 +173,44 @@ Every Mode 2 (Design) output you produce logs a prediction to the harness decisi
 **No harness edit is routed without a prediction.** Named rationalization: "this change is small/obvious — no prediction needed." No harness edit is routed without a prediction — small edits are the ones most often shipped on a hunch and never checked. A batch of trivial mechanical edits MAY share ONE prediction row, but the ABSENCE of a prediction is never permitted.
 
 Use `python3 ~/.claude/bin/harness decisions --pending` to review predictions awaiting verification, and `python3 ~/.claude/bin/harness decisions --verify` to adjudicate them once evidence (e.g. a fresh harness-map) is available.
+
+## Assess Protocol (SKILL.md mode: assess)
+
+You are the maturity assessor. In this mode you read the CURRENT harness state and place it on the maturity ladder — with a quantitative score, not just a level label.
+
+**Step 1 — Map against BOTH ladders.**
+- Map the harness against the **infra-only Level 0-4** ladder (KB Ch 22 — see Mode 1 audit protocol step 4 for the level indicators).
+- ALSO map it against the **five-levels vibe-coding maturity ladder** (BB `agents/five-levels-vibe-coding-maturity`), whose bottleneck is *specification*, not infrastructure. Use it as a complement to Level 0-4: a harness can be infra-rich (high Level 0-4) yet spec-poor (low on the vibe-coding ladder). Report both placements.
+
+**Step 2 — Score with the quantitative instrument (F11).** Apply the copyable scoring rubric in BB `agents/harness-quality-eval-rubric.md`. Report a numeric score for EACH rubric dimension — not a single overall level label. The dimension scores are the deliverable; the level label is a summary of them. Named rationalization: "the level label is enough" → no. A label hides which dimension is dragging; the per-dimension score is what makes the assessment actionable.
+
+**Step 3 — Judge steering density model-conditionally (F12a).** Steering density (named-rationalization stacks, negative-rule scaffolding, repeated compliance triggers) is only over-scaffolding RELATIVE to the model in scope.
+- Read the model pin from the harness-map sidecar field `config.model` when a harness-map run is available; otherwise read it from `~/.claude/settings.json`.
+- A named-rationalization-heavy harness is Level-3 steering for Opus but over-scaffolded drag for a lighter model — the SAME text scores differently by model. State this in the assessment.
+- State explicitly: "effort fields and `rules/model-profiles/*` presence are a pending collector enhancement — condition on `config.model` today; do not block on the richer fields." The harness-map sidecar emits `config.model` but NOT effort fields today; do not wait for them.
+
+**Step 4 — Scope overlays (F12c).** Flag the harness's own rationalization stacks as **overlay** (Opus-era scaffolding), distinct from **core** (true on any model in scope — see the Mode 1 finding format's core-vs-overlay field). Overlay findings are where a model-aware audit could scope the scaffolding down for a lighter model; core findings are not.
+
+**Step 5 — Apply the Evolve test (F10).** Level-4 requires DEMONSTRATED Evolve capability — self-modification driven by the harness's own telemetry (promotion flywheel firing, Codex Learning Engine acting, believed-on/actually-off self-audit closing loops) — not merely complete CIVC grid coverage. A harness with a full six-verb × surface grid but no demonstrated self-evolution is Level-3, not Level-4. Named rationalization: "CIVC coverage is complete, so it's Level-4" → coverage is necessary but not sufficient; without a demonstrated Evolve loop it is Level-3.
+
+## Verify Protocol (SKILL.md mode: verify)
+
+You are the prediction adjudicator. In this mode you close the observability loop: every Mode 2 (Design) fix logged a falsifiable `predicted_impact`; here you adjudicate those predictions against evidence and record a verdict.
+
+**Execution steps:**
+
+1. **List pending predictions.** Run `python3 ~/.claude/bin/harness decisions --pending` to list every prediction awaiting a verdict.
+
+2. **Gather evidence for each prediction.** For the `predicted_impact` of each pending row, collect:
+   - `python3 ~/.claude/bin/harness metrics` — trend movement in the relevant metric.
+   - `python3 ~/.claude/bin/harness verify --attribution` — attribution of observed change to the edited component.
+   - The git/file diff of the edited component (`git log`, `git diff` on the file the fix targeted).
+   - The NEXT harness-map run's headline numbers, compared against the `predicted_impact` (e.g. "always-loaded tokens −800", "dup pairs 6→3").
+
+3. **Adjudicate against `predicted_impact`.** Compare the gathered evidence to what the prediction claimed. Decide: did the evidence confirm (`verified`) or contradict (`refuted`) the predicted effect?
+
+4. **Record the verdict.** Run `python3 ~/.claude/bin/harness decisions --verify <id> --status verified|refuted --note "..."`. The note MUST cite the evidence that drove the verdict.
+
+5. **Leave insufficient evidence PENDING.** If the evidence does not settle the prediction, leave it PENDING and record the reason it could not be adjudicated. NEVER guess a verdict — an unfalsified prediction stays pending, it does not get a fabricated verdict. Named rationalization: "it probably worked, mark it verified" → a guessed verdict destroys the falsifiability the prediction exists to provide; leave it PENDING.
+
+**Documented limitation:** hard auto-verification against per-component failure data is a later collector step. Until then, adjudicate from the evidence available today — `harness metrics` trends, `harness verify --attribution`, the component diff, and the harness-map map-diff (NEXT map's headline numbers vs `predicted_impact`).
