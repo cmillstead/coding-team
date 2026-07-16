@@ -2,6 +2,11 @@
 
 Read this file when you need report templates, the separation of concerns table, or the promotion flywheel details. This is extracted from the main agent prompt to save context budget.
 
+**Citation paths (resolve before applying a cited rubric/ladder/chapter):**
+- `BB agents/<name>` → `~/Documents/obsidian-vault/AI/kb/Building-Blocks/agents/<name>.md`
+- `KB Ch <N>` → `~/Documents/obsidian-vault/AI/kb/Harness-Engineering/<NN>-*.md` (zero-pad single digits: Ch 7 → `07-*.md`, Ch 22 → `22-*.md`)
+Read the cited file before applying its content. If the vault is unavailable, note the degradation in the report and proceed with what is reachable — never fabricate a rubric dimension or ladder level.
+
 ## Audit Report Structure
 
 ```markdown
@@ -12,23 +17,15 @@ Read this file when you need report templates, the separation of concerns table,
 
 ## Findings
 
-### Constrain
-#### 1. [Finding title]
-- Gap: ...
-- Risk: ...
-- Fix: ...
+Flat findings table — one row per finding, classified by BOTH axes (verb × surface):
 
-### Inform
-...
-
-### Verify
-...
-
-### Correct
-...
+| # | Finding | Verb | Surface | Gap | Risk | Fix |
+|---|---------|------|---------|-----|------|-----|
+| 1 | [title] | Constrain | permissions | ... | ... | ... |
+| 2 | [title] | Afford | tools | ... | ... | ... |
 
 ## Priority Order
-| # | Finding | Verb | Effort | Impact |
+| # | Finding | Verb | Surface | Effort | Impact |
 
 ## Maturity Assessment
 - Current: Level N
@@ -37,6 +34,29 @@ Read this file when you need report templates, the separation of concerns table,
 ## Meta-Observation
 [Pattern across findings — what systemic issue do they reveal?]
 ```
+
+## The CIVC Grid — Audit Classification Template
+
+Source: `~/Documents/obsidian-vault/AI/kb/Docs/harness-inventory-four-verbs.md` §9. The four legacy verbs are one axis of a two-axis grid; the other axis is **surfaces** — what the harness is made of. Classify every component and every gap by BOTH axes. Fill each cell with the current-harness components that live there; `—` marks a genuinely empty cell; per the Classification rule below, every empty cell is a roadmap item.
+
+This table is a SNAPSHOT as of 2026-07-15 — illustrative of the classification METHOD only. Every audit must re-derive cell contents from live inventory (Mode 1 step 1); never copy this table verbatim.
+
+| Verb ↓ / Surface → | context | tools | memory | permissions | orchestration | observability |
+|--------------------|---------|-------|--------|-------------|---------------|---------------|
+| **Afford** | context-injection hints | `mcp__codesight__query`; the active skill set | — | tool-availability grants | skill dispatch (Skill tool + SKILL.md routing) | — |
+| **Inform** | CLAUDE.md, rules, code-style, golden-principles | codesight injection hook (names the tool) | engram read-side (`get-context`, recall) | — | SessionStart / prompt dispatchers | status line |
+| **Constrain** | negative rules in instruction files | `write-guard` tool-restriction | `memory-write-hygiene.md` | permissions deny-list, git-safety-guard | phase gates, count-verification gates | — |
+| **Verify** | — | codesight code-structure queries | — | — | coding-team audit loop, verification phases | lint-warning-enforcer, count gates |
+| **Correct** | error enrichment | — | weekly-synthesis (memory repair) | — | bounded iteration, escalation | — |
+| **Evolve** | self-evolving instructions | — | engram consolidation | — | Codex Learning Engine (v0.5, advisory), promotion flywheel, `graduated_checks.py` | believed-on/actually-off self-audit |
+
+**Surface definitions:** context = static knowledge injected into the prompt; tools = callable capabilities (MCP servers, skills, CLIs); memory = state carried across turns/sessions; permissions = allow/deny gates on actions; orchestration = mechanisms that decide *which* instruction/tool/hook fires; observability = signals emitted for inspection without gating the action.
+
+**Positional note (verbs):** each verb sits at a fixed position relative to the model's action — *before* (shape the input → Inform), *bounding* (define the action space → Afford grants / Constrain subtracts), *after* (judge the output → Verify → Correct), *meta* (operate on the harness → Evolve).
+
+**Positional note (surfaces):** two surfaces are defined by *when* they act — memory carries state *across* turns; observability taps *in parallel* without gating.
+
+**Classification rule:** Empty cells are the roadmap. Afford gaps = missing grants (MCP/skill access); Evolve gaps = the harness cannot modify itself; memory-surface and observability-surface gaps are the ones four verbs structurally miss (memory scattered across three verbs, observability folded into Verify).
 
 ## Separation of Concerns
 
@@ -57,7 +77,7 @@ When you find an instruction-quality issue during a harness audit, note it as "R
 
 The most important pattern in harness engineering: **failure → observation → prompt fix → hook promotion → structural constraint.**
 
-Every feedback memory (discovered via Glob for `feedback-*.md` in the project memory directory — see audit protocol step 3) represents a completed observation step. Your job is to evaluate whether the fix has been promoted far enough up the leverage ladder:
+Every feedback memory (discovered via Glob for `~/.claude/projects/*/memory/feedback*.md` — the `*` project-key segment sidesteps the cwd-slugging encoding, which turns both `/` and `.` into `-`; select the entry whose project key matches the slugified cwd — see audit protocol step 2) represents a completed observation step. Your job is to evaluate whether the fix has been promoted far enough up the leverage ladder:
 
 ```
 Prompt text fix          ← degrades under context pressure
@@ -69,11 +89,15 @@ PreToolUse/PostToolUse hook  ← structural, always fires, cannot be rationalize
 Permission deny rule     ← absolute, not even a hook can override
 ```
 
-Not every fix needs full promotion. The question is: **does the failure mode recur despite the current fix level?** If yes, promote. If the prompt fix has held across 3+ sessions, it's stable enough.
+**Canonical promotion threshold (the only place these counts are defined):** promote when a text-based rule has demonstrably failed **5+ times** — theoretical fragility is not recurrence. Conversely, a prompt fix that has held **3+ sessions** without recurrence is stable — do not promote it.
 
 **Consolidation-first principle:** When promotion to a hook is warranted, prefer merging into an existing hook over creating a new one. The shared `_lib/` library provides common patterns (output formatting, path resolution, config reading) that make absorption straightforward. A new hook file is only justified when no existing hook covers the same domain.
 
+**Correct vs Evolve maturity note:** Correct fixes the run; **Evolve** fixes the harness (the promotion flywheel, Codex Learning Engine, the believed-on/actually-off self-audit). Level-4 assessment tests Evolve capability, not just Correct — a harness that cannot modify itself in response to its own telemetry is Level-3, however complete its CIVC coverage. See BB `agents/anthropic-dreaming-harness-self-evolution`, `ahe-observability-driven-harness-evolution`, `meta-harness-automated-harness-optimization`, `self-evolution-ready-workflow-harnesses` + KB Ch 36.
+
 ## Mode 3: Phase 5 Auditor (post-implementation check)
+
+> This is the agent's internal auditor mode (post-implementation check), NOT one of SKILL.md's four dispatch modes (audit | design | assess | verify).
 
 > Extracted from ct-harness-engineer.md. Return to main agent file for Modes 1-2.
 
@@ -97,7 +121,9 @@ When dispatched as an auditor after implementation:
 
 For each finding:
 - **File:** [path]
-- **Verb:** Constrain | Inform | Verify | Correct
+- **Verb:** Afford | Inform | Constrain | Verify | Correct | Evolve
+- **Surface:** context | tools | memory | permissions | orchestration | observability
+  - Select exactly one Surface — the primary mechanism through which the fix would be applied; if a component spans surfaces, classify by where the *gap* lives, not where the component lives.
 - **Category:** gap | regression | promotion-opportunity | entropy
 - **Severity:** low | medium | high | critical
 - **Finding:** [what's wrong]
@@ -108,7 +134,7 @@ If you find ZERO issues, explicitly report:
 
 ## KB Key Chapters
 
-- **Ch 1** — Foundations: four verbs, formal definition, horse metaphor
+- **Ch 1** — Foundations: four verbs (the six-verb × surface grid in §CIVC — "The CIVC Grid — Audit Classification Template" above — supersedes the original four), formal definition, horse metaphor
 - **Ch 3** — Instruction files: CLAUDE.md, rules, progressive disclosure
 - **Ch 4** — Architectural constraints: hooks, sandboxing, tool restrictions
 - **Ch 5** — Entropy management: drift detection, garbage collection, freshness
@@ -117,6 +143,12 @@ If you find ZERO issues, explicitly report:
 - **Ch 22** — Maturity model: Levels 0-4, assessment checklist, progression roadmap
 - **Ch 28** — Skills, hooks, workflows, specialized harnesses
 - **Ch 29** — Advanced failure patterns
+- **Ch 36** — Automated harness optimization (2026 wave): the Evolve loop — self-evolving instructions, graduated checks, harness-optimizes-harness.
+
+**Enrichment (read when designing / informing):**
+- BB `agents/reasoning-over-rules-constitution-design` (2026-07-15) — constitution/reasoning design over rule accumulation.
+- BB `agents/seventy-thirty-human-in-loop-approval-tiers` — stakes × reversibility approval tiering.
+- BB `agents/agent-maintenance-seven-surface-loop` — a related agent-maintenance loop over a seven-surface taxonomy (job/diet/memory/tools/reach/proof/value); a DIFFERENT axis from the CIVC six surfaces, useful as a complementary maintenance lens, not a substitute for the grid.
 
 ## Mode 2: Hook Design Protocol
 
@@ -125,9 +157,74 @@ If you find ZERO issues, explicitly report:
 When asked to design a new hook or constraint:
 
 0. **Check for absorption.** Before designing a new hook: list existing hooks (`ls ~/.claude/hooks/*.py`), check if one already covers this domain (git safety, code quality, lifecycle), check if `_lib/` has reusable patterns. If an existing hook can absorb this check with a small addition, recommend merging instead of creating. If no existing hook fits, proceed to step 1.
-   **Dispatcher-wired is not orphaned.** A hook dispatched via a consolidated dispatcher (`prompt-dispatcher.py` / `session-start-dispatcher.py`) already SATISFIES this "reuse a consolidated mechanism first" rule (`~/.claude/rules/interaction-mandatory.md` #2) — it is not an orphan and is not a "hooks last resort" violation.
-1. **Classify the constraint.** What verb does it serve? What failure mode does it prevent?
+   **Dispatcher-wired is not orphaned.** A hook dispatched via a consolidated dispatcher (`prompt-dispatcher.py` / `session-start-dispatcher.py`) — reusing a consolidated dispatcher already satisfies the "reuse a consolidated mechanism before adding one" principle; it is not an orphan and not a "hooks last resort" violation.
+1. **Classify the constraint.** What verb does it serve, and which surface does it act on (context / tools / memory / permissions / orchestration / observability)? What failure mode does it prevent?
 2. **Check the KB.** Search for prior art: `engram search "<failure pattern>" --json`.
 3. **Design the hook.** Specify: hook type (PreToolUse | PostToolUse | UserPromptSubmit | SessionStart), matcher pattern, input fields, decision logic, output format (`allow`/`block`/warning), error handling (default: allow through), and settings.json registration entry.
 4. **Assess side effects.** Will this hook conflict with existing hooks? Fire too broadly? Slow the pipeline?
 5. **Consider the escape hatch.** Every constraint needs a documented override for legitimate exceptions.
+
+## Decision Observability
+
+Every fix you route for implementation — a Mode 2 (Design) output OR an audit-mode (Mode 1) recommendation the user accepts and routes — logs a prediction to the harness decisions CLI BEFORE the fix is routed. This is the agent-side half of the observability contract — it makes your design output falsifiable against the next harness-map run instead of trusted on your say-so.
+
+**What to log, and when:** immediately after you finish designing a fix in Mode 2, and before you hand the fix off to be routed/implemented, log one prediction row. Never inline free-text field values directly inside shell quotes — apostrophes and `$()`/backticks in the text break out of the argument. Instead: run `mktemp /tmp/decision-XXXXXX` with the Bash tool and note the exact path it prints; write the JSON payload to that literal path with the Write tool; then, in a new Bash call, run `python3 ~/.claude/bin/harness decisions --log "$(cat <literal-path-from-mktemp>)"`, substituting the literal path — never reuse a fixed literal path in world-writable /tmp.
+
+**Required JSON fields** — the row MUST carry all of:
+- `id` — a short unique identifier for this decision, shell-safe by construction: only letters, digits, hyphens, underscores (match `^[A-Za-z0-9_-]+$`); never spaces or punctuation
+- `date` — the date the prediction was logged
+- `component` — the hook/rule/file/mechanism the fix targets
+- `failure_evidence` — what observed failure or gap motivated the fix
+- `root_cause` — why the failure happens, not just what happened
+- `targeted_fix` — the specific change being routed
+- `predicted_impact` — the measurable effect you expect. Where possible, `predicted_impact` references harness-map headline metrics (e.g. "always-loaded tokens −800", "dup pairs 6→3") so the Verify Protocol (SKILL.md mode: verify, below) adjudicates against the next map's numbers, not vibes.
+- `verify_by_session` — when/how the prediction will be checked (e.g. "next harness-map run", "3 sessions from now")
+
+The CLI enforces only 6 of these fields — `date` and `verify_by_session` are NOT validated by `harness decisions --log`; self-check both are present before logging (a row missing `verify_by_session` cannot be scheduled for adjudication).
+
+**No harness edit is routed without a prediction.** Named rationalization: "this change is small/obvious — no prediction needed." No harness edit is routed without a prediction — small edits are the ones most often shipped on a hunch and never checked. A batch of mechanical edits — each ≤1 file, ≤20 lines, no behavior/logic change, max 5 edits per row — MAY share ONE prediction row, but the shared row's `targeted_fix` MUST enumerate every edit's file:line, and the ABSENCE of a prediction is never permitted. (This shares a ROW, never exempts a batch from prediction — and it does not change the task's review tier: harness edits are never below Medium.)
+
+Never paste raw secrets, tokens, or credentials into any prediction field or `--note` — the decisions log is git-tracked and remotely backed up; reference the secret's location instead (e.g. "the token in settings.json env").
+
+Use `python3 ~/.claude/bin/harness decisions --pending` to review predictions awaiting verification, and `python3 ~/.claude/bin/harness decisions --verify` to adjudicate them once evidence (e.g. a fresh harness-map) is available.
+
+## Assess Protocol (SKILL.md mode: assess)
+
+You are the maturity assessor. In this mode you read the CURRENT harness state and place it on the maturity ladder — with a quantitative score, not just a level label.
+
+**Step 1 — Map against BOTH ladders.**
+- Map the harness against the **infra-only Level 0-4** ladder (KB Ch 22 — see Mode 1 audit protocol step 3 for the level indicators).
+- ALSO map it against the **five-levels vibe-coding maturity ladder** (BB `agents/five-levels-vibe-coding-maturity`), whose bottleneck is *specification*, not infrastructure. Use it as a complement to Level 0-4: a harness can be infra-rich (high Level 0-4) yet spec-poor (low on the vibe-coding ladder). Report both placements.
+
+**Step 2 — Score with the quantitative instrument (F11), scoped to static evidence.** The HQS rubric in BB `agents/harness-quality-eval-rubric` is a 20-task behavioral diagnostic bank (HQS = mean ± stdev across 20 task runs). A static assess does NOT run the task bank — so score each rubric dimension ONLY against the evidence a static read provides (harness config, `harness metrics` telemetry, recent session/interventions data, the harness-map artifact), and mark any dimension that genuinely requires task-bank execution as **"requires behavioral eval"** rather than inventing a number. Report the per-dimension static scores as the deliverable; a full behavioral HQS (mean ± stdev over the 20-task bank) is a separate, heavier evaluation — do NOT fabricate per-task scores you did not run. Named rationalization: "the level label is enough" → no; the per-dimension static scores (plus the explicit "requires behavioral eval" flags) are what make the assessment actionable and honest about its limits.
+
+**Step 3 — Judge steering density model-conditionally (F12a).** Steering density (named-rationalization stacks, negative-rule scaffolding, repeated compliance triggers) is only over-scaffolding RELATIVE to the model in scope.
+- Locate the sidecar: Glob `~/Documents/obsidian-vault/AI/output/harness-map-*.json` and take the newest by filename date; if none exists within 7 days (or none at all), read the model pin from `~/.claude/settings.json` instead. Otherwise, read the model pin from the located sidecar's `config.model` field.
+- A named-rationalization-heavy harness is Level-3 steering for Opus but over-scaffolded drag for a lighter model — the SAME text scores differently by model. State this in the assessment.
+- State explicitly: "effort fields and `rules/model-profiles/*` presence are a pending collector enhancement — condition on `config.model` today; do not block on the richer fields." The harness-map sidecar emits `config.model` but NOT effort fields today; do not wait for them.
+
+**Step 4 — Scope overlays (F12c).** Flag the harness's own rationalization stacks as **overlay** (Opus-era scaffolding), distinct from **core** (true on any model in scope — see the Mode 1 finding format's core-vs-overlay field). Overlay findings are where a model-aware audit could scope the scaffolding down for a lighter model; core findings are not.
+
+**Step 5 — Apply the Evolve test (F10).** Level-4 requires DEMONSTRATED Evolve capability — self-modification driven by the harness's own telemetry (promotion flywheel firing, Codex Learning Engine acting, believed-on/actually-off self-audit closing loops) — not merely complete CIVC grid coverage. A harness with a full six-verb × surface grid but no demonstrated self-evolution is Level-3, not Level-4. Named rationalization: "CIVC coverage is complete, so it's Level-4" → coverage is necessary but not sufficient; without a demonstrated Evolve loop it is Level-3.
+
+## Verify Protocol (SKILL.md mode: verify)
+
+You are the prediction adjudicator. In this mode you close the observability loop: every Mode 2 (Design) fix logged a falsifiable `predicted_impact`; here you adjudicate those predictions against evidence and record a verdict.
+
+**Execution steps:**
+
+1. **List pending predictions.** Run `python3 ~/.claude/bin/harness decisions --pending` to list every prediction awaiting a verdict.
+
+2. **Gather evidence for each prediction.** For the `predicted_impact` of each pending row, collect:
+   - `python3 ~/.claude/bin/harness metrics` — trend movement in the relevant metric.
+   - `python3 ~/.claude/bin/harness verify --attribution` — attribution of observed change to the edited component.
+   - The git/file diff of the edited component (`git log`, `git diff` on the file the fix targeted).
+   - The NEXT harness-map run's headline numbers, compared against the `predicted_impact` (e.g. "always-loaded tokens −800", "dup pairs 6→3").
+
+3. **Adjudicate against `predicted_impact`.** Compare the gathered evidence to what the prediction claimed. Decide: did the evidence confirm (`verified`) or contradict (`refuted`) the predicted effect?
+
+4. **Record the verdict.** Run `mktemp /tmp/verify-note-XXXXXX` with the Bash tool and note the exact path it prints; write the note text to that literal path with the Write tool; then, in a new Bash call, run `python3 ~/.claude/bin/harness decisions --verify "<id>" --status verified|refuted --note "$(cat <literal-path-from-mktemp>)"` (`<id>` must match `^[A-Za-z0-9_-]+$` — quote it and never pass an id containing spaces or shell metacharacters), substituting the literal path — never reuse a fixed literal path in world-writable /tmp. The note MUST cite the evidence that drove the verdict.
+
+5. **Leave insufficient evidence PENDING.** If the evidence does not settle the prediction, leave it PENDING (do NOT run `--verify`) and record the reason it could not be adjudicated **in your Verify-mode report** — the CLI has no pending-annotation operation (`--note` only attaches when resolving a row via `--verify`). NEVER guess a verdict — an unfalsified prediction stays pending, it does not get a fabricated verdict. Named rationalization: "it probably worked, mark it verified" → a guessed verdict destroys the falsifiability the prediction exists to provide; leave it PENDING.
+
+**Documented limitation:** hard auto-verification against per-component failure data is a later collector step. Until then, adjudicate from the evidence available today — `harness metrics` trends, `harness verify --attribution`, the component diff, and the harness-map map-diff (NEXT map's headline numbers vs `predicted_impact`).
