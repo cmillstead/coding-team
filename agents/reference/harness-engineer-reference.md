@@ -168,7 +168,7 @@ When asked to design a new hook or constraint:
 
 Every fix you route for implementation — a Mode 2 (Design) output OR an audit-mode (Mode 1) recommendation the user accepts and routes — logs a prediction to the harness decisions CLI BEFORE the fix is routed. This is the agent-side half of the observability contract — it makes your design output falsifiable against the next harness-map run instead of trusted on your say-so.
 
-**What to log, and when:** immediately after you finish designing a fix in Mode 2, and before you hand the fix off to be routed/implemented, log one prediction row with `python3 ~/.claude/bin/harness decisions --log '<json>'`.
+**What to log, and when:** immediately after you finish designing a fix in Mode 2, and before you hand the fix off to be routed/implemented, log one prediction row. Never inline free-text field values directly inside shell quotes — apostrophes and `$()`/backticks in the text break out of the argument. Instead, write the JSON payload to a file first with the Write tool (e.g. `/tmp/decision-<id>.json`), then run `python3 ~/.claude/bin/harness decisions --log "$(cat /tmp/decision-<id>.json)"`.
 
 **Required JSON fields** — the row MUST carry all of:
 - `id` — a short unique identifier for this decision
@@ -177,10 +177,14 @@ Every fix you route for implementation — a Mode 2 (Design) output OR an audit-
 - `failure_evidence` — what observed failure or gap motivated the fix
 - `root_cause` — why the failure happens, not just what happened
 - `targeted_fix` — the specific change being routed
-- `predicted_impact` — the measurable effect you expect. Where possible, `predicted_impact` references harness-map headline metrics (e.g. "always-loaded tokens −800", "dup pairs 6→3") so Mode 4 (Verify) adjudicates against the next map's numbers, not vibes.
+- `predicted_impact` — the measurable effect you expect. Where possible, `predicted_impact` references harness-map headline metrics (e.g. "always-loaded tokens −800", "dup pairs 6→3") so the Verify Protocol (SKILL.md mode: verify, below) adjudicates against the next map's numbers, not vibes.
 - `verify_by_session` — when/how the prediction will be checked (e.g. "next harness-map run", "3 sessions from now")
 
-**No harness edit is routed without a prediction.** Named rationalization: "this change is small/obvious — no prediction needed." No harness edit is routed without a prediction — small edits are the ones most often shipped on a hunch and never checked. A batch of trivial mechanical edits MAY share ONE prediction row, but the ABSENCE of a prediction is never permitted.
+The CLI enforces only 6 of these fields — `date` and `verify_by_session` are NOT validated by `harness decisions --log`; self-check both are present before logging (a row missing `verify_by_session` cannot be scheduled for adjudication).
+
+**No harness edit is routed without a prediction.** Named rationalization: "this change is small/obvious — no prediction needed." No harness edit is routed without a prediction — small edits are the ones most often shipped on a hunch and never checked. A batch of trivial mechanical edits — each meeting `phases/task-weight.md`'s Trivial tier (1 file, ≤20 lines, no behavior/logic change), max 5 edits per row — MAY share ONE prediction row, but the shared row's `targeted_fix` MUST enumerate every edit's file:line, and the ABSENCE of a prediction is never permitted.
+
+Never paste raw secrets, tokens, or credentials into any prediction field or `--note` — the decisions log is git-tracked and remotely backed up; reference the secret's location instead (e.g. "the token in settings.json env").
 
 Use `python3 ~/.claude/bin/harness decisions --pending` to review predictions awaiting verification, and `python3 ~/.claude/bin/harness decisions --verify` to adjudicate them once evidence (e.g. a fresh harness-map) is available.
 
@@ -219,7 +223,7 @@ You are the prediction adjudicator. In this mode you close the observability loo
 
 3. **Adjudicate against `predicted_impact`.** Compare the gathered evidence to what the prediction claimed. Decide: did the evidence confirm (`verified`) or contradict (`refuted`) the predicted effect?
 
-4. **Record the verdict.** Run `python3 ~/.claude/bin/harness decisions --verify <id> --status verified|refuted --note "..."`. The note MUST cite the evidence that drove the verdict.
+4. **Record the verdict.** Write the note text to a file first with the Write tool (e.g. `/tmp/verify-<id>-note.txt`), then run `python3 ~/.claude/bin/harness decisions --verify <id> --status verified|refuted --note "$(cat /tmp/verify-<id>-note.txt)"`. The note MUST cite the evidence that drove the verdict.
 
 5. **Leave insufficient evidence PENDING.** If the evidence does not settle the prediction, leave it PENDING (do NOT run `--verify`) and record the reason it could not be adjudicated **in your Verify-mode report** — the CLI has no pending-annotation operation (`--note` only attaches when resolving a row via `--verify`). NEVER guess a verdict — an unfalsified prediction stays pending, it does not get a fabricated verdict. Named rationalization: "it probably worked, mark it verified" → a guessed verdict destroys the falsifiability the prediction exists to provide; leave it PENDING.
 

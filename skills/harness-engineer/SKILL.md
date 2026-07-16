@@ -80,11 +80,13 @@ Adjudicate prior harness-edit predictions against accumulated evidence.
 
 ## Decision Observability
 
-You are running a predict→verify loop, not guess-and-tweak. Every harness edit `/harness-engineer` proposes MUST emit a prediction row via `python3 ~/.claude/bin/harness decisions --log '<json>'` BEFORE the edit ships, capturing `{failure_evidence, root_cause, targeted_fix, predicted_impact, verify_by_session}` (plus `id`, `date`, `component`).
+You are running a predict→verify loop, not guess-and-tweak. Every harness edit `/harness-engineer` proposes MUST emit a prediction row BEFORE the edit ships, capturing `{failure_evidence, root_cause, targeted_fix, predicted_impact, verify_by_session}` (plus `id`, `date`, `component`). Never inline free-text field values inside shell quotes — write the JSON to a file with the Write tool first, then run `python3 ~/.claude/bin/harness decisions --log "$(cat <file>)"`.
 
 The prediction is the contract: it states what failure the edit fixes and how you will know it worked. A later `/harness-engineer verify` run adjudicates it. An edit with no prediction is unverifiable — exactly the guess-and-tweak this loop removes.
 
-Named rationalization: "this change is small/obvious — no prediction needed." No harness edit ships without a prediction. A batch of trivial mechanical edits MAY share ONE prediction row, but the ABSENCE of a prediction is never permitted. Small edits are the ones most often shipped on a hunch and never checked — that risk is why the invariant holds even under the batch escape.
+Named rationalization: "this change is small/obvious — no prediction needed." No harness edit ships without a prediction. A batch of trivial mechanical edits — each meeting `phases/task-weight.md`'s Trivial tier, max 5 edits per row — MAY share ONE prediction row enumerating every edit's file:line, but the ABSENCE of a prediction is never permitted. Small edits are the ones most often shipped on a hunch and never checked — that risk is why the invariant holds even under the batch escape.
+
+Never paste raw secrets, tokens, or credentials into any prediction field or `--note` — the decisions log is git-tracked and remotely backed up; reference the secret's location instead (e.g. "the token in settings.json env").
 
 ## Routing
 

@@ -129,7 +129,7 @@ Evaluate the current harness state against the CIVC six-verb × surface grid and
 - **Inherit, never re-derive** the inventory. Direct file reads are for deep dives, not re-listing what the map already listed.
 - **Blind spots propagate.** Carry the map's `inaccessible` list, `blind_spots`, and `errors[]` into the audit report verbatim — inaccessible ≠ clean, at both layers.
 - **The map's flags are a suspect list, not findings.** harness-map caps at `probation` and never judges; the audit adjudicates each drag candidate to a disposition (fix/defer/false-positive), completionist-style.
-- **Predictions become measurable.** `predicted_impact` in each `decisions --log` row references map headline metrics where possible, so Mode 4 (Verify) adjudicates against the next map's numbers.
+- **Predictions become measurable.** `predicted_impact` in each `decisions --log` row references map headline metrics where possible, so verify mode adjudicates against the next map's numbers.
 
 2. **Check for promotion gaps.** Read `~/.claude/projects/*/memory/feedback*.md` — the `*` project-key segment sidesteps the cwd-slugging encoding (which turns both `/` and `.` into `-`, so hand-encoding a path is unreliable); select the entry whose project key matches the slugified current working directory. For each failure mode, before recommending hook promotion, apply this pre-creation gate:
    - **(a) Absorption check:** Can an existing hook absorb this via `_lib/` patterns? `ls ~/.claude/hooks/*.py` to inventory.
