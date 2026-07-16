@@ -5,7 +5,7 @@ description: "Use when designing or auditing Claude Code harness infrastructure 
 
 # /harness-engineer — Harness Infrastructure Design & Audit
 
-Designs and audits the infrastructure that governs AI agent behavior: hooks, rules, settings, observability, constraint promotion, and maturity progression. Born from the four verbs (constrain, inform, verify, correct) and trained on the Harness Engineering knowledge base (34 chapters).
+Designs and audits the infrastructure that governs AI agent behavior: hooks, rules, settings, observability, constraint promotion, and maturity progression. Born from the CIVC six-verb × surface grid (afford, inform, constrain, verify, correct, evolve) and trained on the Harness Engineering knowledge base (36 chapters).
 
 ## When to Use
 
@@ -24,11 +24,11 @@ Designs and audits the infrastructure that governs AI agent behavior: hooks, rul
 
 ### 1. Audit (default when no args)
 
-Full harness audit against the four verbs and maturity model.
+Full harness audit against the CIVC six-verb × surface grid and maturity model.
 
 **What it does:**
 - Inventories all hooks, rules, settings, instruction files
-- Classifies each by verb (constrain/inform/verify/correct)
+- Classifies each by verb (afford/inform/constrain/verify/correct/evolve)
 - Checks feedback memories for promotion gaps (prompt fix → hook)
 - Assesses maturity level (0-4) and identifies the bridge to next level
 - Produces a prioritized findings report
@@ -40,10 +40,12 @@ Full harness audit against the four verbs and maturity model.
 Design a new hook, rule, or constraint for a specific failure mode.
 
 **What it does:**
-- Classifies the constraint by verb
+- Classifies the constraint by verb × surface
 - Searches the KB for prior art and patterns
 - Specifies hook type, matcher, logic, registration, escape hatch
 - Assesses side effects and conflicts with existing hooks
+
+**Read when designing a hook:** `@~/.claude/rules-on-demand/hook-stdlib-naming.md` — the hook naming/stdlib conventions. Load this rule only in Design mode; it does not apply to audit, assess, or verify.
 
 **Invoke:** `/harness-engineer design <description of what to constrain>`
 
@@ -59,11 +61,33 @@ Quick maturity assessment without a full audit.
 
 **Invoke:** `/harness-engineer assess`
 
+### 4. Verify
+
+Adjudicate prior harness-edit predictions against accumulated evidence.
+
+**What it does:**
+- Runs `python3 ~/.claude/bin/harness decisions --pending` to list predictions awaiting a verdict
+- For each prediction, gathers evidence: `harness metrics` trends, `python3 ~/.claude/bin/harness verify --attribution` (plus `--phi`/`--overview` as relevant) to ground the verdict in failure-attribution and loop-risk data rather than metrics trends alone, the git/file diff of the edited component, and direct observation of behavior since the edit
+- Adjudicates each against its `predicted_impact`, then records the verdict via `python3 ~/.claude/bin/harness decisions --verify <id> --status verified|refuted --note "..."`
+- If evidence is insufficient, leaves the prediction pending with a noted reason — never guesses a verdict
+
+**Documented limitation:** hard auto-verification against per-component failure data arrives in Step 3 of the harness audit. Until then, verdicts use trends + diffs + direct observation, not automated failure-rate comparison.
+
+**Invoke:** `/harness-engineer verify`
+
+## Decision Observability
+
+You are running a predict→verify loop, not guess-and-tweak. Every harness edit `/harness-engineer` proposes MUST emit a prediction row via `python3 ~/.claude/bin/harness decisions --log '<json>'` BEFORE the edit ships, capturing `{failure_evidence, root_cause, targeted_fix, predicted_impact, verify_by_session}` (plus `id`, `date`, `component`).
+
+The prediction is the contract: it states what failure the edit fixes and how you will know it worked. A later `/harness-engineer verify` run adjudicates it. An edit with no prediction is unverifiable — exactly the guess-and-tweak this loop removes.
+
+Named rationalization: "this change is small/obvious — no prediction needed." No harness edit ships without a prediction. A batch of trivial mechanical edits MAY share ONE prediction row, but the ABSENCE of a prediction is never permitted. Small edits are the ones most often shipped on a hunch and never checked — that risk is why the invariant holds even under the batch escape.
+
 ## Routing
 
 This skill dispatches the `ct-harness-engineer` native agent (`~/.claude/agents/ct-harness-engineer.md`).
 
-**For standalone use:** Dispatch via Agent tool with model `opus`. Pass the mode (audit/design/assess) and any user arguments.
+**For standalone use:** Dispatch via Agent tool with model `opus`. Pass the mode (audit/design/assess/verify) and any user arguments.
 
 **From /coding-team Phase 2:** The team leader dispatches as a design worker alongside other specialists. The harness engineer evaluates the task through the constraint/observability lens.
 
@@ -74,7 +98,7 @@ This skill dispatches the `ct-harness-engineer` native agent (`~/.claude/agents/
 When invoking the agent, include:
 
 ```
-Mode: [audit | design | assess]
+Mode: [audit | design | assess | verify]
 Working directory: [path]
 User request: [what the user asked for]
 
@@ -86,4 +110,4 @@ Trigger: [when should the constraint fire]
 
 The agent has access to the engram CLI (`engram search … --json`, `engram query-nodes … --json`) for KB lookups, codesight-mcp for code analysis, and Bash for inspecting hook scripts and settings.
 
-**Fallback if `engram` is unavailable:** if `engram` is not on PATH, or the dev server is down, retry once; if it still fails, degrade to Grep/Read over `cookbook/` and `docs/reports/` for the same lookups — consistent with the repo's MCP-resilience pattern (retry once max, then degrade to built-in tools).
+**Fallback if `engram` is unavailable:** if `engram` is not on PATH, or the dev server is down, retry once; if it still fails, degrade to Grep/Read over `~/.claude/skills/coding-team/agents/reference/harness-engineer-reference.md` (key chapters, guaranteed present) and — best-effort, only if present — the vault KB at `~/Documents/obsidian-vault/AI/kb/Harness-Engineering/`, for the same lookups. Consistent with the repo's MCP-resilience pattern: retry once max, then degrade to built-in tools.
