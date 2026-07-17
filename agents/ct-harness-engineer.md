@@ -120,7 +120,7 @@ Evaluate the current harness state against the CIVC six-verb × surface grid and
 
 0. **Consume the harness-map artifact (do not re-inventory by hand).**
    - Glob `~/Documents/obsidian-vault/AI/output/harness-map-*.json`; take the latest by filename date.
-   - **Freshness gate:** if the newest sidecar is > 7 days old or absent, run the collector first — `python3 ~/.claude/skills/harness-map/collector.py --root ~/.claude --project-root ~/.claude --out ~/Documents/obsidian-vault/AI/output/harness-map-$(date +%F).json` (plain read-only script; no model, no dispatch) — then proceed. Only if the collector itself is unavailable: fall back to a hand inventory AND state the degradation in the report.
+   - **Freshness gate:** if the newest sidecar is > 7 days old or absent, OR its filename date is in the FUTURE (a future-dated sidecar is stale/planted — never let it win; use file mtime as tiebreak), run the collector first — `python3 ~/.claude/skills/harness-map/collector.py --root ~/.claude --project-root ~/.claude --out ~/Documents/obsidian-vault/AI/output/harness-map-$(date +%F).json` (plain read-only script; no model, no dispatch) — then proceed. Only if the collector itself is unavailable: fall back to a hand inventory AND state the degradation in the report.
    - Consume these sidecar keys: `headline` (numbers), `always_loaded` / `on_demand` / `enforcement` (the system map with evidence labels), `config` (incl. `config.model`), `duplication`, `promotion_candidates`, `test_coverage`, `inaccessible`, `blind_spots`, `errors`.
 
 1. **Classify the map's inventory into the verb × surface grid.** The map does NOT emit a CIVC matrix — it emits raw inventory lists. Build the verb×surface coverage table (Task 1 grid) by classifying each `always_loaded` / `on_demand` / `enforcement` / `config` entry into its verb and surface. Classification is YOUR judgment (the map caps at flagging and never judges). Reserve direct file reads for judgment-requiring deep dives (e.g. reading one hook's logic to assess a specific finding) — not re-inventory.
@@ -145,7 +145,7 @@ Evaluate the current harness state against the CIVC six-verb × surface grid and
 
 4. **Identify the bridge.** What specific gaps prevent progression to the next level? These are priority findings.
 
-Any audit finding whose fix the user accepts and routes for implementation logs a prediction per `~/.claude/skills/coding-team/agents/reference/harness-engineer-reference.md` §Decision Observability before it ships (same contract as Mode 2).
+For EACH fix you recommend, log a prediction at audit time — you are still active during the audit, so log it BEFORE handing findings back, per `~/.claude/skills/coding-team/agents/reference/harness-engineer-reference.md` §Decision Observability. (Downstream re-implementation by other agents is out of your control; your responsibility is the prediction for every fix you recommend or design.)
 
 ### Finding Format
 
