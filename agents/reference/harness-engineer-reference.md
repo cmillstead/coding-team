@@ -37,7 +37,7 @@ Flat findings table — one row per finding, classified by BOTH axes (verb × su
 
 ## The CIVC Grid — Audit Classification Template
 
-Source: `~/Documents/obsidian-vault/AI/kb/Docs/harness-inventory-four-verbs.md` §9. The four legacy verbs are one axis of a two-axis grid; the other axis is **surfaces** — what the harness is made of. Classify every component and every gap by BOTH axes. Fill each cell with the current-harness components that live there; `—` marks a genuinely empty cell; per the Classification rule below, every empty cell is a roadmap item.
+Source: `~/Documents/obsidian-vault/AI/kb/Docs/harness-inventory-four-verbs.md` §9. Six verbs (grown from the source doc's four legacy verbs) are one axis of a two-axis grid; the other axis is **surfaces** — what the harness is made of. Classify every component and every gap by BOTH axes. Fill each cell with the current-harness components that live there; `—` marks a genuinely empty cell; per the Classification rule below, every empty cell is a roadmap item.
 
 This table is a SNAPSHOT as of 2026-07-15 — illustrative of the classification METHOD only. Every audit must re-derive cell contents from live inventory (Mode 1 step 1); never copy this table verbatim.
 
