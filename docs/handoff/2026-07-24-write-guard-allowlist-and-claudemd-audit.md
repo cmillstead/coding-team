@@ -199,3 +199,90 @@ exception in the plan so a later auditor doesn't narrow it and reopen a fail-ope
 ### Next action after compaction
 Apply R1-R5 to the plan (R1 and R2 are blocking; R2 needs the EM decision above, defaulting to option (a)),
 then re-review, then implement. `wg-codex` (Codex gate, REQUIRED at Medium) was still running.
+
+---
+
+## Round 2 — Codex gate returned, R1-R5 + Codex findings APPLIED (post-compaction)
+
+`wg-codex` completed: 438K transcript at `scratchpad/wg-codex-r1.txt`. **VERDICT: REVISE**, ~6 P1 /
+~12 P2 / ~4 P3. It ran for real this time (unlike the earlier silent `codex-gate` no-op).
+
+### Cross-model agreement (highest confidence)
+Codex independently found **R1's bootstrap deadlock**. Two models, two methods, same defect.
+
+### Applied to the plan — all of R1-R5 plus every Codex P1
+
+**Design changes (not patches):**
+1. **Reader takes `root` as a parameter** instead of calling `_git_main_root()` a second time.
+   `check_phase5` derives it as `active.resolve().parents[2]` — `find_active_plan()` only ever globs
+   `<root>/docs/plans/*.md`, so that IS the root by construction. This single change killed four
+   findings at once: the double-git-call P2, the "root is None → full hook ALLOWS" P1 fail-open, the
+   "nonexistent root accepted" P1, AND the `allowlist_repo` fixture's `CODING_TEAM_MAIN_ROOT`
+   env-mutation problem (R4's first half). No `git rev-parse` remains on this codepath.
+2. **Empty entries now REJECT** rather than being filtered. `a.md,,b.md` was silently normalized into a
+   valid declaration — a typo becoming an authorization.
+3. **`_assert_silent_allow()` helper** replaces all six vacuous `if parsed is not None:` positive
+   assertions. Codex's sharpest finding: an import-time crash also yields `parsed is None`, so those
+   tests passed green against a completely broken hook. Now asserts rc==0, empty stdout, no traceback.
+   All 13 `_run` sites changed from `_stderr, _rc` to captured `stderr, rc`.
+4. **Bootstrap section added** (R1): env var for Tasks 1-2 only → deploy Task 2 → self-declare in this
+   plan's own frontmatter → unset env var → flip `in-progress` → Tasks 3-5 dogfood the allowlist.
+   Includes a verification gate at the handoff point.
+
+**R2 — DECISION REVERSED, and this matters.** The pre-compaction default was "add `~/.claude` as a
+second root." Investigation killed it: every `ct-*` agent, every coding-team rule, and
+`~/.claude/CLAUDE.md` are **symlinks into this repo** (`~/.claude/CLAUDE.md` →
+`skills/coding-team/config/CLAUDE.md`). The matcher `.resolve()`s both sides, so all of them are
+ALREADY declarable as repo-relative paths. The only genuinely undeclarable gated files are
+`~/.claude/agents/bt-*.md`, which belong to the brainstorming-team project — and editing those from a
+coding-team session is already forbidden by session-directory discipline in `CLAUDE.md`. So the block
+is CORRECT, not a limitation; a second root would have authorized what another rule forbids. The block
+message now names the real remedy (restart in the owning repo). This is not ff866aa's D1: that
+documented an *unreachable* route, this documents a *reachable* one.
+
+**Plan-accuracy corrections** (Codex found ~8 of these — the plan asserted things about existing files
+that were false):
+- Task 1 import instruction (R3): `test_active_plan.py` has NO `_lib.active_plan` import and no
+  `sys.path` setup — it uses subprocess + sentinel counters. Now specifies the `sys.path` block from
+  `test_write_guard.py:29-32` explicitly.
+- Failure-modes table rows claiming tests that were never written are now marked **MUST ADD** with
+  named tests, plus a note that the table is a checklist, not a record.
+- `test_declared_but_unreadable_plan_blocks` (R4 second half) passes for the wrong reason —
+  `find_active_plan()` raises `AmbiguousActivePlanError` at `active_plan.py:133-137` before the reader
+  runs. Verified by reading the source. Test kept, relabeled; the row now credits only T1's unit test.
+- `except (OSError, ValueError)` on both resolve sites (R5) — NUL bytes raise `ValueError`.
+- "audit trail" / "auditable" claims removed — they contradicted the plan's own Context Brief item 5
+  (`docs/plans/` is gitignored).
+- `test_agent_rule_refs.py` is NOT in the smoke job (`ci.yml:30`); it's gated by the full-suite job
+  (`:61`). Verified by reading the workflow.
+- Task 4's "complete set" of stale docs omitted `phases/named-rationalizations.md:21`. Added — but its
+  ROUTING rule is deliberately retained; only the *sufficiency* implication is stale. Step 5's grep
+  expectation changed from "no matches" to "exactly one match".
+- Task 5 Step 4 split into **4a (reader check, honestly labeled NOT end-to-end)** and **4b (genuine
+  E2E)** — the old step claimed "temporary flip and restore" while explicitly doing neither, and never
+  invoked the hook. 4b now runs `write-guard.py` as a process in a disposable git repo and asserts
+  declared→allow AND undeclared→block.
+- `git add -A` → explicit paths (the tree carries unrelated `.claude/settings.local.json`).
+
+### Recorded but deliberately NOT fixed here
+Three **pre-existing** `is_instruction_file()` holes, now in the plan's "Known gaps" section per
+`rules/finding-integrity.md`. They let a payload skip classification before any allowlist logic runs,
+so they are orthogonal — neither blocked by nor fixed by this work:
+1. Ungated symlink alias (`notes/x.txt` → `agents/X.md` classifies as non-instruction).
+2. Case-insensitive APFS (`skills/demo/skill.md` == `SKILL.md` on disk, not in the basename set).
+3. Frontmatter past the 4096-char window, and unterminated frontmatter, both silently disarm the gate.
+
+Each needs its own plan. They widen scope from "who is authorized" to "what counts as an instruction
+file" — a different review.
+
+### Verified, not asserted
+- All 11 `python` blocks + both heredocs parse (`ast.parse`, with dedent for the two fragments).
+- Zero vacuous `if parsed is not None:` test sites remain (3 hits are the helper + its prose).
+- `check_path_safety` will NOT fire on the new code — it uses `is_relative_to()`, which is in
+  `PATH_SAFE_PATTERNS`.
+- Plan is 1446 lines.
+
+### Next action
+Re-review the revised plan (it changed substantially — the reader signature change touches Tasks 1, 2
+and 5), then implement starting from the Bootstrap section. Do NOT flip `status: in-progress` before
+Task 2 is deployed.
