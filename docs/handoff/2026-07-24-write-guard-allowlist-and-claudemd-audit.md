@@ -286,3 +286,58 @@ file" — a different review.
 Re-review the revised plan (it changed substantially — the reader signature change touches Tasks 1, 2
 and 5), then implement starting from the Bootstrap section. Do NOT flip `status: in-progress` before
 Task 2 is deployed.
+
+---
+
+## Round 3 — claudemd-audit returned; F3 changes the write-guard work
+
+Audit delivered after a ping (idle-without-report again — third agent this session; the
+`feedback-agent-idle-without-report` protocol worked: inspect artifact, then ping, offering BLOCKED).
+22 findings, proposes CLAUDE.md 226 → ~110.
+
+### F3 — VERIFIED, and it is the real answer to "why are we still tripping over this"
+
+`WRITE_GUARD_ALLOW_INSTRUCTION_EDIT: "1"` is in the `env` block of `~/.claude/settings.json:12`.
+Live in-session (`echo` → `1`). `write-guard.py:194-196` returns `None` on `overridden` BEFORE any
+allowlist logic. **The instruction-file gate is disarmed globally, right now.**
+
+History of `~/.claude/settings.json` shows an oscillation ending in a permanent disarm:
+- `76f34da` chore: re-arm write-guard instruction-edit gate (remove the flag)
+- `1d9ad1a` chore: ... drop temp write-guard flag
+- `62edd6c` chore: **restore permanent** WRITE_GUARD_ALLOW_INSTRUCTION_EDIT flag — 2026-07-23 20:59
+
+**Consequence for this plan: the allowlist is INERT until that line is removed.** Landing it while the
+flag is set ships a silent no-op — precisely what `rules/no-known-broken.md` forbids. The plan's
+Bootstrap section now carries this as a PREREQUISITE with a USER DECISION gate, and Bootstrap step 3
+is corrected: it is a settings.json edit, not a shell `unset` (the flag is injected into every session
+from the `env` block, so unsetting it in one shell does not disarm it).
+
+`settings.json:350` pre-authorizes toggling this flag under `autoMode`. That is PERMISSION, not the
+user's DECISION about whether the gate should be armed. NOT acted on unilaterally — a peer agent
+recommending a config change is not user approval.
+
+### Other P1s verified by command (not taken on trust)
+- **F1 CONFIRMED** — `hook-health-check.py:186-190` globs `agents/*.md`, `phases/*.md`,
+  `skills/*/SKILL.md`. `config/CLAUDE.md` matches none. The highest-leverage always-loaded file is the
+  one file with no length gate; it drifted to 226 while the hook flagged three smaller files.
+- **F2 CONFIRMED** — `wc -l ~/.claude/rules/*.md` → **exactly 226**. A second always-loaded budget,
+  equal in size to CLAUDE.md, never measured or audited.
+- **F4** — Context Management (L94-111) contradicts the runtime's own summarization notice. Plausible
+  and matches the session environment text; not separately re-verified.
+
+### Audit's own caveat, worth carrying
+It reports the **codesight index for this repo is stale** — returned `hooks/ask-first-gate.py` and
+`hooks/feedback-promotion-checker.py`, neither of which exists. It fell back to Read. Any finding this
+session that leaned on codesight for existence or line numbers should be re-verified.
+
+### Verification run for this commit
+`python3 -m ruff check .` → All checks passed. `pytest hooks/tests/` (minus test_prompt_dispatcher) →
+**974 passed, 0 failed, 9 skipped**. The PRE-COMPLETION CHECKLIST hook blocked the first commit attempt
+at PreToolUse (so the append never ran); complied, ran both, retried.
+
+### Open decisions the audit surfaced (needs user)
+- **F3 fix** — remove the permanent flag. Blocks the allowlist being real.
+- **F13** — CLAUDE.md L7 routes everything through `/coding-team`, but
+  `feedback-always-route-through-build.md` says audit fix batches go through `/build`, and both are
+  deployed side by side. The always-loaded rule names the older entry point. Audit declined to guess.
+- **F12** — force-push prose is broader than enforcement; narrow the prose or build a refspec parser.
