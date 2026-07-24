@@ -69,6 +69,21 @@ VERIFICATION_PATTERNS = [
 
 COMMIT_PREFIXES = ["feat:", "fix:", "test:", "docs:", "refactor:", "chore:"]
 
+EXTRA_COMMIT_PREFIX_RE_ENV = "GIT_SAFETY_EXTRA_COMMIT_PREFIX_RE"
+
+
+def _extra_prefix_ok(msg_text: str) -> bool:
+    """Repo-scoped escape hatch: an operator-set regex of ADDITIONAL allowed
+    commit-message prefixes (e.g. codesight-mcp's R10 '^M\\d+\\.\\d+:'). Unset or
+    invalid regex -> False (strict conventional prefixes still enforced)."""
+    pat = os.environ.get(EXTRA_COMMIT_PREFIX_RE_ENV, "")
+    if not pat:
+        return False
+    try:
+        return bool(re.match(pat, msg_text))
+    except re.error:
+        return False
+
 PROJECT_MARKERS = [
     "package.json", "tsconfig.json", "deno.json",
     "pyproject.toml", "setup.py", "setup.cfg", "requirements.txt",
@@ -1106,7 +1121,7 @@ def main():
                 )
                 return
 
-            has_prefix = any(msg_text.startswith(prefix) for prefix in COMMIT_PREFIXES)
+            has_prefix = any(msg_text.startswith(prefix) for prefix in COMMIT_PREFIXES) or _extra_prefix_ok(msg_text)
             if not has_prefix:
                 first_word = msg_text.split()[0] if msg_text.strip() else "(empty)"
                 prefixes_str = ", ".join(COMMIT_PREFIXES)
