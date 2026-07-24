@@ -202,6 +202,89 @@ class TestCommitMessageFileFlag:
             os.chdir(old_cwd)
 
 
+class TestCommitPrefixEnvHatch:
+    """Tests for GIT_SAFETY_EXTRA_COMMIT_PREFIX_RE, the repo-scoped escape hatch
+    allowing additional commit-message prefixes via an operator-set regex."""
+
+    def test_env_regex_allows_matching_prefix(self, run_hook, make_event, tmp_state_dir, tmp_path):
+        _init_feature_repo(tmp_path)
+        old_cwd = os.getcwd()
+        os.chdir(tmp_path)
+        _seed_verification_state(tmp_state_dir)
+        try:
+            event = make_event("Bash", command='git commit -m "M0.1: add Makefile"')
+            with _env_override("GIT_SAFETY_EXTRA_COMMIT_PREFIX_RE", r"^M\d+\.\d+: "):
+                result = run_hook("git-safety-guard.py", event)
+            assert result.stdout.strip() == ""
+        finally:
+            os.chdir(old_cwd)
+
+    def test_env_regex_still_blocks_nonmatching(self, run_hook, make_event, tmp_state_dir, tmp_path):
+        _init_feature_repo(tmp_path)
+        old_cwd = os.getcwd()
+        os.chdir(tmp_path)
+        _seed_verification_state(tmp_state_dir)
+        try:
+            event = make_event("Bash", command='git commit -m "random msg"')
+            with _env_override("GIT_SAFETY_EXTRA_COMMIT_PREFIX_RE", r"^M\d+\.\d+: "):
+                result = run_hook("git-safety-guard.py", event)
+            assert result.parsed is not None
+            assert result.parsed["decision"] == "block"
+            assert "FORMAT ERROR" in result.parsed["reason"]
+        finally:
+            os.chdir(old_cwd)
+
+    def test_no_env_blocks_M_format(self, run_hook, make_event, tmp_state_dir, tmp_path):
+        """Repo-scoping proof: without the env var, the M-format is NOT loosened."""
+        _init_feature_repo(tmp_path)
+        old_cwd = os.getcwd()
+        os.chdir(tmp_path)
+        _seed_verification_state(tmp_state_dir)
+        try:
+            event = make_event("Bash", command='git commit -m "M0.1: add Makefile"')
+            with _env_override("GIT_SAFETY_EXTRA_COMMIT_PREFIX_RE", None):
+                result = run_hook("git-safety-guard.py", event)
+            assert result.parsed is not None
+            assert result.parsed["decision"] == "block"
+            assert "FORMAT ERROR" in result.parsed["reason"]
+        finally:
+            os.chdir(old_cwd)
+
+    def test_env_invalid_regex_falls_back_strict(self, run_hook, make_event, tmp_state_dir, tmp_path):
+        """An invalid operator regex must not crash the hook -- it falls back to strict."""
+        _init_feature_repo(tmp_path)
+        old_cwd = os.getcwd()
+        os.chdir(tmp_path)
+        _seed_verification_state(tmp_state_dir)
+        try:
+            event = make_event("Bash", command='git commit -m "M0.1: add Makefile"')
+            with _env_override("GIT_SAFETY_EXTRA_COMMIT_PREFIX_RE", "["):
+                result = run_hook("git-safety-guard.py", event)
+            assert result.returncode == 0, f"hook must exit 0, got {result.returncode}; stderr={result.stderr!r}"
+            assert result.parsed is not None
+            assert result.parsed["decision"] == "block"
+            assert "FORMAT ERROR" in result.parsed["reason"]
+        finally:
+            os.chdir(old_cwd)
+
+    def test_env_regex_trailing_space_is_significant(self, run_hook, make_event, tmp_state_dir, tmp_path):
+        """The operator's trailing space is honored (no .strip()) -- a message
+        missing the space after the milestone marker is correctly rejected."""
+        _init_feature_repo(tmp_path)
+        old_cwd = os.getcwd()
+        os.chdir(tmp_path)
+        _seed_verification_state(tmp_state_dir)
+        try:
+            event = make_event("Bash", command='git commit -m "M0.1:no-space-after-colon"')
+            with _env_override("GIT_SAFETY_EXTRA_COMMIT_PREFIX_RE", r"^M\d+\.\d+: "):
+                result = run_hook("git-safety-guard.py", event)
+            assert result.parsed is not None
+            assert result.parsed["decision"] == "block"
+            assert "FORMAT ERROR" in result.parsed["reason"]
+        finally:
+            os.chdir(old_cwd)
+
+
 class TestCommitMessageUnparseable:
     """Tests for block-by-default when message can't be extracted."""
 
