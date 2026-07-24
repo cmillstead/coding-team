@@ -104,3 +104,98 @@ I made this error too: claimed `hooks/write-guard.py` was untracked by git. Caus
 **Agents finish work but often never send the report.** Four times this session (`planner`, `plan-reviewer-2`, `cc-hooks-expert`, `wg-planner`). On an idle notification with no report: inspect the ARTIFACT first (the work is usually done), then ping asking them to re-send, and explicitly offer `Status: BLOCKED` as an honest alternative to reconstructing from memory. Do NOT re-dispatch a fresh agent — that discards completed work. Saved as `memory/feedback-agent-idle-without-report.md`.
 
 **Guard state:** currently 0 plans with `status: in-progress`, so `write-guard.py` is dormant and hook/instruction edits are allowed. If a future session finds edits blocked, check for a stale `in-progress` plan before reaching for the env var.
+
+---
+
+## Plan review results — write-guard allowlist (received post-handoff)
+
+`wg-reviewer` returned **Issues Found**: 7 findings (1 Critical, 2 High, 2 Medium, 2 Low). It ran NO shell
+commands (no Bash tool in its dispatch), said so explicitly, and grounded every claim in file:line content.
+No tree-state claims — nothing to reject as false premise. Treat these as sound.
+
+### BLOCKING — must be fixed before implementation
+
+**R1. Bootstrap deadlock — the plan blocks its own execution (Critical).**
+All six files in the plan's File Structure table (`:85-91`) are gated by `is_instruction_file()`:
+`hooks/_lib/active_plan.py`, `hooks/tests/test_active_plan.py`, `hooks/write-guard.py`,
+`hooks/tests/test_write_guard.py` (`"hooks" in parts and suffix in (".py",".sh")`, `write-guard.py:92`);
+`SKILL.md` (`BEHAVIORAL_INSTRUCTION_BASENAMES`, `:64`, `:84-85`); `phases/execution.md`
+(`BEHAVIORAL_INSTRUCTION_DIRS`, `:65-72`, matched `:96-97`). The plan is `status: planned` with NO
+`instruction_files` key. Flipping to `in-progress` at Phase 5 entry makes `check_phase5` (`:194-216`)
+block Tasks 1-4. Self-declaration cannot rescue Tasks 1-2 — they run BEFORE the allowlist code exists,
+so the old guard ignores the key.
+FIX: explicit prerequisite — `WRITE_GUARD_ALLOW_INSTRUCTION_EDIT=1` for Tasks 1-2 ONLY; once Task 2 lands
+(hook live via symlink), add `instruction_files:` to THIS plan's own frontmatter covering all six files
+and UNSET the env var so Tasks 3-5 dogfood the new mechanism. That is also a stronger E2E proof than the
+current Task 5 Step 4.
+
+**R2. New routing text is unsatisfiable for out-of-repo instruction files (High). REPRODUCES ff866aa's D1.**
+`is_instruction_file()` gates by path SHAPE anywhere on disk — no repo-root constraint (`:75-99`) — but
+`read_instruction_allowlist()` rejects absolute entries and anything escaping the repo root (plan `:374-391`).
+So `~/.claude/CLAUDE.md`, `~/.claude/agents/*.md`, and instruction files in OTHER repos can never be
+declared; the env var remains their only route — while the new block message labels declaration
+**PREFERRED** (`:684-689`) and the SKILL.md row (`:1029`) states it unconditionally.
+This is the same "unsatisfiable remediation" defect class as D1, which the plan itself cites at `:23`.
+**EM DECISION REQUIRED** (operator directive: root cause over symptom — do NOT just scope the claim, that
+is documenting a limitation):
+  (a) Make out-of-repo instruction files declarable — permit entries resolving under a known harness root
+      (`~/.claude`) in addition to the arming plan's repo. Threat model is process discipline, not an
+      adversarial boundary, so a second known root is acceptable. PREFERRED — actually fixes it.
+  (b) Scope the block message + SKILL.md claim to in-repo files only. Honest but leaves the gap = the
+      symptom-masking move the operator just prohibited. Only if (a) proves unworkable.
+
+### IMPORTANT
+
+**R3. Task 1's import instruction is wrong; tests would fail at collection (High).**
+Plan `:246` says to match the file's existing import style, but `hooks/tests/test_active_plan.py:13-20`
+has NO module-level import of `_lib.active_plan` and never does `sys.path.insert` — it reaches the library
+only via `run_python()` subprocess snippets (`:50-63`), which is incompatible with the new in-process calls.
+Result: `ModuleNotFoundError: _lib` at collection, masked by Step 2's predicted `ImportError` (`:250-251`).
+FIX: specify BOTH `sys.path.insert(0, str(HOOKS_DIR))` and explicit `from _lib.active_plan import ...`.
+Precedent: `hooks/tests/test_write_guard.py:29-32`.
+
+**R4. Failure-modes table claims coverage three tests do not provide (Medium).** Load-bearing, since that
+table is the plan's fail-closed evidence.
+- `:1160` repo-root-unresolvable — the `allowlist_repo` fixture (`:229-241`) always SETS
+  `CODING_TEAM_MAIN_ROOT` and never unsets it; branch at plan `:359-364` is untested.
+- `:1156` `test_declared_but_unreadable_plan_blocks` (`:926-943`) never reaches the reader's unreadable
+  branch — `find_active_plan()` raises `AmbiguousActivePlanError` first (`active_plan.py:130-137`,
+  handled `write-guard.py:175-184`). Passes for the wrong reason. (T1's `test_unreadable_plan_raises`
+  does cover it.)
+- `:1163` "unexpected exception → covered by bare-except" — nothing forces one. Untested.
+
+**R5. Exception-type mismatch (Medium).** Reader catches only `OSError` (`:380-386`); matcher catches
+`(OSError, ValueError)` (`:611-614`). `Path.resolve()` raises `ValueError` on an embedded NUL, which
+survives `read_text(errors="replace")` and `_FRONTMATTER_KEY_RE`'s `(.*?)` (`active_plan.py:46`), so it
+escapes as raw `ValueError`, contradicting the reader's docstring (`:332-335`). Still FAILS CLOSED via
+`check_phase5`'s broad `except Exception` (`:648`), but the unit contract is wrong.
+FIX: `except (OSError, ValueError)`.
+
+### MINOR
+**R6 (Low).** Dead code in `test_suffix_near_miss_not_authorized` (`:774-786`): `near` is created but never
+asserted on; reads half-edited. Reasoning is correct (`is_instruction_file` keys off `path.suffix`).
+**R7 (Low, advisory).** `except Exception` at `:648` conflicts with `~/.claude/code-style.md:6`, but is
+load-bearing here (it is what turns R5's `ValueError` into a block). KEEP IT — state the deliberate
+exception in the plan so a later auditor doesn't narrow it and reopen a fail-open path.
+
+### Verified sound by the reviewer — do not re-audit
+- Fail-closed: no input found that yields an ALLOW; only `return None` in new logic is the exact-match
+  branch (`:658-661`). (Apart from R5's exception TYPE.)
+- Path matching holds for `a.md.bak`, `evil/agents/a.md`, `agents/../agents/a.md`, absolute targets,
+  trailing whitespace, duplicates. A declared DIRECTORY authorizes nothing (no wildcard leak). A symlink to
+  a declared file resolves to it and is allowed — semantically correct. Case variation on APFS OVER-blocks
+  (fail-closed direction).
+- `preserve_case_keys` default is byte-identical to `active_plan.py:77`; the ONLY in-repo caller of that
+  `_parse_frontmatter` is `find_active_plan` at `:139` (other grep hits are unrelated same-named local
+  functions). No `find_active_plan()` regression.
+- Back-compat IS proven by test (`test_no_key_blocks_every_instruction_edit`, `:539-554`), honestly flagged
+  at `:577` as a regression lock rather than red-green.
+- SKILL.md 198/200 headroom handled: Task 4's edits are 1→1 in place, table stays 2 rows, net 0.
+- Test helpers verified: `_run(event, cwd, env)` (`test_write_guard.py:94-96`), `_write_plan(body=...)`
+  (`:83-91`), `stat` already imported at `:18`.
+- Stale-doc inventory complete: `SKILL.md:159`, `:179-180`, `:185`, `phases/execution.md:22` all carry the
+  "go through the Agent tool" claim verbatim.
+
+### Next action after compaction
+Apply R1-R5 to the plan (R1 and R2 are blocking; R2 needs the EM decision above, defaulting to option (a)),
+then re-review, then implement. `wg-codex` (Codex gate, REQUIRED at Medium) was still running.
