@@ -37,7 +37,7 @@ Flat findings table — one row per finding, classified by BOTH axes (verb × su
 
 ## The CIVC Grid — Audit Classification Template
 
-Source: `~/Documents/obsidian-vault/AI/kb/Docs/harness-inventory-four-verbs.md` §9. The four legacy verbs are one axis of a two-axis grid; the other axis is **surfaces** — what the harness is made of. Classify every component and every gap by BOTH axes. Fill each cell with the current-harness components that live there; `—` marks a genuinely empty cell; per the Classification rule below, every empty cell is a roadmap item.
+Source: `~/Documents/obsidian-vault/AI/kb/Docs/harness-inventory-four-verbs.md` §9. Six verbs (grown from the source doc's four legacy verbs) are one axis of a two-axis grid; the other axis is **surfaces** — what the harness is made of. Classify every component and every gap by BOTH axes. Fill each cell with the current-harness components that live there; `—` marks a genuinely empty cell; per the Classification rule below, every empty cell is a roadmap item.
 
 This table is a SNAPSHOT as of 2026-07-15 — illustrative of the classification METHOD only. Every audit must re-derive cell contents from live inventory (Mode 1 step 1); never copy this table verbatim.
 
@@ -232,3 +232,25 @@ You are the prediction adjudicator. In this mode you close the observability loo
 5. **Leave insufficient evidence PENDING.** If the evidence does not settle the prediction, leave it PENDING (do NOT run `--verify`) and record the reason it could not be adjudicated **in your Verify-mode report** — the CLI has no pending-annotation operation (`--note` only attaches when resolving a row via `--verify`). NEVER guess a verdict — an unfalsified prediction stays pending, it does not get a fabricated verdict. Named rationalization: "it probably worked, mark it verified" → a guessed verdict destroys the falsifiability the prediction exists to provide; leave it PENDING. A prediction past its `verify_by_session` with still-insufficient evidence is flagged **OVERDUE** in the Verify report (not silently left pending) so the Evolve loop surfaces stalls rather than accumulating dead predictions.
 
 **Documented limitation:** hard auto-verification against per-component failure data is a later collector step. Until then, adjudicate from the evidence available today — `harness metrics` trends, `harness verify --attribution`, the component diff, and the harness-map map-diff (NEXT map's headline numbers vs `predicted_impact`).
+
+## Ebook Consistency Gate
+
+> Extracted from ct-harness-engineer.md. The agent file carries a MANDATORY pointer here; this is the full gate.
+
+**Every proposed fix must be consistent with the ebook and case studies.** Before handing any fix to /coding-team, validate it against these principles:
+
+1. **Channeling > blocking** (Case 30): Does this fix make the right path easier, or add enforcement the agent will route around? If the fix is a new block/regex/pattern-match, ask: "Can the agent bypass this with a different method?" If yes, redesign as channeling or resilience.
+
+2. **No hook accumulation** (Case 39, moratorium): Does this fix require a new hook? If yes, does it pass the pre-creation gate (absorption, sufficiency, cost)? Adding a check to an existing hook is maintenance — a new hook file is accumulation.
+
+3. **Verify > Constrain for unbounded attack surface** (Case 45): If the protected thing can be attacked many ways, blocking specific methods is whack-a-mole. Detect the anomaly instead.
+
+4. **Friction = signal** (Case 30, Case 40): If the orchestrator keeps bypassing a rule, the problem might be the rule's cost. Before adding enforcement, ask: "Is the delegation overhead justified by the audit value?"
+
+5. **Definition of Done** (Case 40): Is this fix part of an open-ended audit cycle? If the harness meets all acceptance criteria, the fix is maintenance — and maintenance during moratorium needs justification.
+
+**If a proposed fix violates any of these, redesign it before routing.**
+
+Known rationalizations:
+- "The ebook principle doesn't apply here because this case is different" — it applies until you can explain specifically why not.
+- "This is a quick structural fix" — quick fixes that violate principles create debt that takes longer to unwind than the original problem.

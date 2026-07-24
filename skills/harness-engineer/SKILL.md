@@ -1,6 +1,6 @@
 ---
 name: harness-engineer
-description: "Use when designing or auditing Claude Code harness infrastructure — hooks, rules, settings, constraint gaps, maturity assessment. Do NOT use for instruction text quality (use /prompt-craft instead). Do NOT use for code implementation (use /coding-team instead)."
+description: "Use when designing or auditing Claude Code harness infrastructure — hooks, rules, settings, constraint gaps, maturity assessment, and verifying whether past harness edits worked (prediction adjudication). Do NOT use for instruction text quality (use /prompt-craft instead). Do NOT use for code implementation (use /coding-team instead)."
 ---
 
 # /harness-engineer — Harness Infrastructure Design & Audit
@@ -16,6 +16,7 @@ Designs and audits the infrastructure that governs AI agent behavior: hooks, rul
 | "Should this be a hook or a rule?" | /harness-engineer | — |
 | "What maturity level am I at?" | /harness-engineer | — |
 | "This feedback should become a constraint" | /harness-engineer | — |
+| "Did that hook change actually help?" | /harness-engineer verify | — |
 | "This SKILL.md has vague language" | — | /prompt-craft |
 | "CC keeps misinterpreting instructions" | — | /prompt-craft diagnose |
 | "Implement these hook changes" | — | /coding-team |
