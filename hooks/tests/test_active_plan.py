@@ -315,8 +315,11 @@ print(json.dumps({
             f"cached result {out['cached']!r} != uncached {out['direct']!r}"
         )
 
-    def test_no_plan_cached_as_none(self, repo: Path, session_env: dict):
-        """When no plan exists, None is cached and returned on subsequent calls without re-scan."""
+    def test_no_plan_result_is_never_cached_always_rescans(self, repo: Path, session_env: dict):
+        """P1-4: a None result (no active plan) must NEVER be cached — it is
+        the DISARMED answer, and caching it risks serving a stale None while
+        a plan is actually armed (see TestNegativeResultNotCached). Every
+        call with no active plan must rescan, not just the first."""
         counter_file = Path(session_env["ACTIVE_PLAN_CACHE_FILE"]).parent / "counter2.json"
         counter_file.write_text("0")
 
@@ -343,7 +346,8 @@ print(json.dumps({{"plan": str(result) if result else None}}))
         out1 = json.loads(r1.stdout)
         assert out1["plan"] is None
 
-        # Call 2: cached None must also come back without re-scanning
+        # Call 2: must rescan again — a None result is never written to the
+        # cache file, so there is nothing for call 2 to hit.
         code_call2 = f"""
 import json
 from pathlib import Path
@@ -367,8 +371,11 @@ print(json.dumps({{"plan": str(result) if result else None}}))
         out2 = json.loads(r2.stdout)
         assert out2["plan"] is None
 
-        count = json.loads(counter_file.read_text())
-        assert count == 1, f"cached None should not trigger rescan; got {count} scans"
+        count_after_call2 = json.loads(counter_file.read_text())
+        assert count_after_call2 == 2, (
+            f"a None result must never be cached — expected a rescan on every "
+            f"call (2 scans across 2 calls), got {count_after_call2}"
+        )
 
     def test_ttl_expiry_triggers_rescan(self, repo: Path, session_env: dict):
         """After TTL expires, the next call re-scans even if file signatures match."""
@@ -454,6 +461,214 @@ print(json.dumps({"plan": str(result) if result else None}))
         assert out2["plan"] is not None
         # They should both point to the same plan (consistency)
         assert out1["plan"] == out2["plan"]
+
+
+class TestNegativeResultNotCached:
+    """P1-4: a None result (no active plan) must never be served stale, and
+    a hand-written or legacy cache entry must not be able to fake a cached
+    None (or a never-expiring positive entry) past the reader's validation.
+    Caching only positive results means the worst stale case is a needless
+    block (fail-closed), not a silent allow — see the producer-side lock
+    below and TestCrossInvocationCache.test_no_plan_result_is_never_cached_always_rescans.
+    """
+
+    def test_stale_none_is_not_served_after_status_flip(
+        self, repo: Path, tmp_path: Path, session_env: dict
+    ):
+        """Producer-side lock. Prime the cache with status: planned (None),
+        flip the SAME file to in-progress, then restore the ORIGINAL mtime —
+        defeating the signature-based invalidation the same way Codex
+        reproduced the disarm. A call within the TTL must NOT return the
+        stale cached None."""
+        plan = _write_plan(repo, "plan.md", PLANNED_FRONTMATTER + "# Plan\n")
+        original_stat = plan.stat()
+
+        code_call1 = """
+import json
+from _lib.active_plan import find_active_plan_cached
+result = find_active_plan_cached(ttl_seconds=60)
+print(json.dumps({"plan": str(result) if result else None}))
+"""
+        r1 = run_python(code_call1, cwd=repo, env=session_env)
+        assert r1.returncode == 0, f"call 1 failed: {r1.stderr}"
+        out1 = json.loads(r1.stdout)
+        assert out1["plan"] is None, f"planned status should yield None, got {out1['plan']}"
+
+        # Flip to in-progress, then restore the ORIGINAL mtime/atime so a
+        # signature comparison alone cannot see the change.
+        plan.write_text(
+            ACTIVE_FRONTMATTER + "# Plan\n\n## Completion Checklist\n- [ ] Second-opinion review\n"
+        )
+        os.utime(plan, ns=(original_stat.st_atime_ns, original_stat.st_mtime_ns))
+
+        code_call2 = """
+import json
+from _lib.active_plan import find_active_plan_cached
+result = find_active_plan_cached(ttl_seconds=60)
+print(json.dumps({"plan": str(result) if result else None}))
+"""
+        r2 = run_python(code_call2, cwd=repo, env=session_env)
+        assert r2.returncode == 0, f"call 2 failed: {r2.stderr}"
+        out2 = json.loads(r2.stdout)
+        assert out2["plan"] is not None, (
+            "SAFETY FAILURE: a None cached from call 1 was served stale after "
+            "a mtime-preserving flip to in-progress — write-guard would stay "
+            "DISARMED while a plan is armed."
+        )
+        assert str(plan) in out2["plan"], f"expected plan path {plan!s}, got {out2['plan']}"
+
+    def test_handwritten_null_plan_path_is_a_cache_miss(
+        self, repo: Path, tmp_path: Path, session_env: dict
+    ):
+        """A hand-written (or legacy-writer-produced) cache entry with
+        plan_path=null, otherwise fully valid (current version, matching
+        signature, unexpired ts), must be treated as a cache MISS — a
+        write-side-only fix (never WRITE a null plan_path) would still let
+        a reader SERVE one from a hand-written or externally redirected
+        cache file (ACTIVE_PLAN_CACHE_FILE)."""
+        plan = _write_plan(repo, "plan.md")  # in-progress by default
+
+        code = f"""
+import json, time
+from pathlib import Path
+import _lib.active_plan as _ap
+
+plan_root = Path({str(repo)!r})
+plans_dir = plan_root / "docs" / "plans"
+candidates = sorted(plans_dir.glob("*.md"))
+sig = _ap._compute_signature(candidates)
+
+entry = {{
+    "version": _ap._CACHE_ENTRY_VERSION,
+    "repo_root": str(plan_root),
+    "session_id": {session_env["CLAUDE_CODE_SESSION_ID"]!r},
+    "signature": sig,
+    "plan_path": None,
+    "ts": time.time(),
+}}
+Path({str(Path(session_env["ACTIVE_PLAN_CACHE_FILE"]))!r}).write_text(json.dumps(entry))
+
+result = _ap.find_active_plan_cached(ttl_seconds=60)
+print(json.dumps({{"plan": str(result) if result else None}}))
+"""
+        r = run_python(code, cwd=repo, env=session_env)
+        assert r.returncode == 0, r.stderr
+        out = json.loads(r.stdout)
+        assert out["plan"] is not None, (
+            f"a hand-written plan_path=null entry must be a cache miss "
+            f"(fresh scan), not served as a cached None: {out!r}"
+        )
+        assert str(plan) in out["plan"]
+
+    def test_legacy_entry_without_version_is_rejected(
+        self, repo: Path, tmp_path: Path, session_env: dict
+    ):
+        """A cache entry lacking the version field (the pre-P1-4 shape,
+        possibly holding a stale negative result written before this fix
+        existed) must be rejected outright — cache miss, forcing a rescan.
+        Uses a POSITIVE stored plan_path so the test proves rejection rather
+        than coincidentally matching a fresh scan's result for the wrong
+        reason."""
+        plan = _write_plan(repo, "plan.md")
+        counter_file = tmp_path / "counter_legacy.json"
+        counter_file.write_text("0")
+
+        code = f"""
+import json, time
+from pathlib import Path
+import _lib.active_plan as _ap
+
+plan_root = Path({str(repo)!r})
+plans_dir = plan_root / "docs" / "plans"
+candidates = sorted(plans_dir.glob("*.md"))
+sig = _ap._compute_signature(candidates)
+
+# Legacy shape: no "version" key at all.
+entry = {{
+    "repo_root": str(plan_root),
+    "session_id": {session_env["CLAUDE_CODE_SESSION_ID"]!r},
+    "signature": sig,
+    "plan_path": {str(plan)!r},
+    "ts": time.time(),
+}}
+Path({str(Path(session_env["ACTIVE_PLAN_CACHE_FILE"]))!r}).write_text(json.dumps(entry))
+
+counter_path = Path({str(counter_file)!r})
+_original = _ap.find_active_plan
+def _counting(_orig=_original, **kwargs):
+    result = _orig(**kwargs)
+    c = json.loads(counter_path.read_text())
+    counter_path.write_text(json.dumps(c + 1))
+    return result
+_ap.find_active_plan = _counting
+
+result = _ap.find_active_plan_cached(ttl_seconds=60)
+print(json.dumps({{"plan": str(result) if result else None}}))
+"""
+        r = run_python(code, cwd=repo, env=session_env)
+        assert r.returncode == 0, r.stderr
+        out = json.loads(r.stdout)
+        assert out["plan"] is not None and str(plan) in out["plan"]
+
+        count = json.loads(counter_file.read_text())
+        assert count == 1, (
+            f"a version-less legacy cache entry must be rejected (cache miss, "
+            f"triggering a rescan), got {count} rescans"
+        )
+
+    def test_future_timestamp_entry_is_rejected(
+        self, repo: Path, tmp_path: Path, session_env: dict
+    ):
+        """A cache entry whose ts is ahead of `now` must be rejected — the
+        TTL check `now - ts < ttl_seconds` alone ACCEPTS a future ts (the
+        subtraction goes negative, which is always < ttl_seconds), so a
+        far-future ts would never expire without an explicit bound."""
+        plan = _write_plan(repo, "plan.md")
+        counter_file = tmp_path / "counter_future.json"
+        counter_file.write_text("0")
+
+        code = f"""
+import json, time
+from pathlib import Path
+import _lib.active_plan as _ap
+
+plan_root = Path({str(repo)!r})
+plans_dir = plan_root / "docs" / "plans"
+candidates = sorted(plans_dir.glob("*.md"))
+sig = _ap._compute_signature(candidates)
+
+entry = {{
+    "version": _ap._CACHE_ENTRY_VERSION,
+    "repo_root": str(plan_root),
+    "session_id": {session_env["CLAUDE_CODE_SESSION_ID"]!r},
+    "signature": sig,
+    "plan_path": {str(plan)!r},
+    "ts": time.time() + 1_000_000_000,
+}}
+Path({str(Path(session_env["ACTIVE_PLAN_CACHE_FILE"]))!r}).write_text(json.dumps(entry))
+
+counter_path = Path({str(counter_file)!r})
+_original = _ap.find_active_plan
+def _counting(_orig=_original, **kwargs):
+    result = _orig(**kwargs)
+    c = json.loads(counter_path.read_text())
+    counter_path.write_text(json.dumps(c + 1))
+    return result
+_ap.find_active_plan = _counting
+
+result = _ap.find_active_plan_cached(ttl_seconds=60)
+print(json.dumps({{"plan": str(result) if result else None}}))
+"""
+        r = run_python(code, cwd=repo, env=session_env)
+        assert r.returncode == 0, r.stderr
+        out = json.loads(r.stdout)
+        assert out["plan"] is not None and str(plan) in out["plan"]
+
+        count = json.loads(counter_file.read_text())
+        assert count == 1, (
+            f"an entry with a future ts must be rejected (cache miss, "
+            f"triggering a rescan), got {count} rescans"
+        )
 
 
 class TestMainRootTestSeamPairing:

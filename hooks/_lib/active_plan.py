@@ -323,6 +323,14 @@ def _compute_signature(candidates: list[Path]) -> list[list]:
     return pairs
 
 
+# Bumped whenever the cache entry SHAPE or validation rules change in a way
+# that makes an old entry unsafe to trust (P1-4: entries written before a
+# None result stopped being cached could still hold a stale negative
+# result). A reader rejects any entry missing this field, or whose value
+# doesn't match — see the version check in find_active_plan_cached() below.
+_CACHE_ENTRY_VERSION = 2
+
+
 def find_active_plan_cached(
     ttl_seconds: int = 5, *, plan_root: "Path | None" = _UNSET  # type: ignore[assignment]
 ) -> "Path | None":
@@ -338,9 +346,40 @@ def find_active_plan_cached(
 
     Cache is keyed by repo_root + session_id and is invalidated when any
     candidate plan file's st_mtime_ns changes (file-signature invalidation).
-    The TTL is a backstop only — the signature is the primary invalidator,
-    so an in-place status flip (which changes st_mtime_ns) immediately breaks
-    the signature and forces a fresh read on the very next call.
+    The TTL is a backstop only — the signature is the primary invalidator.
+    IMPORTANT: this is NOT airtight — an in-place content flip (e.g.
+    status: planned -> in-progress) that also restores the ORIGINAL mtime
+    (via os.utime) is invisible to the signature. Creation, deletion, and
+    rename of plan files ARE always caught, since the candidate list itself
+    changes. A None result is therefore never cached (see below), so the
+    worst case of the signature's blind spot is a needless rescan, not a
+    stale disarm.
+
+    A None result (no active plan) is NEVER cached (P1-4) — it is the
+    DISARMED answer, and caching it risks serving a stale None while a
+    plan is actually armed (exactly the mtime-preserving flip above).
+    Caching only positive results means the worst stale-cache outcome is
+    an extra scan, not a silent bypass. Measured: an uncached scan of 38
+    real plan files costs ~1.2ms — negligible next to hook subprocess
+    launch (~12ms for the git call alone). Every entry also carries a
+    version field (_CACHE_ENTRY_VERSION); a reader rejects an entry
+    missing it or bearing a different one, so a pre-existing cache file
+    written before this fix (which could hold a stale negative result)
+    is never trusted. A `plan_path` that is falsey (None/"" — a
+    hand-written or externally-produced entry, since ACTIVE_PLAN_CACHE_FILE
+    lets anything choose where this file lives) is likewise treated as a
+    cache MISS on read, not as a cached None; and an entry whose `ts` is
+    ahead of `now` is rejected outright (the naive `now - ts < ttl_seconds`
+    check alone accepts a future ts, since the subtraction goes negative).
+
+    Stale POSITIVE results are a separate, narrower, and currently
+    out-of-scope hole: if plan A is cached in-progress and plan B is then
+    flipped to in-progress with A's plan.md untouched (candidate list and
+    A's own signature entry unchanged), a cache hit still returns A while
+    the authoritative uncached call would raise AmbiguousActivePlanError.
+    Today this still fails closed (either path blocks the gate), but it
+    MISIDENTIFIES the arming plan — a hole against any future feature that
+    attaches per-file authority to the specific plan path returned.
 
     AmbiguousActivePlanError is NEVER cached — it propagates every time.
     On any cache I/O or stat error, falls through to find_active_plan().
@@ -387,16 +426,20 @@ def find_active_plan_cached(
     try:
         raw = cache_path.read_text(encoding="utf-8")
         entry = json.loads(raw)
+        entry_ts = float(entry.get("ts", 0))
+        stored_plan_path = entry.get("plan_path")
 
         if (
-            entry.get("repo_root") == str(plan_root)
+            entry.get("version") == _CACHE_ENTRY_VERSION
+            and entry.get("repo_root") == str(plan_root)
             and entry.get("session_id") == session_id
             and entry.get("signature") == current_sig
-            and (now - float(entry.get("ts", 0))) < ttl_seconds
+            and stored_plan_path  # falsey (None/""/missing) -> cache MISS, not a cached None
+            and entry_ts <= now  # reject a future-dated ts (would never expire)
+            and (now - entry_ts) < ttl_seconds
         ):
             # Cache hit: return the stored result
-            stored = entry.get("plan_path")
-            return Path(stored) if stored else None
+            return Path(stored_plan_path)
     except (OSError, ValueError, json.JSONDecodeError, TypeError, KeyError):
         # Cache miss or corrupt — proceed to rescan
         pass
@@ -408,16 +451,21 @@ def find_active_plan_cached(
     result = find_active_plan(plan_root=plan_root)
 
     # Write the new cache entry, ignoring write errors (cache is optional).
-    try:
-        entry = {
-            "repo_root": str(plan_root),
-            "session_id": session_id,
-            "signature": current_sig,
-            "plan_path": str(result) if result is not None else None,
-            "ts": now,
-        }
-        cache_path.write_text(json.dumps(entry), encoding="utf-8")
-    except OSError:
-        pass
+    # Only when a plan was actually found — a None result must never be
+    # written (P1-4): it is the DISARMED answer, and caching it risks
+    # serving a stale None on a later call while a plan is actually armed.
+    if result is not None:
+        try:
+            entry = {
+                "version": _CACHE_ENTRY_VERSION,
+                "repo_root": str(plan_root),
+                "session_id": session_id,
+                "signature": current_sig,
+                "plan_path": str(result),
+                "ts": now,
+            }
+            cache_path.write_text(json.dumps(entry), encoding="utf-8")
+        except OSError:
+            pass
 
     return result
