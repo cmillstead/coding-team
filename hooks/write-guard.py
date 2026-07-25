@@ -27,18 +27,114 @@ from _lib.active_plan import find_active_plan_cached, AmbiguousActivePlanError
 # ---------------------------------------------------------------------------
 # Phase 5 edit guard
 # ---------------------------------------------------------------------------
-def is_orchestrator_file(file_path: str) -> bool:
-    """Return True only for files the orchestrator may always edit during Phase 5."""
-    path_str = str(file_path)
-    if path_str.startswith("/tmp"):
-        return True
-    if "/Documents/obsidian-vault/" in path_str:
-        return True
-    if "/memory/" in path_str or path_str.endswith("/memory"):
-        return True
-    if "/.paul/" in path_str:
-        return True
-    return False
+
+# /tmp scratch-space root, checked in both spellings: on macOS /tmp is a
+# symlink to /private/tmp, and the OS may hand back either spelling. Computed
+# once at import time — never resolve the FILE PATH under test, only these
+# two fixed constants (see is_orchestrator_file's docstring).
+_TMP_ROOT = Path("/tmp")
+
+
+def _tmp_root_resolved() -> Path:
+    try:
+        return _TMP_ROOT.resolve()
+    except OSError:
+        return _TMP_ROOT
+
+
+_TMP_ROOT_RESOLVED = _tmp_root_resolved()
+
+
+def _orchestrator_exemption_category(
+    file_path: str, *, plan_root: "Path | None" = None
+) -> "str | None":
+    """Return which orchestrator-exempt root FILE_PATH matches, or None.
+
+    Checked in priority order — a path could structurally match more than
+    one root (e.g. a memory/ dir nested inside .paul/), and the four roots
+    are NOT interchangeable: some are unconditional, one is not, so the
+    caller must know exactly which root matched rather than a bare bool.
+    is_orchestrator_file() below is a thin bool wrapper over this for the
+    common case; check_phase5() calls this directly so it can apply the
+    memory/-specific conjunction with is_instruction_file() without
+    re-deriving which root actually matched.
+    """
+    try:
+        path = Path(file_path)
+        parts = path.parts
+
+        # .paul/ — UNCONDITIONAL. check_paul_phase_gate() (main()'s second
+        # blocking check) governs everything under .paul/phases/<dir>/, and
+        # those artifacts (DISCOVERY.md, GROUND.md, ...) classify as
+        # behavioral instruction files. Conjoining this with
+        # is_instruction_file() would block them here, before
+        # check_paul_phase_gate ever runs — making that gate unreachable
+        # and killing the PAUL workflow. Component match, not substring, so
+        # `x.paul.bak` does not falsely match.
+        if ".paul" in parts:
+            return "paul"
+
+        # Obsidian vault — UNCONDITIONAL. Vault notes are KB reference
+        # material; nothing loads agent prompts from the vault, so a note
+        # nested under a component literally named "agents" or "phases" is
+        # still just a note (204 real vault notes live this way). Match the
+        # consecutive component pair rather than anchoring to
+        # ~/Documents/obsidian-vault (the vault may be reached via a
+        # symlinked $HOME) or a bare "obsidian-vault" component (too loose).
+        for i in range(len(parts) - 1):
+            if parts[i] == "Documents" and parts[i + 1] == "obsidian-vault":
+                return "vault"
+
+        # memory/ — CONDITIONAL. Orchestrator-owned data, but a behavioral
+        # instruction file could plausibly be laundered through it, so the
+        # caller additionally requires `not is_instruction_file(...)`
+        # before treating a memory/ match as exempt. Component match, not
+        # substring, so `mymemory/` does not falsely match.
+        if "memory" in parts:
+            return "memory"
+
+        # /tmp — CONDITIONAL on repo containment. A scratch file in /tmp
+        # stays exempt; a harness repo that happens to live under /tmp does
+        # not get its whole gate switched off — only PLAN_ROOT, when
+        # supplied, narrows this. Path.is_relative_to() (never startswith)
+        # so /tmpfoo does not falsely match either root spelling.
+        for tmp_root in (_TMP_ROOT, _TMP_ROOT_RESOLVED):
+            if path.is_relative_to(tmp_root):
+                if plan_root is not None and path.is_relative_to(plan_root):
+                    return None
+                return "tmp"
+
+        return None
+    except Exception:
+        # Any path-construction/comparison failure -> not exempt
+        # (fail-closed: None means "gate applies"). Not reachable via the
+        # input today, since nothing above resolves it — kept as defensive
+        # depth, not a hot path.
+        return None
+
+
+def is_orchestrator_file(file_path: str, *, plan_root: "Path | None" = None) -> bool:
+    """Return True only for files the orchestrator may always edit during Phase 5.
+
+    The four exempt roots are heterogeneous, NOT a single uniform rule —
+    see _orchestrator_exemption_category() for the per-root rationale and
+    which ones are unconditional vs. conditional. Do not collapse this back
+    into a flat OR of substring checks; that reintroduces both the P1-1
+    instruction-file-laundering bug and the /tmp vs /tmpfoo substring bug.
+
+    All matching is STRUCTURAL (Path.parts / Path.is_relative_to()), never
+    substring, and runs on FILE_PATH exactly as spelled — this function
+    never resolves its input. That is deliberate: resolving the input would
+    canonicalize every edited path (an extra syscall on every Edit/Write)
+    and would mean a symlink alias into an exempt root becomes exempt too.
+    The fail-closed direction here is that a symlink alias is NOT exempt.
+
+    `plan_root`, when supplied, is the arming plan's repo root (see
+    check_phase5's `_plan_repo_root()`); it narrows the /tmp exemption so a
+    harness repo living under /tmp does not get a free pass. It does not
+    affect the other three roots.
+    """
+    return _orchestrator_exemption_category(file_path, plan_root=plan_root) is not None
 
 
 # Behavioral instruction files: high-impact surface — always delegate
@@ -149,6 +245,22 @@ def _plan_staleness_note(plan: Path) -> str:
     return ""
 
 
+def _plan_repo_root(active: Path) -> "Path | None":
+    """Derive the repo root that owns the arming plan, or None if it can't be.
+
+    The plan lives at `<root>/docs/plans/<name>.md`, so the root is two
+    levels above `docs/plans/`. `.parents[2]` is taken BEFORE `.resolve()`
+    so a symlinked plan path cannot bind the containment check (used by the
+    /tmp exemption) to a foreign root. Returns None on any failure — the
+    /tmp exemption then falls back to its old unconditional behavior for
+    this one edit rather than wedging the gate on an unrelated Path error.
+    """
+    try:
+        return active.parents[2].resolve()
+    except (IndexError, OSError):
+        return None
+
+
 def check_phase5(file_path: str) -> str | None:
     """Check coding-team pipeline edit guard. Returns block reason or None.
 
@@ -185,8 +297,18 @@ def check_phase5(file_path: str) -> str | None:
     if active is None:
         # No active plan -> no pipeline state to gate.
         return None
-    if is_orchestrator_file(file_path):
-        return None
+    category = _orchestrator_exemption_category(
+        file_path, plan_root=_plan_repo_root(active)
+    )
+    if category is not None:
+        # memory/ is the one exempt root that is NOT unconditional — an
+        # instruction file must not be laundered through it. The other
+        # three (vault, .paul, /tmp) are already fully resolved by
+        # _orchestrator_exemption_category() itself (vault/.paul
+        # unconditionally; /tmp via the plan_root containment check
+        # above), so only "memory" needs this extra conjunction here.
+        if category != "memory" or not is_instruction_file(file_path):
+            return None
 
     # Behavioral instruction files: ALWAYS delegate — high-impact surface
     # regardless of edit size. Source code: allowed for small edits

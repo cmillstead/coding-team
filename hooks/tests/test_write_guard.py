@@ -517,6 +517,160 @@ class TestPhase5ReferenceDataFilesAllowed:
             assert parsed.get("decision") != "block"
 
 
+class TestOrchestratorExemptionDoesNotLaunderInstructionFiles:
+    """P1-1: the orchestrator exemption at check_phase5 must not launder
+    behavioral instruction files through memory/, and must not silently kill
+    the downstream PAUL gate by conditioning .paul/. The four exempt roots
+    are heterogeneous — see is_orchestrator_file()'s docstring for why each
+    one is (or isn't) conjoined with is_instruction_file()."""
+
+    def _armed_plan(self, repo: Path) -> Path:
+        return _write_plan(repo, "plan.md")
+
+    @pytest.mark.parametrize(
+        "relpath",
+        [
+            "memory/agents/a.md",  # instruction file laundered through memory/
+            "memory/SKILL.md",
+        ],
+    )
+    def test_instruction_file_under_memory_is_blocked(self, repo, relpath):
+        self._armed_plan(repo)
+        target = repo / relpath
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("# Agent\n")
+        event = {
+            "tool_name": "Edit",
+            "tool_input": {"file_path": str(target), "new_string": "x"},
+        }
+        parsed, stdout, _stderr, _rc = _run(event, cwd=repo)
+        assert parsed is not None and parsed.get("decision") == "block", (
+            f"{relpath} is an instruction file and must NOT be laundered by "
+            f"the memory/ exemption — got {stdout!r}"
+        )
+        reason = parsed.get("reason", "")
+        assert "HOOK CRASH" not in reason, (
+            f"block came from a hook crash, not the Phase 5 gate: {stdout!r}"
+        )
+        assert "behavioral instruction-file edit" in reason, (
+            f"block reason is not the Phase 5 instruction-file gate: {stdout!r}"
+        )
+
+    def test_non_instruction_file_under_memory_is_still_allowed(self, repo):
+        """Regression lock: the memory/ exemption's real purpose survives."""
+        self._armed_plan(repo)
+        target = repo / "memory" / "notes.md"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("# Notes\n")
+        event = {
+            "tool_name": "Edit",
+            "tool_input": {"file_path": str(target), "new_string": "x"},
+        }
+        parsed, stdout, _stderr, _rc = _run(event, cwd=repo)
+        if parsed is not None:
+            assert parsed.get("decision") != "block", (
+                f"a non-instruction file under memory/ must stay exempt, got {stdout!r}"
+            )
+
+    def test_paul_artifact_is_NOT_blocked_by_an_armed_plan(self, repo):
+        """`.paul/` is exempt UNCONDITIONALLY — it has its own gate downstream
+        in main() (check_paul_phase_gate).
+
+        `.paul/phases/<dir>/*.md` classifies as an instruction file, so any
+        conjunction applied to `.paul` makes check_paul_phase_gate unreachable
+        and kills the PAUL workflow. No existing test covers this end to end —
+        the PAUL tests call check_paul_phase_gate() directly
+        (test_write_guard.py:1319-1361), so a regression here is silent.
+        """
+        self._armed_plan(repo)
+        target = repo / ".paul" / "phases" / "03-x" / "DISCOVERY.md"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("# Discovery\n")
+        event = {
+            "tool_name": "Write",
+            "tool_input": {"file_path": str(target), "content": "x"},
+        }
+        parsed, stdout, _stderr, _rc = _run(event, cwd=repo)
+        # It may be blocked BY THE PAUL GATE (that gate is not under test here);
+        # what must never happen is a check_phase5 instruction-file block.
+        if parsed is not None and parsed.get("decision") == "block":
+            reason = parsed.get("reason", "")
+            assert "HOOK CRASH" not in reason, (
+                f"block came from a hook crash, not either gate: {stdout!r}"
+            )
+            assert "PAUL" in reason, (
+                f"PAUL artifact was blocked by the Phase 5 instruction gate, "
+                f"not the PAUL staircase — check_paul_phase_gate is now "
+                f"unreachable: {stdout!r}"
+            )
+
+    def test_vault_note_under_agents_dir_is_still_allowed(self, repo, tmp_path):
+        """204 real vault notes live under `agents/`/`phases/` components.
+
+        They are KB reference notes with no behavioral effect. The vault
+        exemption is unconditional; a conjunction here blocks daily writes.
+        """
+        self._armed_plan(repo)
+        vault_note = repo / "Documents" / "obsidian-vault" / "AI" / "agents" / "note.md"
+        vault_note.parent.mkdir(parents=True, exist_ok=True)
+        vault_note.write_text("# Note\n")
+        event = {
+            "tool_name": "Edit",
+            "tool_input": {"file_path": str(vault_note), "new_string": "x"},
+        }
+        parsed, stdout, _stderr, _rc = _run(event, cwd=repo)
+        if parsed is not None:
+            assert parsed.get("decision") != "block", (
+                f"a vault note under an agents/ component must stay exempt, got {stdout!r}"
+            )
+
+
+class TestIsOrchestratorFile:
+    """Structural-matching unit tests for is_orchestrator_file() (Fix B).
+
+    Exercises the function directly — these are pure path-matching
+    questions, not pipeline-state questions, so no subprocess is needed.
+    """
+
+    def test_tmpfoo_is_not_exempt(self):
+        assert not _WRITE_GUARD.is_orchestrator_file("/tmpfoo/repo/hooks/x.py")
+
+    def test_tmp_is_exempt_on_both_spellings(self):
+        assert _WRITE_GUARD.is_orchestrator_file("/tmp/scratch.txt")
+        assert _WRITE_GUARD.is_orchestrator_file("/private/tmp/scratch.txt")
+
+    def test_mymemory_component_is_not_exempt(self):
+        assert not _WRITE_GUARD.is_orchestrator_file("/repo/mymemory/note.md")
+
+    def test_repo_under_tmp_does_not_get_a_free_pass(self, tmp_path):
+        """The one genuinely exploitable case: a harness repo living in /tmp.
+
+        A scratch file in /tmp stays exempt; an instruction file inside the
+        arming plan's repo does not, even when that repo is under /tmp.
+        """
+        plan_root = Path("/tmp/some-harness-repo")
+        instruction_shaped = "/tmp/some-harness-repo/hooks/write-guard.py"
+        assert not _WRITE_GUARD.is_orchestrator_file(
+            instruction_shaped, plan_root=plan_root
+        ), "a file inside the arming plan's own repo must not get a free /tmp pass"
+
+        scratch = "/tmp/some-harness-repo-sibling/scratch.txt"
+        assert _WRITE_GUARD.is_orchestrator_file(
+            scratch, plan_root=plan_root
+        ), "a /tmp scratch file OUTSIDE the arming plan's repo stays exempt"
+
+    def test_path_error_is_not_exempt(self):
+        """Any path exception yields False (= not exempt = gate applies).
+
+        Defensive depth: requirement 2 forbids resolving the input, so this
+        is not reachable via ELOOP on the input today. Assert the contract
+        directly rather than via a symlink fixture, which would pass
+        vacuously — `tmp_path` is rooted at `<repo>/.pytest-tmp`
+        (conftest.py:61-64) and is not under any exempt root.
+        """
+        assert not _WRITE_GUARD.is_orchestrator_file(None)
+
+
 class TestPhase5BlockMessageDiagnosability:
     """DEFECT 3: the block message must name the arming plan path."""
 
