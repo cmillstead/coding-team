@@ -698,3 +698,79 @@ NEW and unreviewed by either gate — neither reviewed this mechanism. Codex off
 `mcp__codesight__query` REJECTS any path outside `/Users/cevin/src/`, so it cannot serve this repo at
 all. Dispatch templates that mandate a codesight search are unsatisfiable here. Related: an earlier
 agent reported the codesight index as stale (returned two hook files that do not exist).
+
+---
+
+## Round 9 — Codex round 2 on the reachability plan (rx-codex-2): REVISE, 3 P1 + 2 P2
+
+Proof: `codex exec - < ...codex-prompt-r2.txt | tee /tmp/second-opinion-review-rxcodex2.txt`, **222878**
+bytes. It verified all 42 file:line refs in the plan resolve and say what the plan claims, and ran a
+green baseline (974/0/9) before dispatch. This round caught a REGRESSION, not just gaps — running it
+was the right call.
+
+### P1-1 — my root-from-file design REGRESSED worktrees. Verified.
+`_lib/active_plan.py:25-28` is an explicit contract: *"Worktrees and the primary checkout resolve to
+the same root, so the same plan directory is consulted from any worktree."* A linked worktree has no
+`docs/plans/` of its own (gitignored, exists only in the main checkout), so a walk up to the nearest
+`docs/plans/` ancestor finds NOTHING → dormant → edits allowed while the main checkout is armed.
+Strictly worse than today.
+
+### P1-2 — a deeper `docs/plans/` shadows an armed parent
+`/repo` armed; empty `/repo/component/docs/plans/` exists; editing `/repo/component/hooks/x.py`
+selects `/repo/component`, scans empty, allows. The shadowing dir need not be a repo. "Nearest" is
+only meaningful for genuine nested REPOSITORY ownership — a directory name cannot express that.
+
+### P1-3 — Tasks 1 and 2 mandated OPPOSITE resolution policies for the same input
+Task 1 Fix B req 5: `is_orchestrator_file()` runs LEXICALLY, never resolves. Task 2 req 1: resolve the
+target first. Exploit: `/tmp/alias` → armed `/repo`; edit `/tmp/alias/hooks/write-guard.py`; Task 2
+resolves into `/repo` and finds the plan, Task 1 sees a lexical `/tmp/...` path and exempts it as
+external scratch. Gate off. A worktree physically under `/tmp` fails identically.
+
+### The fix — one redesign closes all three
+Task 2 now uses **target-scoped git identity**, not a directory-name walk: `git -C <nearest EXISTING
+parent of target>` with `GIT_DIR`/`GIT_WORK_TREE` scrubbed, keeping BOTH answers separate —
+`--show-toplevel` (worktree root, for containment) and `--git-common-dir` (shared plan root, which is
+what preserves the worktree contract). Plus an explicit resolution-policy table: LEXICAL path answers
+"how was it spelled" (`is_orchestrator_file`), resolved/git identity answers "who owns it"
+(root + containment). `is_orchestrator_file()` must NOT recompute resolution internally.
+
+New tests: `test_worktree_consults_the_main_checkouts_plans` (real `git worktree add` — the regression
+lock), `test_empty_nested_docs_plans_does_not_shadow_an_armed_parent`,
+`test_symlinked_repo_alias_under_tmp_is_not_exempted`.
+
+### P2-4 — the migrated seam would have made two flagship tests vacuous. Verified.
+`_run(cwd=...)` does `run_env.setdefault("CODING_TEAM_MAIN_ROOT", str(cwd))`
+(`test_write_guard.py:94-110`). Once `_run()` also sets the sentinel, the root is FORCED to cwd and
+the production resolver never runs. Plan now requires a `_run(..., use_root_seam=False)` mode used by
+every root-resolution test, added as an explicit FIRST step.
+
+### P2-5 — Task 3 spec was complete, tests were not; residual note self-contradicted
+Only producer-side was tested. Added hand-written-cache tests for requirements 2-4 (null `plan_path` →
+miss, version-less legacy entry → miss, future `ts` → miss). Also deleted a residual note claiming a
+pre-change null entry "can still be served for up to the 5s TTL" — that contradicted requirement 3,
+which invalidates version-less entries. Confirmed requirement 2 is NOT dead code: a falsey
+`plan_path` stays reachable via a hand-written cache or redirected `ACTIVE_PLAN_CACHE_FILE`.
+
+### Cost — measured, no caching needed
+Codex prototyped on this tree: resolve+ancestor-walk ≈ 0.03 ms; uncached scan of 38 plans ≈ 0.96 ms.
+Negligible vs hook subprocess launch. Explicitly do NOT cache negative root results — that would
+reintroduce the Task 3 invalidation problem.
+
+### Pre-flight items also applied
+- `is_orchestrator_file()`'s `plan_root` is now declared keyword-only, OPTIONAL, default `None` (the
+  plan's own unit tests call it with one arg; optionality was never stated).
+- Corrected the deploy note: `~/.claude/hooks/_lib` IS a symlink
+  (`-> ../skills/coding-team/hooks/_lib`), so the path exists. Prior phrasing invited a reader to add
+  a deploy step or `cp` over the symlink.
+
+### Learning captured
+New `skills/second-opinion/codex-learnings.d/` entry **C28 — dual resolution policy for one input**
+(id verified unique; live set now 32). Pattern: a plan changes how a value is derived in one component
+while a sibling consumer or a documented contract still assumes the old derivation. Check before
+dispatch: grep all other readers of that value, AND grep docstrings/contracts asserting the old
+behavior — a documented invariant the change falsifies is a REGRESSION that no existing test will
+catch. That single check would have caught both P1-1 and P1-3.
+
+### State
+Plan is 798 lines, python blocks parse, ruff clean. No stale directory-walk residue (the only
+remaining mention is the deliberate "why not" rationale).
