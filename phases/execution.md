@@ -36,7 +36,7 @@ Execution uses subagents because the plan pre-decomposes work into independent t
 
 **Pre-flight: Activate plan.** BEFORE dispatching the first implementer, edit the active plan file's frontmatter using the Edit tool: change `status: planned` to `status: in-progress`. This is a normal Edit by the orchestrator — write-guard isn't yet active because the plan currently has `status: planned`, not `status: in-progress`.
 
-Once the edit lands, write-guard is active for the duration of Phase 5: orchestrator direct Edit/Write to instruction files (`agents/`, `phases/`, `skills/`, `CLAUDE.md`, hooks) will be blocked, forcing all instruction-file work through the Agent tool.
+Once the edit lands, write-guard is active for the duration of Phase 5: it blocks ALL Edit/Write to instruction files (`agents/`, `phases/`, `skills/`, `CLAUDE.md`, hooks) — including edits dispatched through the Agent tool, since the hook fires identically inside a sub-agent (see "Known limitations of the plan-file gate" in `phases/named-rationalizations.md`). The Agent tool remains the required routing for instruction-file work; it does not by itself authorize the edit while a plan is armed — a legitimately-blocked mid-pipeline edit is resolved by letting the plan reach `status: complete`, repairing stale frontmatter, or the documented `WRITE_GUARD_ALLOW_INSTRUCTION_EDIT=1` override, never by relocating the working directory.
 
 Verify: re-read the plan, confirm `status: in-progress` is present in the frontmatter block (between the leading `---` delimiters). If the plan still shows `status: planned`, re-edit before proceeding. If multiple plans now claim `status: in-progress`, the lifecycle hook will fail closed — clear the stale ones (mark them `complete`) before dispatching.
 
