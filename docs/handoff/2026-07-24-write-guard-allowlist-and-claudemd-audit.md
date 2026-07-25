@@ -341,3 +341,42 @@ at PreToolUse (so the append never ran); complied, ran both, retried.
   `feedback-always-route-through-build.md` says audit fix batches go through `/build`, and both are
   deployed side by side. The always-loaded rule names the older entry point. Audit declined to guess.
 - **F12** — force-push prose is broader than enforcement; narrow the prose or build a refspec parser.
+
+---
+
+## Round 4 — F3 RESOLVED: permanent flag removed on user decision
+
+User approved removal. `WRITE_GUARD_ALLOW_INSTRUCTION_EDIT` deleted from the `env` block of
+`~/.claude/settings.json`; JSON re-validated (`json.load` OK, key absent). Committed **`f6c70b9`** in
+the `~/.claude` repo — note that repo was on `feat/harness-map-s2-m3-git-age`, pre-existing unrelated
+in-flight work, so the commit sits on that branch.
+
+### Why the removal was safe to do immediately
+Tested the hook against a temp repo with the override stripped from the environment:
+
+| Plan state | Decision |
+|---|---|
+| `status: planned` (nothing armed) | **allow** |
+| `status: in-progress` | **block** |
+
+The gate is DORMANT unless some plan is `in-progress` (`write-guard.py:185-187`). No plan is armed,
+so re-arming cost nothing today. Friction returns only during armed Phase 5 work — which is exactly
+where the allowlist is meant to carry it.
+
+### Session caveat — carry this to Task 3
+The `env` block is read at SESSION START. **This session still has the flag live** (`echo` → `1`) even
+though the file no longer contains it. Consequence:
+- Tasks 1–2: unaffected (gate dormant either way, no plan armed).
+- **Task 3 onward MUST run in a session where `echo "[$WRITE_GUARD_ALLOW_INSTRUCTION_EDIT]"` prints
+  `[]`.** Otherwise the override short-circuits the allowlist and every "declared file allowed" result
+  is meaningless. Relaunch — the flag cannot be cleared from inside a running session.
+
+Plan Bootstrap updated accordingly, and its step 1 was CORRECTED: Tasks 1–2 need no override at all
+(leave the plan at `status: planned`; the gate is dormant). The earlier draft wrongly said they should
+run under the global override — that was worse, since it depends on a permanent global flag rather
+than a time-bounded unarmed window.
+
+### Memory written
+`memory/feedback-escape-hatch-granularity.md` — an escape hatch costlier to use than the friction it
+relieves gets left permanently on, silently disabling the control. Match hatch granularity to the
+block's granularity (per-edit block ⇒ per-edit release, not per-session). Indexed in MEMORY.md.
