@@ -532,3 +532,86 @@ reached. Indexed in MEMORY.md.
 ### Round budget
 Codex round 2 of max 5. Skill requires a green verification run (baseline first) before re-dispatch.
 Telemetry not emitted: `harness` not on PATH (stated once, proceeding, per skill rule).
+
+---
+
+## Round 7 — RESEQUENCED. New plan: write-guard reachability.
+
+User chose option 1. Reachability fixes go FIRST; the allowlist is blocked behind them (task #2
+blockedBy #5). New plan: `docs/plans/2026-07-25-write-guard-reachability.md` (539 lines, deliberately
+~1/3 the allowlist plan's size — over-specification was the recurring defect source there).
+
+**Scope decision.** Only FOUR of the six Codex findings are true reachability bugs in shipped code:
+P1-1 (orchestrator exemption), P1-5 (`CODING_TEAM_MAIN_ROOT`), P1-4 (stale-`None` cache), P1-6
+(documented bypass). P1-3, P2-7 and P1-2 are defects in code that does not exist yet (the matcher, the
+reader's duplicate-key handling, worktree declaration matching) — deferred to the allowlist plan and
+enumerated there so they cannot be lost.
+
+### rx-reviewer round 1 — HIGH finding, and it was a self-inflicted outage in MY plan
+
+My Task 1 "Fix A" was a blanket `is_orchestrator_file(...) and not is_instruction_file(...)`.
+Every claim below was re-verified by command here:
+
+- **204 obsidian-vault `.md` files** live under path components named `agents/`/`phases/`
+  (`find ~/Documents/obsidian-vault -name '*.md' | grep -cE '/(agents|phases|prompts|commands|steps|workers)/'`
+  → 204). KB notes with zero behavioral effect — nothing loads agent prompts from the vault. The
+  blanket conjunction blocks all 204 during any armed plan.
+- **The PAUL workflow dies.** `.paul/phases/<dir>/*.md` classifies as an instruction file, and
+  `check_phase5` runs at `write-guard.py:773` — BEFORE `check_paul_phase_gate` at `:779`. Verified by
+  reading both call sites. `.paul/` dirs live inside product repos (`~/src/engram/.paul` et al) and
+  there is a LIVE PAUL project at Phase 6.
+- **The suite stays green through both** — PAUL tests call `check_paul_phase_gate()` directly
+  (`test_write_guard.py:1319-1361`), never through `check_phase5`. No end-to-end coverage existed.
+
+**Root of my error: I treated the exemption list as homogeneous.** It is not — the four roots are
+exempt for three different reasons:
+
+| Root | Why exempt | Conjunction? |
+|---|---|---|
+| obsidian vault | content is never harness instructions; path shape is coincidence | NO |
+| `.paul/` | governed by a DIFFERENT gate downstream (`:779`) | NO — conditioning makes that gate unreachable |
+| `memory/` | orchestrator-owned data inside a repo | YES — `not is_instruction_file(...)` |
+| `/tmp` | scratch — UNLESS a real repo lives there | YES — keyed on repo containment, not file shape |
+
+Verified zero instruction-shaped files exist in any `memory/` dir today, so that conjunction breaks
+nothing. The `/tmp`-contains-a-repo case is the only genuinely exploitable part of P1-1.
+
+Plan now states the list is heterogeneous and instructs against collapsing it back — "simplifying" it
+is precisely how the outage returns. Added the missing end-to-end PAUL regression test.
+
+### Other applied findings
+- Task 2's E2E test must pass `CODING_TEAM_TEST_SEAM=""` explicitly, or once `_run()` sets the
+  sentinel the assertion inverts and looks like an implementation bug. Also corrected the plan's
+  claim about what `setdefault`→assignment fixes (it is the AMBIENT value, not the caller's).
+- Task 2 blast radius is bounded: exactly 4 in-repo setters, all one-line migrations, no external
+  consumer. Named them in the plan.
+- Task 4's verification grep is now scoped `-- phases/`; unscoped it matches this handoff at
+  `:478-479`, which QUOTES the workaround as review record and must not be edited to satisfy a step.
+- Task 3 must INVERT `test_no_plan_cached_as_none` (`test_active_plan.py:315-368`) — it asserts
+  `count == 1` and its name encodes None-caching as a feature. Named explicitly so it is not read as
+  a safety test and used to soften the fix.
+- Fix A + Fix B must land in ONE commit: Fix B alone WIDENS the exemption on macOS
+  (`/private/tmp/...` does not currently satisfy `startswith("/tmp")`).
+- Fix B must NOT resolve the input path (macOS `/tmp` handled by comparing against both spellings) —
+  resolving would canonicalize every edited path and add a syscall to every Edit/Write.
+- `phases/execution.md:22` documents the exemption Task 1 changes; added to Task 1 Step 6.
+- No deploy step needed anywhere in this plan: `~/.claude/hooks/write-guard.py` is a symlink to the
+  repo file and no copy of `_lib/active_plan.py` exists under `~/.claude/hooks/`.
+- Measurement target for Task 3: `docs/plans/` holds 38 `.md` files, each read IN FULL
+  (`_lib/active_plan.py:132`) before slicing to 4096 chars (`:139`).
+
+**No finding was rejected this round** — every rx-reviewer claim verified. Notable given how many
+false state-claims earlier rounds produced; this agent grounded everything in file content and said
+up front it had no Bash.
+
+### In flight
+`rx-codex` is running the Medium-tier Codex gate against the PRE-REVISION plan (Task 1's design has
+since changed materially). Letting it finish rather than killing it: its Tasks 2/3/4 findings remain
+valid, and any Task 1 finding that survives the redesign is worth having. Triage must mark which is
+which.
+
+### Advisory, out of scope (from rx-reviewer)
+`SKILL.md:161` still calls `/tmp/coding-team-session.json` a "structural dependency for Phase 5 edit
+guards, completeness checks, and recursion protection". Stale twice over — state is plan-file-derived
+now, and the recursion guard was removed (`phases/named-rationalizations.md:65`). Same family as Task
+4's false-claim cleanup; separate ticket.
