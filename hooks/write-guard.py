@@ -254,10 +254,15 @@ def _plan_repo_root(active: Path) -> "Path | None":
     /tmp exemption) to a foreign root. Returns None on any failure — the
     /tmp exemption then falls back to its old unconditional behavior for
     this one edit rather than wedging the gate on an unrelated Path error.
+
+    Catches Exception broadly (not just IndexError/OSError): `.resolve()`
+    raises RuntimeError, not OSError, when it hits a symlink loop — a
+    narrower except would let that RuntimeError escape check_phase5 and
+    surface as a top-level HOOK CRASH block instead of degrading gracefully.
     """
     try:
         return active.parents[2].resolve()
-    except (IndexError, OSError):
+    except Exception:
         return None
 
 

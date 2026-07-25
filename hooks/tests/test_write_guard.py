@@ -671,6 +671,19 @@ class TestIsOrchestratorFile:
         assert not _WRITE_GUARD.is_orchestrator_file(None)
 
 
+class TestPlanRepoRootSymlinkLoop:
+    """`_plan_repo_root()`'s docstring promises None on any failure. A
+    self-referential symlink two levels above the plan makes `.resolve()`
+    raise RuntimeError (not OSError) — verify that degrades to None instead
+    of escaping check_phase5 as a HOOK CRASH."""
+
+    def test_symlink_loop_in_repo_root_returns_none_not_raise(self, tmp_path: Path):
+        loop_dir = tmp_path / "loop"
+        loop_dir.symlink_to(loop_dir)
+        active = loop_dir / "docs" / "plans" / "plan.md"
+        assert _WRITE_GUARD._plan_repo_root(active) is None
+
+
 class TestPhase5BlockMessageDiagnosability:
     """DEFECT 3: the block message must name the arming plan path."""
 
