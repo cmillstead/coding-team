@@ -615,3 +615,86 @@ which.
 guards, completeness checks, and recursion protection". Stale twice over — state is plan-file-derived
 now, and the recursion guard was removed (`phases/named-rationalizations.md:65`). Same family as Task
 4's false-claim cleanup; separate ticket.
+
+---
+
+## Round 8 — Codex gate on the reachability plan (rx-codex): REVISE, 3 P1 + 3 P2
+
+Proof supplied and checked: `codex exec ... | tee /tmp/second-opinion-review-rxcodex1.txt`, **262485**
+bytes, Codex v-, model gpt-5.6-sol, session 019f973e-3727-7390-9076-402dfbbd1260. Codex ran live repro
+subprocesses (real `git init` temp repos, real `find_active_plan_cached()` calls). All cited paths
+exist in-repo. Reviewed the PRE-REVISION plan, but nearly everything survived — Task 1's redesign did
+not touch Tasks 2-4.
+
+### P1-A — THE finding. My Task 4 was symptom-masking.
+
+`_git_main_root()` answers **"what repo is this PROCESS in?"** when the question that matters is
+**"what repo does this FILE belong to?"** That single authority-model mismatch produces all of:
+- `CODING_TEAM_MAIN_ROOT` honored unconditionally (`_lib/active_plan.py:91`)
+- `git rev-parse` invoked with NO env scrubbing, so `GIT_DIR`/`GIT_WORK_TREE` redirect the root
+- running from an unrelated repo, a non-repo cwd, or any repo with an empty `docs/plans/` disarms it
+- **the documented bypass at `phases/named-rationalizations.md:64` works BECAUSE of this**
+
+Task 4 deleted the sentence describing the technique while leaving the technique working. That is
+exactly the operator's banned pattern. **Task 2 is now the real fix:** derive the protected root from
+the EDITED FILE, walking up to the nearest ancestor containing `docs/plans/`. Resolve the target
+first (harness instruction files are reached through symlinks). No `docs/plans/` ancestor → dormant,
+with an explicit instruction NOT to fall back to cwd. Also scrub `GIT_DIR`/`GIT_WORK_TREE`, and keep
+`CODING_TEAM_MAIN_ROOT` only behind a paired `CODING_TEAM_TEST_SEAM=1`. Task 4 is now labelled
+documentation cleanup that does NOT close the hole.
+
+### P1-B — my plan overclaimed; claim rescoped
+
+Goal was "Make the instruction-file gate actually reachable" and the failure table closed with "No
+row's failure mode is a silent allow". Both FALSE. Verified open routes, now in a new
+**Accepted residual risk** table in the plan:
+- `CT_PRETOOLUSE_DISPATCHER_DISABLE=1` → `pretooluse-dispatcher.py:140`, `sys.exit(0)`, no guard runs
+- `CT_PRETOOLUSE_DISPATCHER_SKIP=write-guard.py` → `:63`, targeted skip
+- `write-guard.py:764` — `if tool_name not in ("Edit","Write"): return`, so a Bash `write_text()`
+  never reaches the guard
+- `write-guard.py:769` — falsey `file_path` silently returns
+- handler missing/timeout/start-failure → dispatcher returns `("","",0)` → fail-open
+
+Goal retitled to "Close four of the paths that disarm the gate". A follow-up ticket is required before
+anyone calls the gate sound.
+
+### P1-C — "never cache a None" was write-side only
+
+`_lib/active_plan.py:245-246` is `stored = entry.get("plan_path"); return Path(stored) if stored else
+None`. Ceasing to WRITE negative entries does not stop the reader SERVING a legacy or hand-written
+one; Codex reproduced it. Task 3 now requires all four: never write null entries; treat a falsey
+`plan_path` as a cache MISS on read; invalidate legacy entries via a version field; and bound `ts`
+against the future (the TTL check `now - ts < ttl` ACCEPTS a future timestamp, so a forged entry never
+expires). `ACTIVE_PLAN_CACHE_FILE` lets anything choose where that file lives.
+
+Stale POSITIVE results deferred to the allowlist plan's prerequisites: cached `a.md` while `b.md` is
+flipped with mtime restored returns `a.md` while the authoritative call raises Ambiguous — fails
+closed today, but MISIDENTIFIES the arming plan, which becomes an authorization hole once per-file
+authority attaches to that path. Also noted: plan create/delete/rename ARE already covered
+(`_compute_signature` gets a fresh glob); content-flip-with-restored-mtime is the only real hole.
+
+### P2 items applied
+- **P2-E, all three verified.** `phases/execution.md` is **218 lines**, so the plan's "neither file may
+  exceed 200" was unsatisfiable in place — now says edit in place, do not grow, file the trim
+  separately. `git grep` CANNOT see two more evasion copies at
+  `docs/plans/2026-06-14-coding-team-fastlane.md:567,:586` because `docs/plans/` is gitignored
+  (`.gitignore:2`) — verification switched to `grep -rn` over explicit paths, with `docs/handoff/`
+  excluded because it QUOTES the workaround as review record and must not be edited.
+- **P2-F.** Block assertions must exclude `HOOK CRASH`: `write-guard.py:828-846` converts ANY uncaught
+  exception into `decision: block`, so `assert decision == "block"` passes against a crashed hook.
+  Also flagged the three tests that already PASS pre-fix as regression locks, so the implementer does
+  not hunt a nonexistent fixture bug, and fixed the `-k` expression to select the unit class.
+- **P2-D.** Vault rule now pinned to the consecutive component pair `("Documents","obsidian-vault")`,
+  and all component checks declared LEXICAL (consistent with the no-resolve-input rule) — a symlink
+  alias into an exempt root is deliberately NOT exempt.
+- **P3-G.** "Let the plan reach `status: complete`" qualified as normal Phase 6 completion, not marking
+  a plan complete to unblock an unfinished edit.
+
+### State
+Plan is 696 lines, all python blocks parse, ruff clean. Task 2's design (root-from-file) is materially
+NEW and unreviewed by either gate — neither reviewed this mechanism. Codex offered round 3.
+
+### Tooling note from rx-codex, worth acting on
+`mcp__codesight__query` REJECTS any path outside `/Users/cevin/src/`, so it cannot serve this repo at
+all. Dispatch templates that mandate a codesight search are unsatisfiable here. Related: an earlier
+agent reported the codesight index as stale (returned two hook files that do not exist).
