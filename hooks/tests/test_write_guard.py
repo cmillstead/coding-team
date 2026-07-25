@@ -15,9 +15,12 @@ import base64
 import importlib.util
 import json
 import os
+import shutil
 import stat
 import subprocess
 import sys
+import tempfile
+import uuid
 from pathlib import Path
 
 import pytest
@@ -92,20 +95,34 @@ def _write_plan(repo_root: Path, name: str, body: str | None = None) -> Path:
 
 
 def _run(
-    event: dict, cwd: Path | None = None, env: dict | None = None
+    event: dict,
+    cwd: Path | None = None,
+    env: dict | None = None,
+    use_root_seam: bool = True,
 ) -> tuple[dict | None, str, str, int]:
     """Run write-guard.py with the given event; return (parsed_json, stdout, stderr, returncode).
 
-    When `cwd` is given, CODING_TEAM_MAIN_ROOT is set to it so active-plan
-    detection uses the test repo directly instead of depending on `git
-    rev-parse` succeeding in an ephemeral tmp repo (see _lib/active_plan.py).
-    An explicit `env` entry for the same key is not overridden.
+    When `cwd` is given and `use_root_seam` is True (the default), BOTH
+    CODING_TEAM_MAIN_ROOT and CODING_TEAM_TEST_SEAM are set (explicit
+    assignment, not setdefault) so active-plan detection uses the test repo
+    directly instead of depending on real git discovery succeeding for an
+    ephemeral tmp repo (see _lib/active_plan.py — the seam requires BOTH
+    vars paired, per P1-5). An explicit `env` entry for either key wins:
+    `run_env.update(env)` runs last, layering the caller's values on top of
+    whatever the seam set.
+
+    Set `use_root_seam=False` to exercise REAL target-scoped git discovery
+    (write-guard.py's `_resolve_target_git_roots()`) instead of the seam.
+    Required for any test asserting on actual git-identity resolution — with
+    the seam active, the root is FORCED to `cwd` regardless of which file is
+    being edited, which would make such a test vacuous.
     """
     run_env = None
     if cwd is not None or env is not None:
         run_env = dict(os.environ)
-        if cwd is not None:
-            run_env.setdefault("CODING_TEAM_MAIN_ROOT", str(cwd))
+        if cwd is not None and use_root_seam:
+            run_env["CODING_TEAM_MAIN_ROOT"] = str(cwd)
+            run_env["CODING_TEAM_TEST_SEAM"] = "1"
         if env is not None:
             run_env.update(env)
     result = subprocess.run(
@@ -671,19 +688,6 @@ class TestIsOrchestratorFile:
         assert not _WRITE_GUARD.is_orchestrator_file(None)
 
 
-class TestPlanRepoRootSymlinkLoop:
-    """`_plan_repo_root()`'s docstring promises None on any failure. A
-    self-referential symlink two levels above the plan makes `.resolve()`
-    raise RuntimeError (not OSError) — verify that degrades to None instead
-    of escaping check_phase5 as a HOOK CRASH."""
-
-    def test_symlink_loop_in_repo_root_returns_none_not_raise(self, tmp_path: Path):
-        loop_dir = tmp_path / "loop"
-        loop_dir.symlink_to(loop_dir)
-        active = loop_dir / "docs" / "plans" / "plan.md"
-        assert _WRITE_GUARD._plan_repo_root(active) is None
-
-
 class TestPhase5BlockMessageDiagnosability:
     """DEFECT 3: the block message must name the arming plan path."""
 
@@ -785,6 +789,218 @@ class TestPhase5OverrideEscapeHatch:
         )
         if parsed is not None:
             assert parsed.get("decision") != "block"
+
+
+class TestTargetScopedRootResolution:
+    """P1-5: the protected root is derived from the EDITED FILE's own git
+    identity, not from the process's cwd. Every test here uses
+    `use_root_seam=False` so real target-scoped git discovery
+    (`_resolve_target_git_roots()`) actually runs — with the seam active
+    the root would be forced to `cwd` regardless of the file being edited,
+    making these tests vacuous. Every block assertion excludes HOOK CRASH
+    and requires the Phase-5-specific reason substring, per
+    TestOrchestratorExemptionDoesNotLaunderInstructionFiles's pattern —
+    write-guard.py's top-level handler turns ANY exception into a block,
+    so a bare `decision == "block"` would pass against a crashed hook.
+    """
+
+    def _armed_repo_with_instruction_file(self, root: Path) -> Path:
+        """Init a git repo at ROOT, arm a plan, and write an instruction file.
+
+        Returns the instruction file's path.
+        """
+        _init_repo(root)
+        _write_plan(root, "plan.md")
+        instr = root / "skills" / "demo" / "SKILL.md"
+        instr.parent.mkdir(parents=True)
+        instr.write_text("# Demo\nYou are demo.\n")
+        return instr
+
+    def _assert_blocked_by_phase5(self, parsed, stdout: str) -> None:
+        assert parsed is not None and parsed.get("decision") == "block", (
+            f"expected block, got {stdout!r}"
+        )
+        reason = parsed.get("reason", "")
+        assert "HOOK CRASH" not in reason, f"block came from a hook crash: {stdout!r}"
+        assert "behavioral instruction-file edit" in reason, (
+            f"block reason is not the Phase 5 instruction-file gate: {stdout!r}"
+        )
+
+    def test_root_follows_the_edited_file_not_the_cwd(self, tmp_path: Path):
+        """The documented bypass (cd to a repo with no plans) asserted closed.
+
+        An armed plan lives only in repo-a. Running the hook with cwd set to
+        an unrelated repo-b (no plans at all) must NOT disarm the gate for
+        an edit to a file that physically belongs to repo-a.
+        """
+        repo_a = tmp_path / "repo-a"
+        repo_a.mkdir()
+        instr = self._armed_repo_with_instruction_file(repo_a)
+
+        repo_b = tmp_path / "repo-b"
+        repo_b.mkdir()
+        _init_repo(repo_b)  # unrelated repo, no plans
+
+        event = {
+            "tool_name": "Edit",
+            "tool_input": {"file_path": str(instr), "new_string": "altered"},
+        }
+        parsed, stdout, _stderr, _rc = _run(event, cwd=repo_b, use_root_seam=False)
+        self._assert_blocked_by_phase5(parsed, stdout)
+
+    def test_git_env_vars_cannot_redirect_the_root(self, tmp_path: Path):
+        """GIT_DIR/GIT_WORK_TREE pointed at an unrelated empty repo must not
+        redirect target-scoped discovery away from the edited file's real
+        owning repo."""
+        repo_a = tmp_path / "repo-a"
+        repo_a.mkdir()
+        instr = self._armed_repo_with_instruction_file(repo_a)
+
+        empty_repo = tmp_path / "empty-repo"
+        empty_repo.mkdir()
+        _init_repo(empty_repo)  # no docs/plans
+
+        event = {
+            "tool_name": "Edit",
+            "tool_input": {"file_path": str(instr), "new_string": "altered"},
+        }
+        parsed, stdout, _stderr, _rc = _run(
+            event,
+            use_root_seam=False,
+            env={
+                "GIT_DIR": str(empty_repo / ".git"),
+                "GIT_WORK_TREE": str(empty_repo),
+            },
+        )
+        self._assert_blocked_by_phase5(parsed, stdout)
+
+    def test_worktree_consults_the_main_checkouts_plans(self, tmp_path: Path):
+        """Regression lock for the contract at _lib/active_plan.py's module
+        docstring: worktrees and the primary checkout resolve to the same
+        plan_root. A plan armed ONLY in the main checkout must still gate an
+        edit made inside a linked worktree. A directory-name walk up from
+        the worktree would fail this (docs/plans/ doesn't exist there,
+        gitignored and only present in the main checkout); target-scoped
+        `--git-common-dir` passes it.
+        """
+        main_repo = tmp_path / "main-repo"
+        main_repo.mkdir()
+        self._armed_repo_with_instruction_file(main_repo)  # armed in main only
+
+        worktree_dir = tmp_path / "wt-checkout"
+        subprocess.run(
+            [
+                "git", "-C", str(main_repo), "worktree", "add", "-q",
+                "-b", "wt-branch", str(worktree_dir),
+            ],
+            check=True,
+            capture_output=True,
+        )
+
+        instr = worktree_dir / "skills" / "demo" / "SKILL.md"
+        instr.parent.mkdir(parents=True)
+        instr.write_text("# Demo\nYou are demo.\n")
+
+        event = {
+            "tool_name": "Edit",
+            "tool_input": {"file_path": str(instr), "new_string": "altered"},
+        }
+        parsed, stdout, _stderr, _rc = _run(event, use_root_seam=False)
+        self._assert_blocked_by_phase5(parsed, stdout)
+
+    def test_empty_nested_docs_plans_does_not_shadow_an_armed_parent(self, tmp_path: Path):
+        """An empty docs/plans/ nested under a subdirectory of the armed
+        repo must not shadow the armed parent — target-scoped resolution
+        only ever consults <owning-repo-root>/docs/plans/, never a
+        directory-name walk that could stop at the nested empty one."""
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        self._armed_repo_with_instruction_file(repo)
+
+        nested_empty = repo / "component" / "docs" / "plans"
+        nested_empty.mkdir(parents=True)
+
+        instr = repo / "component" / "hooks" / "x.py"
+        instr.parent.mkdir(parents=True)
+        instr.write_text("print('hi')\n")
+
+        event = {
+            "tool_name": "Edit",
+            "tool_input": {"file_path": str(instr), "new_string": "altered"},
+        }
+        parsed, stdout, _stderr, _rc = _run(event, use_root_seam=False)
+        self._assert_blocked_by_phase5(parsed, stdout)
+
+    def test_symlinked_repo_alias_under_tmp_is_not_exempted(self, tmp_path: Path):
+        """P1-1 x P1-5 interaction: is_instruction_file() classification is
+        LEXICAL (spelling says /tmp), but repo OWNERSHIP is resolved (the
+        alias resolves to the armed repo) — ownership must win for the /tmp
+        exemption decision, or a /tmp symlink alias would launder any
+        instruction-file edit around the gate."""
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        self._armed_repo_with_instruction_file(repo)
+        (repo / "hooks").mkdir()
+        hook_file = repo / "hooks" / "write-guard.py"
+        hook_file.write_text("print('hi')\n")
+
+        alias = Path("/tmp") / f"wg-alias-{uuid.uuid4().hex[:8]}"
+        alias.symlink_to(repo)
+        try:
+            aliased_path = alias / "hooks" / "write-guard.py"
+            event = {
+                "tool_name": "Edit",
+                "tool_input": {"file_path": str(aliased_path), "new_string": "altered"},
+            }
+            parsed, stdout, _stderr, _rc = _run(event, use_root_seam=False)
+            self._assert_blocked_by_phase5(parsed, stdout)
+        finally:
+            alias.unlink()
+
+    def test_file_outside_any_git_repo_is_dormant(self):
+        """A file with no owning git repo at all is never pipeline-gated —
+        target-scoped discovery must NOT fall back to cwd (that would
+        reintroduce the defect this resolution scheme exists to close)."""
+        outside = Path(tempfile.mkdtemp(prefix="wg-no-repo-"))
+        try:
+            instr = outside / "skills" / "demo" / "SKILL.md"
+            instr.parent.mkdir(parents=True)
+            instr.write_text("# Demo\nYou are demo.\n")
+            event = {
+                "tool_name": "Edit",
+                "tool_input": {"file_path": str(instr), "new_string": "altered"},
+            }
+            parsed, stdout, _stderr, _rc = _run(event, use_root_seam=False)
+            if parsed is not None:
+                assert parsed.get("decision") != "block", (
+                    f"a file outside any git repo must not be pipeline-gated, got {stdout!r}"
+                )
+        finally:
+            shutil.rmtree(outside, ignore_errors=True)
+
+    def test_ambient_main_root_override_is_ignored_end_to_end(self, repo: Path):
+        """P1-5 end-to-end: an ambient CODING_TEAM_MAIN_ROOT pointed at an
+        empty dir must not disarm the gate — without the paired sentinel,
+        real target-scoped git discovery takes over regardless. Passes
+        CODING_TEAM_TEST_SEAM="" explicitly: once _run() sets the sentinel
+        for every cwd invocation (use_root_seam defaults to True here), the
+        env-supplied root would otherwise be honored and this assertion
+        would invert.
+        """
+        instr = self._armed_repo_with_instruction_file(repo)  # note: repo IS init'd by fixture already
+        empty_dir = repo.parent / "unrelated-empty"
+        empty_dir.mkdir()
+
+        event = {
+            "tool_name": "Edit",
+            "tool_input": {"file_path": str(instr), "new_string": "altered"},
+        }
+        parsed, stdout, _stderr, _rc = _run(
+            event,
+            cwd=repo,
+            env={"CODING_TEAM_MAIN_ROOT": str(empty_dir), "CODING_TEAM_TEST_SEAM": ""},
+        )
+        self._assert_blocked_by_phase5(parsed, stdout)
 
 
 # ---------------------------------------------------------------------------

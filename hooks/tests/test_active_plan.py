@@ -77,7 +77,9 @@ def session_env(tmp_path: Path) -> dict:
     Also pins CODING_TEAM_MAIN_ROOT to tmp_path (the same path the `repo`
     fixture initializes as a git repo) so active-plan detection uses the
     test repo directly instead of depending on `git rev-parse` succeeding
-    in an ephemeral tmp repo (see _lib/active_plan.py).
+    in an ephemeral tmp repo (see _lib/active_plan.py). CODING_TEAM_TEST_SEAM
+    must be paired with it (P1-5) — without the sentinel, the override is
+    ignored and these tests would depend on real git discovery instead.
     """
     session_id = f"test-active-plan-{uuid.uuid4().hex[:12]}"
     cache_file = tmp_path / "active-plan-cache.json"
@@ -85,6 +87,7 @@ def session_env(tmp_path: Path) -> dict:
         "CLAUDE_CODE_SESSION_ID": session_id,
         "ACTIVE_PLAN_CACHE_FILE": str(cache_file),
         "CODING_TEAM_MAIN_ROOT": str(tmp_path),
+        "CODING_TEAM_TEST_SEAM": "1",
     }
 
 
@@ -114,8 +117,8 @@ counter_path = Path({str(counter_file)!r})
 import _lib.active_plan as _ap
 _original = _ap.find_active_plan
 
-def _counting(counter_path=counter_path, _orig=_original):
-    result = _orig()
+def _counting(counter_path=counter_path, _orig=_original, **kwargs):
+    result = _orig(**kwargs)
     count = json.loads(counter_path.read_text())
     counter_path.write_text(json.dumps(count + 1))
     return result
@@ -144,8 +147,8 @@ counter_path = Path({str(counter_file)!r})
 import _lib.active_plan as _ap
 _original = _ap.find_active_plan
 
-def _counting(counter_path=counter_path, _orig=_original):
-    result = _orig()
+def _counting(counter_path=counter_path, _orig=_original, **kwargs):
+    result = _orig(**kwargs)
     count = json.loads(counter_path.read_text())
     counter_path.write_text(json.dumps(count + 1))
     return result
@@ -324,8 +327,8 @@ from _lib.active_plan import find_active_plan_cached
 import _lib.active_plan as _ap
 _original = _ap.find_active_plan
 
-def _counting(_orig=_original):
-    result = _orig()
+def _counting(_orig=_original, **kwargs):
+    result = _orig(**kwargs)
     counter = Path({str(counter_file)!r})
     c = json.loads(counter.read_text())
     counter.write_text(json.dumps(c + 1))
@@ -348,8 +351,8 @@ from _lib.active_plan import find_active_plan_cached
 import _lib.active_plan as _ap
 _original = _ap.find_active_plan
 
-def _counting(_orig=_original):
-    result = _orig()
+def _counting(_orig=_original, **kwargs):
+    result = _orig(**kwargs)
     counter = Path({str(counter_file)!r})
     c = json.loads(counter.read_text())
     counter.write_text(json.dumps(c + 1))
@@ -395,8 +398,8 @@ from _lib.active_plan import find_active_plan_cached
 import _lib.active_plan as _ap
 _original = _ap.find_active_plan
 
-def _counting(_orig=_original):
-    result = _orig()
+def _counting(_orig=_original, **kwargs):
+    result = _orig(**kwargs)
     counter = Path({str(counter_file)!r})
     c = json.loads(counter.read_text())
     counter.write_text(json.dumps(c + 1))
@@ -423,11 +426,13 @@ print(json.dumps({{"plan": str(result) if result else None}}))
             "CLAUDE_CODE_SESSION_ID": f"session-A-{uuid.uuid4().hex[:8]}",
             "ACTIVE_PLAN_CACHE_FILE": str(cache_file1),
             "CODING_TEAM_MAIN_ROOT": str(repo),
+            "CODING_TEAM_TEST_SEAM": "1",
         }
         session_env2 = {
             "CLAUDE_CODE_SESSION_ID": f"session-B-{uuid.uuid4().hex[:8]}",
             "ACTIVE_PLAN_CACHE_FILE": str(cache_file2),
             "CODING_TEAM_MAIN_ROOT": str(repo),
+            "CODING_TEAM_TEST_SEAM": "1",
         }
 
         code = """
@@ -449,3 +454,51 @@ print(json.dumps({"plan": str(result) if result else None}))
         assert out2["plan"] is not None
         # They should both point to the same plan (consistency)
         assert out1["plan"] == out2["plan"]
+
+
+class TestMainRootTestSeamPairing:
+    """P1-5: CODING_TEAM_MAIN_ROOT must be honored only when paired with a
+    truthy CODING_TEAM_TEST_SEAM — an ambient leftover of the former alone
+    must degrade to real git discovery, not silently redirect the root."""
+
+    def test_main_root_override_ignored_without_sentinel(self, tmp_path: Path):
+        """Without CODING_TEAM_TEST_SEAM, CODING_TEAM_MAIN_ROOT is ignored."""
+        empty_dir = tmp_path / "empty"
+        empty_dir.mkdir()
+        code = """
+import json
+from _lib.active_plan import _git_main_root
+result = _git_main_root()
+print(json.dumps({"root": str(result) if result else None}))
+"""
+        r = run_python(code, cwd=tmp_path, env={"CODING_TEAM_MAIN_ROOT": str(empty_dir)})
+        assert r.returncode == 0, r.stderr
+        out = json.loads(r.stdout)
+        assert out["root"] != str(empty_dir), (
+            "CODING_TEAM_MAIN_ROOT must be ignored when CODING_TEAM_TEST_SEAM "
+            "is not set — an ambient leftover must not silently redirect the root"
+        )
+
+    def test_main_root_override_honored_with_sentinel(self, tmp_path: Path):
+        """With the paired CODING_TEAM_TEST_SEAM=1 sentinel, the override IS honored.
+
+        Regression lock, not a red test: this passes both before and after
+        the P1-5 fix — only test_main_root_override_ignored_without_sentinel
+        above is new coverage of the actual defect.
+        """
+        empty_dir = tmp_path / "empty"
+        empty_dir.mkdir()
+        code = """
+import json
+from _lib.active_plan import _git_main_root
+result = _git_main_root()
+print(json.dumps({"root": str(result) if result else None}))
+"""
+        r = run_python(
+            code,
+            cwd=tmp_path,
+            env={"CODING_TEAM_MAIN_ROOT": str(empty_dir), "CODING_TEAM_TEST_SEAM": "1"},
+        )
+        assert r.returncode == 0, r.stderr
+        out = json.loads(r.stdout)
+        assert out["root"] == str(empty_dir)

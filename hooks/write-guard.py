@@ -21,7 +21,11 @@ from pathlib import Path
 from _lib import event as _event
 from _lib import graduated_checks as _graduated_checks
 from _lib import output as _output
-from _lib.active_plan import find_active_plan_cached, AmbiguousActivePlanError
+from _lib.active_plan import (
+    find_active_plan_cached,
+    AmbiguousActivePlanError,
+    _resolve_target_git_roots,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -46,7 +50,10 @@ _TMP_ROOT_RESOLVED = _tmp_root_resolved()
 
 
 def _orchestrator_exemption_category(
-    file_path: str, *, plan_root: "Path | None" = None
+    file_path: str,
+    *,
+    plan_root: "Path | None" = None,
+    target_worktree_root: "Path | None" = None,
 ) -> "str | None":
     """Return which orchestrator-exempt root FILE_PATH matches, or None.
 
@@ -58,6 +65,15 @@ def _orchestrator_exemption_category(
     common case; check_phase5() calls this directly so it can apply the
     memory/-specific conjunction with is_instruction_file() without
     re-deriving which root actually matched.
+
+    `target_worktree_root`, when supplied, is FILE_PATH's own resolved
+    worktree root (`--show-toplevel`, from the caller's target-scoped git
+    discovery — see _lib/active_plan.py's _resolve_target_git_roots()).
+    This function never resolves anything itself (see is_orchestrator_file's
+    docstring); target_worktree_root is a caller-resolved value passed in
+    purely for the /tmp branch's containment check below, alongside (not
+    instead of) the pre-existing lexical `plan_root` check — see that
+    check's comment for why both are needed.
     """
     try:
         path = Path(file_path)
@@ -95,12 +111,32 @@ def _orchestrator_exemption_category(
 
         # /tmp — CONDITIONAL on repo containment. A scratch file in /tmp
         # stays exempt; a harness repo that happens to live under /tmp does
-        # not get its whole gate switched off — only PLAN_ROOT, when
-        # supplied, narrows this. Path.is_relative_to() (never startswith)
-        # so /tmpfoo does not falsely match either root spelling.
+        # not get its whole gate switched off. Path.is_relative_to() (never
+        # startswith) so /tmpfoo does not falsely match either root spelling.
         for tmp_root in (_TMP_ROOT, _TMP_ROOT_RESOLVED):
             if path.is_relative_to(tmp_root):
+                # Lexical containment: catches the case where the arming
+                # repo's own root is spelled starting with /tmp (e.g. a CI
+                # sandbox), so every file in it is lexically "under /tmp".
+                # This alone CANNOT catch a /tmp path that is a symlink
+                # ALIAS into the armed repo (e.g. /tmp/alias -> /repo) —
+                # `path` here is FILE_PATH exactly as spelled, never
+                # resolved, so "/tmp/alias/x" is never lexically relative
+                # to a resolved "/repo".
                 if plan_root is not None and path.is_relative_to(plan_root):
+                    return None
+                # Resolved containment: closes the alias gap above. The
+                # CALLER resolves FILE_PATH's own worktree root via real
+                # git discovery (this function still performs no resolution
+                # itself) and passes it in; if that resolved identity IS
+                # the armed repo, the /tmp spelling is irrelevant — the
+                # file belongs to the pipeline being gated regardless of
+                # how the path to reach it was spelled.
+                if (
+                    target_worktree_root is not None
+                    and plan_root is not None
+                    and target_worktree_root == plan_root
+                ):
                     return None
                 return "tmp"
 
@@ -113,7 +149,12 @@ def _orchestrator_exemption_category(
         return None
 
 
-def is_orchestrator_file(file_path: str, *, plan_root: "Path | None" = None) -> bool:
+def is_orchestrator_file(
+    file_path: str,
+    *,
+    plan_root: "Path | None" = None,
+    target_worktree_root: "Path | None" = None,
+) -> bool:
     """Return True only for files the orchestrator may always edit during Phase 5.
 
     The four exempt roots are heterogeneous, NOT a single uniform rule —
@@ -122,19 +163,32 @@ def is_orchestrator_file(file_path: str, *, plan_root: "Path | None" = None) -> 
     into a flat OR of substring checks; that reintroduces both the P1-1
     instruction-file-laundering bug and the /tmp vs /tmpfoo substring bug.
 
-    All matching is STRUCTURAL (Path.parts / Path.is_relative_to()), never
-    substring, and runs on FILE_PATH exactly as spelled — this function
-    never resolves its input. That is deliberate: resolving the input would
-    canonicalize every edited path (an extra syscall on every Edit/Write)
-    and would mean a symlink alias into an exempt root becomes exempt too.
-    The fail-closed direction here is that a symlink alias is NOT exempt.
+    All matching on FILE_PATH itself is STRUCTURAL (Path.parts /
+    Path.is_relative_to()), never substring, and runs on FILE_PATH exactly
+    as spelled — this function never resolves FILE_PATH. That is deliberate:
+    resolving it would canonicalize every edited path (an extra syscall on
+    every Edit/Write) and would mean a symlink alias into an exempt root
+    becomes exempt too. The fail-closed direction here is that a symlink
+    alias is NOT exempt via the unconditional roots (.paul, vault, memory).
 
-    `plan_root`, when supplied, is the arming plan's repo root (see
-    check_phase5's `_plan_repo_root()`); it narrows the /tmp exemption so a
-    harness repo living under /tmp does not get a free pass. It does not
-    affect the other three roots.
+    `plan_root`, when supplied, is the arming plan's repo root; it narrows
+    the /tmp exemption LEXICALLY so a harness repo whose own root is spelled
+    starting with /tmp does not get a free pass. It does not affect the
+    other three roots.
+
+    `target_worktree_root`, when supplied, is FILE_PATH's own RESOLVED
+    worktree root (the caller's target-scoped git discovery result — see
+    _lib/active_plan.py's _resolve_target_git_roots()). This closes the one
+    gap the lexical `plan_root` check above cannot: a /tmp path that is a
+    symlink ALIAS into the armed repo. Passing it is what makes the alias
+    case NOT exempt, without this function performing any resolution itself.
     """
-    return _orchestrator_exemption_category(file_path, plan_root=plan_root) is not None
+    return (
+        _orchestrator_exemption_category(
+            file_path, plan_root=plan_root, target_worktree_root=target_worktree_root
+        )
+        is not None
+    )
 
 
 # Behavioral instruction files: high-impact surface — always delegate
@@ -245,33 +299,21 @@ def _plan_staleness_note(plan: Path) -> str:
     return ""
 
 
-def _plan_repo_root(active: Path) -> "Path | None":
-    """Derive the repo root that owns the arming plan, or None if it can't be.
-
-    The plan lives at `<root>/docs/plans/<name>.md`, so the root is two
-    levels above `docs/plans/`. `.parents[2]` is taken BEFORE `.resolve()`
-    so a symlinked plan path cannot bind the containment check (used by the
-    /tmp exemption) to a foreign root. Returns None on any failure — the
-    /tmp exemption then falls back to its old unconditional behavior for
-    this one edit rather than wedging the gate on an unrelated Path error.
-
-    Catches Exception broadly (not just IndexError/OSError): `.resolve()`
-    raises RuntimeError, not OSError, when it hits a symlink loop — a
-    narrower except would let that RuntimeError escape check_phase5 and
-    surface as a top-level HOOK CRASH block instead of degrading gracefully.
-    """
-    try:
-        return active.parents[2].resolve()
-    except Exception:
-        return None
-
-
 def check_phase5(file_path: str) -> str | None:
     """Check coding-team pipeline edit guard. Returns block reason or None.
 
+    Root resolution is TARGET-scoped (P1-5): both the active-plan lookup and
+    the orchestrator-exemption containment check use the repo that OWNS
+    file_path, resolved via `_resolve_target_git_roots()` — never the
+    process's cwd. This means relocating the working directory (e.g.
+    running from an unrelated repo, or a repo with an empty docs/plans/)
+    cannot disarm or rearm the gate for a given file; only the file's own
+    git identity can. If file_path is not inside any git repository, the
+    gate is dormant for it (there is no pipeline-owning repo to consult).
+
     Pipeline state is derived from the active plan file (under
-    `$MAIN_ROOT/docs/plans/`) via `find_active_plan()`. The active plan
-    is the unique plan whose YAML frontmatter declares
+    `<owning repo>/docs/plans/`) via `find_active_plan_cached()`. The
+    active plan is the unique plan whose YAML frontmatter declares
     `status: in-progress`. When such a plan exists, behavioral
     instruction-file edits are blocked — a 1-line change to an agent
     prompt, skill, or hook can cascade through the entire pipeline.
@@ -287,8 +329,14 @@ def check_phase5(file_path: str) -> str | None:
     ambiguous/stale-state block so a wedged gate is recoverable).
     """
     overridden = _instruction_edit_overridden()
+    worktree_root, plan_root = _resolve_target_git_roots(file_path)
+    if plan_root is None:
+        # file_path is not inside any git repository -> not pipeline-gated.
+        # Do NOT fall back to cwd here — that reintroduces the defect this
+        # target-scoped resolution exists to close (P1-5).
+        return None
     try:
-        active = find_active_plan_cached()
+        active = find_active_plan_cached(plan_root=plan_root)
     except AmbiguousActivePlanError as exc:
         if overridden:
             return None
@@ -303,7 +351,7 @@ def check_phase5(file_path: str) -> str | None:
         # No active plan -> no pipeline state to gate.
         return None
     category = _orchestrator_exemption_category(
-        file_path, plan_root=_plan_repo_root(active)
+        file_path, plan_root=plan_root, target_worktree_root=worktree_root
     )
     if category is not None:
         # memory/ is the one exempt root that is NOT unconditional — an

@@ -121,6 +121,12 @@ _WRITE_GUARD_AMBIENT_FLAGS = (
     "WRITE_GUARD_ALLOW_INSTRUCTION_EDIT",
     "WRITE_GUARD_ALLOW_MIGRATION_EDIT",
     "GIT_SAFETY_ALLOW_COMPOUND",
+    # P1-5: CODING_TEAM_MAIN_ROOT is honored only when paired with a truthy
+    # CODING_TEAM_TEST_SEAM (see _lib/active_plan.py's _test_seam_root()).
+    # Both are scrubbed here so an ambient leftover of either cannot leak
+    # into a "should use real git discovery" test and silently redirect it.
+    "CODING_TEAM_MAIN_ROOT",
+    "CODING_TEAM_TEST_SEAM",
 )
 
 
