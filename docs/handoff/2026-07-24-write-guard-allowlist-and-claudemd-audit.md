@@ -774,3 +774,59 @@ catch. That single check would have caught both P1-1 and P1-3.
 ### State
 Plan is 798 lines, python blocks parse, ruff clean. No stale directory-walk residue (the only
 remaining mention is the deliberate "why not" rationale).
+
+---
+
+# ==== RESUME HERE (post-compaction, 2026-07-25) ====
+
+**Decision: IMPLEMENT the reachability plan.** Plan review is done — 3 rounds, all findings applied.
+Medium tier's post-execution Codex review will catch what plan review missed, against real code.
+
+## Read first
+`docs/plans/2026-07-25-write-guard-reachability.md` — 798 lines, 4 tasks, `status: planned`.
+**GITIGNORED**: it exists only in this working tree. It is the spec; this handoff is the rationale.
+
+## Do this
+Implement Tasks 1 → 2 → 3 in order (Task 4 is independent, any time). Per task: failing tests FIRST,
+then implementation, then FULL suite green, then lint, then commit with EXPLICIT paths (never
+`git add -A`).
+
+Branch is `fix/write-guard-plan-allowlist` (named for the sibling workstream; that is fine, do not
+rename mid-flight). Baseline to beat: **974 passed, 0 failed, 9 skipped**; `ruff check .` clean.
+
+## Non-negotiables — each cost a review round to find
+1. **Do NOT flip this plan to `status: in-progress`.** It edits `hooks/` and `phases/`, which the gate
+   covers, and the allowlist that would authorize them does not exist yet. The gate is dormant only
+   while no plan is in-progress — keep it that way for the whole implementation.
+2. **Do NOT collapse the orchestrator-exemption list into one uniform rule.** It is HETEROGENEOUS.
+   A blanket conjunction blocks 204 obsidian-vault notes and kills the PAUL workflow, and the suite
+   stays GREEN through both.
+3. **Do NOT use a `docs/plans/` ancestor walk for root derivation.** It regresses worktrees against
+   the documented contract at `_lib/active_plan.py:25-28`. Use target-scoped git identity, keeping
+   `--show-toplevel` and `--git-common-dir` as SEPARATE answers.
+4. **Do NOT let one resolution policy leak across the Task 1 / Task 2 boundary.** Lexical path answers
+   "how was it spelled"; git identity answers "who owns it". See learning C28.
+5. **Task 4 is documentation cleanup and must NOT be described as closing the bypass.** Task 2 closes
+   it in code.
+6. **Do NOT cache the root result.** Measured: 0.03 ms resolve, 0.96 ms scan — caching reintroduces
+   the Task 3 invalidation bug.
+7. Every block assertion must exclude `HOOK CRASH` — `write-guard.py:828-846` turns any exception into
+   a block, so `assert decision == "block"` passes against a crashed hook.
+8. Root-resolution tests need `_run(..., use_root_seam=False)` (add it first) or they are vacuous:
+   `_run(cwd=)` setdefaults `CODING_TEAM_MAIN_ROOT` (`test_write_guard.py:94-110`).
+
+## Session env
+This session carries `WRITE_GUARD_ALLOW_INSTRUCTION_EDIT=1` live from launch (removed from
+settings.json in `f6c70b9`, but the env block is read at session start). Harmless for this work — the
+gate is dormant anyway — but any manual verification of gate behavior must run in a RELAUNCHED session
+where `echo "[${WRITE_GUARD_ALLOW_INSTRUCTION_EDIT}]"` prints `[]`.
+
+## Routing
+Implementation goes through the Agent tool (`ct-implementer`), not orchestrator edits — `hooks/` and
+`phases/` are instruction files and ALWAYS delegate regardless of size.
+
+## After this plan lands
+Task #2 (allowlist, `docs/plans/2026-07-24-write-guard-plan-allowlist.md`, 1507 lines) unblocks. It
+carries deferred items P1-3 (duplicate frontmatter keys), P2-7 (`RuntimeError`/ELOOP + non-branch-
+specific `_assert_blocked`), P1-2 (worktree declaration matching), and the stale-POSITIVE cache
+misidentification. Tasks #3 and #4 are queued and independent.
