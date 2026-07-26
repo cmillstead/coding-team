@@ -57,23 +57,33 @@ All three accepted only after independent orchestrator verification, not from th
 `hooks/tests/conftest.py`'s task-#12 root-cause docstring was also corrected (it described the
 now-deleted exemption as a live mechanism). Docstring-only — `config.addinivalue_line` untouched.
 
-## IN FLIGHT — agent `wg-drift`, two P3 doc-drift residues F3's sweep missed
+## Doc-drift residues — CLOSED in `a3ba6de`
 
-Comments and markdown ONLY; behavior is settled and must not change. Re-dispatch from here if lost.
+Two P3 residues F3's own sweep missed, both found by orchestrator verification rather than reported:
 
-**V1 `SKILL.md:181`** — the Phase 5 Edit Routing table still lists `/tmp/*` as "Orchestrator edits
-directly", unqualified. `phases/execution.md:22` was updated and explicitly defers to this table
-("See 'Phase 5 Edit Routing' in SKILL.md"), so the authority and the prose now disagree — and
-unqualified `/tmp` describes the P1-A bypass shape (linked worktree under `/tmp` inside an armed
-repo) as permitted policy. Same row's `memory/*.md` cell is likewise missing execution.md:22's
-instruction-file qualifier.
+- **`SKILL.md:181`** — the Phase 5 Edit Routing table listed `/tmp/*` as "Orchestrator edits
+  directly", unqualified, while `phases/execution.md:22` (which explicitly defers to this table)
+  had been corrected. Unqualified `/tmp` described the P1-A bypass shape as permitted policy. The
+  row now carries both qualifiers — `/tmp` outside any armed repo, and `memory/*.md` unless the
+  file is itself an instruction file.
+- **`hooks/write-guard.py` `:256`, `:274`, `:300`** — three `check_phase5` comments still described
+  `/tmp` as a live conditional exemption (`:274` claimed it was "re-evaluated below"; nothing
+  re-evaluates it). Re-grounded rather than deleted — they sit in the function a future reader
+  would restore the branch from, which the F3 docstring names as how P1-A came to exist.
 
-**V2 `hooks/write-guard.py` `~:256`, `~:274`, `~:300`** — three comments inside `check_phase5` still
-describe `/tmp` as a live conditional exemption. `:274` claims `memory/` and `/tmp` "are
-re-evaluated below"; nothing re-evaluates `/tmp`. `:300`'s conclusion ("only memory needs the
-conjunction") is right but its stated reason is now false. Re-ground, don't just delete — these sit
-in the very function a future reader would "restore" the branch from, which the F3 docstring names
-as how P1-A came to exist.
+Verified comments-only mechanically: every changed line in `write-guard.py` is a comment.
+
+---
+
+## STATUS: this plan is COMPLETE
+
+All four tasks landed, all three review rounds (QA, Codex, Codex re-review) applied, all residues
+closed. Suite `1003 passed, 0 failed, 9 skipped`, ruff clean, live hook healthy — verified by the
+orchestrator at tip `a3ba6de`, not taken from any agent report.
+
+`docs/plans/2026-07-25-write-guard-reachability.md` stays **gitignored and `status: planned`**. Do
+NOT flip it. Keeping no plan armed was the bootstrap condition for this entire implementation, and
+the allowlist that would authorize these edits still does not exist — that is task #2 below.
 
 ---
 
