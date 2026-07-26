@@ -6,8 +6,11 @@ verified by command at write time.
 
 ## Repo state
 
-- **Branch:** `feat/reference-extraction-group-a`, pushed, **PR #123 open**
-- **`main`** @ `2a2da47`. Merged today: #118, #119, #120, #121, #122
+- **`main`** @ `446046b`. **PR #123 MERGED** 2026-07-26T23:41Z; local branch deleted.
+  Merged today: #118, #119, #120, #121, #122, #123.
+- **Parent repo reconciled** — `~/.claude` @ `cbb8ea2` on branch
+  `harness/reconcile-reference-deploy` (local, unpushed). See "The live harness"
+  below.
 - **No plan is `status: in-progress`** — `write-guard.py` is DORMANT. If a future
   session finds instruction edits blocked, look for a stale `in-progress` plan
   before reaching for `WRITE_GUARD_ALLOW_INSTRUCTION_EDIT`.
@@ -16,13 +19,24 @@ verified by command at write time.
   **Never stage either.**
 - Tests: `python3 -m pytest hooks/tests -q` → **1055 passed, 9 skipped**. `ruff check .` clean.
 
-## ⚠ The live harness already changed
+## The live harness changed — and is now recorded
 
 `scripts/deploy.sh` ran for real during T4. `~/.claude/rules/` is **116** lines
-(was 226) and `~/.claude/reference/` holds 5 symlinks. **This is true on disk
-regardless of whether PR #123 merges** — reverting requires a re-deploy, not just
-a branch delete. Already-running sessions still have the old set ambiently
-loaded; only new sessions see the reduced surface.
+(was 226) and `~/.claude/reference/` holds 5 symlinks, all resolving.
+
+`~/.claude` is its own git repo (`cmillstead/claude-harness`) with
+`skills/coding-team` as a **submodule**. The deploy therefore mutated the *parent*
+repo's working tree — 5 symlink deletions plus an untracked `reference/` — and
+left it uncommitted. Committed as `cbb8ea2`, which also bumps the submodule
+pointer to `446046b`. Without that commit a `git checkout` in `~/.claude` would
+silently restore five always-loaded rules and re-inflate the surface to 464 while
+PR #123 sat merged and looking correct.
+
+**That branch is local and unpushed**, on top of 5 unpushed `harness-map` commits.
+It was branched from HEAD rather than `origin/main` deliberately: `origin/main`
+still carries `WRITE_GUARD_ALLOW_INSTRUCTION_EDIT: "1"` in `settings.json`, so
+checking it out would have disarmed the write-guard instruction gate in live
+config. Push/PR it from a `~/.claude`-rooted session.
 
 Always-loaded surface: **464 → 354** (`config/CLAUDE.md` 238 + rules 116).
 
@@ -44,17 +58,36 @@ Plan: `docs/plans/2026-07-26-reference-extraction-group-a.md` (gitignored,
 
 ## Open items, ranked
 
-### 1. F3 — five always-loaded files exist in NO repository (highest risk)
+### 1. F3 — CORRECTED: not orphans, a two-repo split source of truth
 
-`~/.claude/rules/` contains 5 **regular files** (not symlinks) with no repo
-source: `scan-finding-completeness.md` (29), `text-discipline.md` (14),
-`no-known-broken.md` (15), `defensive-simplify-guard.md` (16),
-`exemption-override.md` (5). **79 of the remaining 116 lines**, no git history, no
-rollback. A single `[[ -L ]]` guard at `scripts/deploy.sh:116` stands between them
-and `rm -f`.
-**Resume:** move all 5 into `rules/` in the repo, re-run `deploy.sh` to convert
-them to symlinks, and extend `deploy-drift-check.py` to report deployed-only
-files as drift.
+**The original F3 in this handoff and in the audit was wrong.** It claimed 5
+always-loaded files existed in no repository, with no history and no rollback. It
+inferred that from their absence in *this* repo's `git ls-files` without checking
+whether `~/.claude` was itself a repo. It is, and it tracks them
+(`2e6a014`, `b8efdc8`). There was never a data-loss exposure.
+
+What is real: `~/.claude/rules/` has **two owners**. Seven entries are symlinks
+(`120000`) deployed from this repo; five are regular files (`100644`) owned by
+the parent — `scan-finding-completeness.md` (29), `defensive-simplify-guard.md`
+(16), `no-known-broken.md` (15), `text-discipline.md` (14),
+`exemption-override.md` (5). That is **79 of the 116 remaining lines, now 68% of
+the rules surface** — up from a third, because Phase 1 removed only from the
+side this repo owns.
+
+The consequence is measurement, not loss: anything auditing from this repo sees
+37 lines and reports clean, while the real surface is 116. Later reduction phases
+sized against the wrong number will undershoot.
+
+**Resume:** do NOT move the 5 into this repo's `rules/` as the audit first
+advised — two repos deploying into one directory is the defect; duplicating the
+source deepens it. Pick one owner, record the decision, then extend
+`deploy-drift-check.py` to walk the deployed dir and label deployed-only files by
+owning repo (foreign ≠ drift).
+
+The prune loop's `[[ -L ]]` plus its `case "$target_abs" in "$REPO_ROOT/rules/"*)`
+target guard is what kept it from deleting the parent's 5 files on its first real
+run. Load-bearing. The Phase 5 QA review had already caught that its test was
+vacuous and fixed it.
 
 ### 2. PR #95 — open since 2026-06-24, needs a verdict
 
