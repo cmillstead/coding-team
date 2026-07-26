@@ -17,5 +17,5 @@ now" — it isn't. One retry is the maximum. Do NOT skip the underlying check
 (dependency verification, duplicate detection, data-flow tracing, etc.) just
 because codesight is down — perform it with Grep/Read instead.
 
-This mirrors the repo-wide MCP-resilience pattern in `rules/mcp-resilience.md`:
+This mirrors the repo-wide MCP-resilience pattern in `reference/mcp-resilience.md`:
 retry once max, then degrade gracefully to built-in tools.

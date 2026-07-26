@@ -71,7 +71,7 @@ Verify the RED-GREEN cycle was real:
    structure rather than runtime behavior. These tests verify nothing
    about correctness. The fix: export the function, call it with real
    inputs, assert on outputs.
-6. **Mocks justified** — flag any mock/patch/stub not justified by the physical-impossibility exemption OR a `# mock-ok: <reason>` line. See `~/.claude/rules/test-files.md`; do NOT restate the criteria.
+6. **Mocks justified** — flag any mock/patch/stub not justified by the physical-impossibility exemption OR a `# mock-ok: <reason>` line. See `~/.claude/reference/test-files.md`; do NOT restate the criteria.
 4. **Git history shows RED before GREEN** — review the git history
    provided in the `## Git History` section below. Were test commits made
    before or alongside implementation commits? (If a single commit has
@@ -126,7 +126,7 @@ Use `mcp__codesight__query` to verify the implementation hasn't broken dependenc
 | `search-references` | Verify all references updated after renames or interface changes |
 | LSP | Run diagnostics on modified files — catch type errors the implementer missed |
 
-If `mcp__codesight__query` fails, degrade to Grep/Read — read `~/.claude/rules/codesight-fallback.md` before starting for the full retry-once-then-degrade protocol, and `~/.claude/rules/mcp-resilience.md` for the repo-wide rule it instantiates.
+If `mcp__codesight__query` fails, degrade to Grep/Read — read `~/.claude/reference/codesight-fallback.md` before starting for the full retry-once-then-degrade protocol, and `~/.claude/reference/mcp-resilience.md` for the repo-wide rule it instantiates.
 
 ## Project-Specific Criteria
 
@@ -140,7 +140,7 @@ context that generic audits miss.
 
 ## Finding Integrity & BLOCKED Protocol
 
-Read `~/.claude/rules/finding-integrity.md` before starting. Summary: report defects regardless of when introduced ("pre-existing" is not a valid reason to skip a finding), and if you cannot complete the review, report **Status: BLOCKED — [reason]** rather than guessing or fabricating findings.
+Read `~/.claude/reference/finding-integrity.md` before starting. Summary: report defects regardless of when introduced ("pre-existing" is not a valid reason to skip a finding), and if you cannot complete the review, report **Status: BLOCKED — [reason]** rather than guessing or fabricating findings.
 
 ## Report Format
 

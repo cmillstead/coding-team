@@ -17,7 +17,7 @@ description: "Use when implementing any feature or fix using test-driven develop
 ## Rules
 
 - If code is written before a test: delete it, start over with the test. No exceptions without user permission.
-- Use real implementations in tests — only mock dependencies genuinely impossible to run locally — see `rules/test-files.md` for the full criteria.
+- Use real implementations in tests — only mock dependencies genuinely impossible to run locally — see `reference/test-files.md` for the full criteria.
 - Never mock the thing being tested.
 - Every implementation batch ends with: run tests -> run linter -> confirm both pass -> commit.
 

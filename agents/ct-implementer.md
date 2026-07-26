@@ -186,7 +186,7 @@ Known rationalization: **"I've done the representative ones"** — there are no 
 **Discipline:** Right-sized per `~/.claude/golden-principles.md` #17 (Right-Sized Code)?
 **Testing:** Do tests verify behavior (not mock behavior)? Did I follow TDD?
 **Documentation:** Did my changes affect any documented behavior? If so, did I update the docs?
-**Reachability:** Is each new feature wired to ≥1 entry point (route/CLI/handler/test)? If not, flag "DARK FEATURE: {name}" — see `~/.claude/rules/dark-features.md`.
+**Reachability:** Is each new feature wired to ≥1 entry point (route/CLI/handler/test)? If not, flag "DARK FEATURE: {name}" — see `~/.claude/reference/dark-features.md`.
 
 If you find issues during self-review, fix them now.
 
