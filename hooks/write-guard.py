@@ -32,22 +32,6 @@ from _lib.active_plan import (
 # Phase 5 edit guard
 # ---------------------------------------------------------------------------
 
-# /tmp scratch-space root, checked in both spellings: on macOS /tmp is a
-# symlink to /private/tmp, and the OS may hand back either spelling. Computed
-# once at import time — never resolve the FILE PATH under test, only these
-# two fixed constants (see _orchestrator_exemption_category's docstring).
-_TMP_ROOT = Path("/tmp")
-
-
-def _tmp_root_resolved() -> Path:
-    try:
-        return _TMP_ROOT.resolve()
-    except OSError:
-        return _TMP_ROOT
-
-
-_TMP_ROOT_RESOLVED = _tmp_root_resolved()
-
 
 def _orchestrator_exemption_category(
     file_path: str, *, plan_root: "Path | None" = None
@@ -55,24 +39,38 @@ def _orchestrator_exemption_category(
     """Return which orchestrator-exempt root FILE_PATH matches, or None.
 
     Checked in priority order — a path could structurally match more than
-    one root (e.g. a memory/ dir nested inside .paul/), and the four roots
-    are NOT interchangeable: some are unconditional, one is not, so the
-    caller must know exactly which root matched rather than a bare bool.
+    one root (e.g. a memory/ dir nested inside .paul/), and the roots are
+    NOT interchangeable: some are unconditional, one is not, so the caller
+    must know exactly which root matched rather than a bare bool.
     check_phase5() calls this directly so it can apply the memory/-specific
     conjunction with is_instruction_file() without re-deriving which root
     actually matched. No other production caller exists (P2-C removed the
     is_orchestrator_file() wrapper — it had zero production callers and its
-    own tests never exercised the /tmp branch the way check_phase5 actually
-    calls it, which is why P1-A shipped green).
+    own tests never exercised how check_phase5 actually calls this
+    function, which is why the P1-A worktree bypass shipped green).
 
     `plan_root`, when supplied, is the repo the CALLER already resolved as
     owning FILE_PATH and confirmed to be armed (check_phase5 derives it from
     FILE_PATH's own git identity via _resolve_target_git_roots(), then only
     reaches this function once find_active_plan_cached(plan_root=plan_root)
     found an active plan for that exact repo). So `plan_root is not None`
-    already MEANS "FILE_PATH belongs to an armed repo" — see the /tmp branch
-    below (P1-A) for why this makes containment comparisons unnecessary and
-    in fact wrong.
+    already MEANS "FILE_PATH belongs to an armed repo".
+
+    F3: there used to be a fourth, /tmp-based root here ("a scratch file in
+    /tmp stays exempt"), removed as DEAD PRODUCTION CODE. check_phase5 only
+    ever calls this function once plan_root has been confirmed non-None (it
+    returns early on `plan_root is None` before ever reaching this call —
+    see its docstring), so a /tmp branch keyed on `plan_root is not None`
+    could never return anything but None in production; the "genuinely
+    exempt /tmp scratch" case it was meant to protect was ALREADY handled
+    by that same upstream early return, one level up. Keeping an
+    unreachable exemption branch in a security-adjacent guard invites a
+    future reader to "restore" it — which is exactly how the P1-A worktree
+    bypass came to exist in the first place (a containment comparison
+    added to this same branch, which went the wrong way on a linked
+    worktree). A /tmp path is therefore not a distinct exemption root at
+    all now; it falls through this function like any other path that
+    doesn't match .paul, vault, or memory/.
     """
     try:
         path = Path(file_path)
@@ -107,34 +105,6 @@ def _orchestrator_exemption_category(
         # substring, so `mymemory/` does not falsely match.
         if "memory" in parts:
             return "memory"
-
-        # /tmp — CONDITIONAL on plan_root being unset. P1-A: the exemption
-        # is voided UNCONDITIONALLY once plan_root is supplied — not via a
-        # containment comparison. The previous design compared FILE_PATH's
-        # own resolved worktree root against plan_root and exempted on
-        # equality; for an ORDINARY checkout those two values are the SAME
-        # thing by construction (both come from the same git identity), so
-        # the comparison was a tautology that was always true — the ONE
-        # case where it could differ was a file reached through a LINKED
-        # WORKTREE, and there the comparison went false, so the file was
-        # wrongly EXEMPTED instead of blocked (a real /tmp worktree bypass,
-        # reproduced against the live hook). At the only production call
-        # site (check_phase5), plan_root is derived from FILE_PATH's own
-        # git identity and is only ever passed here once that exact repo
-        # was confirmed armed — so plan_root being set already means
-        # FILE_PATH belongs to the armed repo, full stop; no comparison can
-        # add information a containment check hasn't already made true by
-        # construction. A GENUINELY unowned /tmp scratch file (no armed
-        # owning repo at all) never reaches this branch with plan_root set
-        # in production, because check_phase5 returns early on
-        # `plan_root is None` before this function is ever called — see
-        # its docstring. Path.is_relative_to() (never startswith) so
-        # /tmpfoo does not falsely match either root spelling.
-        for tmp_root in (_TMP_ROOT, _TMP_ROOT_RESOLVED):
-            if path.is_relative_to(tmp_root):
-                if plan_root is not None:
-                    return None
-                return "tmp"
 
         return None
     except Exception:

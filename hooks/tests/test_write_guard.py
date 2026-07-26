@@ -589,6 +589,14 @@ class TestOrchestratorExemptionDoesNotLaunderInstructionFiles:
         and kills the PAUL workflow. No existing test covers this end to end —
         the PAUL tests call check_paul_phase_gate() directly
         (test_write_guard.py:1319-1361), so a regression here is silent.
+
+        F2: the assertion is UNCONDITIONAL (not gated behind
+        `if ... decision == "block"`) — a conditional assertion block passes
+        silently on an ALLOW, which is exactly what deleting or skipping
+        check_paul_phase_gate() would produce. The expected outcome here is
+        known and asserted positively: check_paul_phase_gate blocks this
+        exact fixture (DISCOVERY.md with no ASSUMPTIONS.md) with its own
+        ASSUMPTIONS.md-missing reason.
         """
         self._armed_plan(repo)
         target = repo / ".paul" / "phases" / "03-x" / "DISCOVERY.md"
@@ -599,18 +607,24 @@ class TestOrchestratorExemptionDoesNotLaunderInstructionFiles:
             "tool_input": {"file_path": str(target), "content": "x"},
         }
         parsed, stdout, _stderr, _rc = _run(event, cwd=repo)
-        # It may be blocked BY THE PAUL GATE (that gate is not under test here);
-        # what must never happen is a check_phase5 instruction-file block.
-        if parsed is not None and parsed.get("decision") == "block":
-            reason = parsed.get("reason", "")
-            assert "HOOK CRASH" not in reason, (
-                f"block came from a hook crash, not either gate: {stdout!r}"
-            )
-            assert "PAUL" in reason, (
-                f"PAUL artifact was blocked by the Phase 5 instruction gate, "
-                f"not the PAUL staircase — check_paul_phase_gate is now "
-                f"unreachable: {stdout!r}"
-            )
+        assert parsed is not None and parsed.get("decision") == "block", (
+            f"expected check_paul_phase_gate to block (no ASSUMPTIONS.md "
+            f"present) — an ALLOW here means the PAUL gate was skipped or "
+            f"deleted, got {stdout!r}"
+        )
+        reason = parsed.get("reason", "")
+        assert "HOOK CRASH" not in reason, (
+            f"block came from a hook crash, not either gate: {stdout!r}"
+        )
+        assert "behavioral instruction-file edit" not in reason, (
+            f"PAUL artifact was blocked by the Phase 5 instruction gate, "
+            f"not the PAUL staircase — check_paul_phase_gate is now "
+            f"unreachable: {stdout!r}"
+        )
+        assert "PAUL phase '03-x' isn't assumed" in reason, (
+            f"expected check_paul_phase_gate's own ASSUMPTIONS.md-missing "
+            f"reason, got {stdout!r}"
+        )
 
     def test_paul_artifact_is_NOT_blocked_by_ambiguous_plan_state(self, repo):
         """P2-A: `.paul/` must stay UNCONDITIONALLY exempt even when the
@@ -620,6 +634,12 @@ class TestOrchestratorExemptionDoesNotLaunderInstructionFiles:
         artifact was blocked with "cannot determine active plan state"
         instead of ever reaching check_paul_phase_gate — making the PAUL
         gate unreachable exactly when two plans race to in-progress.
+
+        F2: same unconditional-assertion fix as
+        test_paul_artifact_is_NOT_blocked_by_an_armed_plan above — the
+        check_paul_phase_gate() logic doesn't consult plan state at all, so
+        this fixture produces the identical ASSUMPTIONS.md-missing reason
+        (verified empirically); asserted here rather than assumed.
         """
         _write_plan(repo, "plan-a.md")
         _write_plan(repo, "plan-b.md")  # two in-progress -> ambiguous
@@ -632,18 +652,24 @@ class TestOrchestratorExemptionDoesNotLaunderInstructionFiles:
             "tool_input": {"file_path": str(target), "content": "x"},
         }
         parsed, stdout, _stderr, _rc = _run(event, cwd=repo)
-        # It may be blocked BY THE PAUL GATE (that gate is not under test here);
-        # what must never happen is the check_phase5 ambiguity block.
-        if parsed is not None and parsed.get("decision") == "block":
-            reason = parsed.get("reason", "")
-            assert "HOOK CRASH" not in reason, (
-                f"block came from a hook crash, not either gate: {stdout!r}"
-            )
-            assert "cannot determine active plan state" not in reason.lower(), (
-                f"a .paul/ artifact must not be shadowed by an ambiguous plan "
-                f"state — check_paul_phase_gate is now unreachable whenever "
-                f"two plans race to in-progress: {stdout!r}"
-            )
+        assert parsed is not None and parsed.get("decision") == "block", (
+            f"expected check_paul_phase_gate to block (no ASSUMPTIONS.md "
+            f"present) — an ALLOW here means the PAUL gate was skipped or "
+            f"deleted, got {stdout!r}"
+        )
+        reason = parsed.get("reason", "")
+        assert "HOOK CRASH" not in reason, (
+            f"block came from a hook crash, not either gate: {stdout!r}"
+        )
+        assert "cannot determine active plan state" not in reason.lower(), (
+            f"a .paul/ artifact must not be shadowed by an ambiguous plan "
+            f"state — check_paul_phase_gate is now unreachable whenever "
+            f"two plans race to in-progress: {stdout!r}"
+        )
+        assert "PAUL phase '03-x' isn't assumed" in reason, (
+            f"expected check_paul_phase_gate's own ASSUMPTIONS.md-missing "
+            f"reason, got {stdout!r}"
+        )
 
     def test_vault_note_under_agents_dir_is_still_allowed(self, repo, tmp_path):
         """204 real vault notes live under `agents/`/`phases/` components.
@@ -676,73 +702,50 @@ class TestOrchestratorExemptionCategory:
     target) is REMOVED, not merely re-tested. It had zero production
     callers (check_phase5 calls _orchestrator_exemption_category directly)
     and this class's own test_repo_under_tmp_does_not_get_a_free_pass
-    (below, retired) pinned a containment shape production never actually
+    (long retired) pinned a containment shape production never actually
     exercised that way — which is why the P1-A worktree bypass shipped
-    green. See test_plan_root_truthy_voids_tmp_exemption_unconditionally
-    for the corrected contract, which also means the function's
-    `target_worktree_root` parameter is GONE, not merely untested: P1-A's
-    fix made the /tmp branch a plain `plan_root is not None` check, so
-    there is no second value left to compare against and nothing for such
-    a parameter to do.
+    green. This also removed the function's `target_worktree_root`
+    parameter entirely: P1-A's fix made the /tmp branch a plain
+    `plan_root is not None` check, so there was no second value left to
+    compare against.
+
+    F3: the /tmp branch itself is GONE, not merely fixed. Codex confirmed
+    by probe that it was unreachable dead code in production —
+    check_phase5 only calls this function once plan_root is confirmed
+    non-None (it returns early on `plan_root is None` before ever reaching
+    this call), so a /tmp branch keyed on `plan_root is not None` could
+    never return anything but None. The tests that used to assert "/tmp
+    stays exempt" (test_tmp_is_exempt_on_both_spellings_when_no_plan_root,
+    test_tmp_scratch_without_any_plan_root_stays_exempt) and the P1-A
+    regression lock that asserted the corrected plan_root-truthy override
+    (test_plan_root_truthy_voids_tmp_exemption_unconditionally) are all
+    retired: /tmp is not a distinct exemption root anymore, so there is
+    nothing /tmp-specific left to test beyond
+    test_tmp_paths_are_not_exempt_at_all below — genuinely unowned /tmp
+    scratch is handled upstream, by check_phase5's own `plan_root is None`
+    early return, before this function is ever called at all.
     """
 
     def test_tmpfoo_is_not_exempt(self):
         assert _WRITE_GUARD._orchestrator_exemption_category("/tmpfoo/repo/hooks/x.py") is None
 
-    def test_tmp_is_exempt_on_both_spellings_when_no_plan_root(self):
-        assert _WRITE_GUARD._orchestrator_exemption_category("/tmp/scratch.txt") == "tmp"
-        assert _WRITE_GUARD._orchestrator_exemption_category("/private/tmp/scratch.txt") == "tmp"
+    def test_tmp_paths_are_not_exempt_at_all(self):
+        """F3: /tmp is no longer a distinct exemption root, with or without
+        plan_root — it falls through this function like any other
+        non-matching path. Replaces the four retired /tmp-specific tests
+        this class used to carry (see class docstring)."""
+        assert _WRITE_GUARD._orchestrator_exemption_category("/tmp/scratch.txt") is None
+        assert _WRITE_GUARD._orchestrator_exemption_category("/private/tmp/scratch.txt") is None
+        assert (
+            _WRITE_GUARD._orchestrator_exemption_category(
+                "/tmp/some-harness-repo/hooks/write-guard.py",
+                plan_root=Path("/tmp/some-harness-repo"),
+            )
+            is None
+        )
 
     def test_mymemory_component_is_not_exempt(self):
         assert _WRITE_GUARD._orchestrator_exemption_category("/repo/mymemory/note.md") is None
-
-    def test_plan_root_truthy_voids_tmp_exemption_unconditionally(self):
-        """P1-A regression lock (unit level). plan_root truthy means the
-        CALLER (check_phase5) already resolved it from FILE_PATH's own git
-        identity and confirmed that repo is armed — so /tmp can never
-        legitimately exempt once plan_root is set, regardless of whether
-        file_path is lexically "inside" plan_root.
-
-        The retired predecessor of this test (test_repo_under_tmp_does_not_
-        get_a_free_pass) asserted a SIBLING /tmp path (lexically outside
-        plan_root) stayed exempt even with plan_root set. That containment
-        distinction is gone on purpose, not an oversight: in the real
-        calling convention, plan_root is always resolved from file_path's
-        OWN git identity, so plan_root being set at all already means
-        file_path belongs to that armed repo — a caller passing an
-        unrelated plan_root for a "sibling" file is a synthetic scenario
-        this API no longer needs to support, and the old containment
-        check's only real discriminating power was on a LINKED WORKTREE,
-        where it went the wrong way (P1-A).
-        """
-        plan_root = Path("/tmp/some-harness-repo")
-
-        instruction_shaped = "/tmp/some-harness-repo/hooks/write-guard.py"
-        assert (
-            _WRITE_GUARD._orchestrator_exemption_category(
-                instruction_shaped, plan_root=plan_root
-            )
-            is None
-        ), "a file inside the arming plan's own repo must not get a free /tmp pass"
-
-        sibling = "/tmp/some-harness-repo-sibling/scratch.txt"
-        assert (
-            _WRITE_GUARD._orchestrator_exemption_category(sibling, plan_root=plan_root)
-            is None
-        ), "plan_root truthy voids the /tmp exemption unconditionally, even for a lexical sibling"
-
-    def test_tmp_scratch_without_any_plan_root_stays_exempt(self):
-        """Genuine unowned /tmp scratch (no plan_root at all) stays exempt.
-
-        In production this is moot: check_phase5 never reaches this
-        function with plan_root=None, since it returns early at the
-        `plan_root is None` check before calling this function at all
-        (P2-B). Kept as a unit-level contract test for the pure function.
-        """
-        assert (
-            _WRITE_GUARD._orchestrator_exemption_category("/tmp/genuinely-unowned/scratch.txt")
-            == "tmp"
-        )
 
     def test_path_error_is_not_exempt(self):
         """Any path exception yields None (= not exempt = gate applies).
@@ -927,10 +930,41 @@ class TestTargetScopedRootResolution:
         parsed, stdout, _stderr, _rc = _run(event, cwd=repo_b, use_root_seam=False)
         self._assert_blocked_by_phase5(parsed, stdout)
 
-    def test_git_env_vars_cannot_redirect_the_root(self, tmp_path: Path):
-        """GIT_DIR/GIT_WORK_TREE pointed at an unrelated empty repo must not
-        redirect target-scoped discovery away from the edited file's real
-        owning repo."""
+    @pytest.mark.parametrize(
+        "case_id,env_builder",
+        [
+            (
+                "GIT_DIR+GIT_WORK_TREE",
+                lambda repo_a, empty_repo: {
+                    "GIT_DIR": str(empty_repo / ".git"),
+                    "GIT_WORK_TREE": str(empty_repo),
+                },
+            ),
+            (
+                "GIT_COMMON_DIR",
+                lambda repo_a, empty_repo: {"GIT_COMMON_DIR": str(empty_repo / ".git")},
+            ),
+            (
+                "GIT_CEILING_DIRECTORIES",
+                lambda repo_a, empty_repo: {"GIT_CEILING_DIRECTORIES": str(repo_a)},
+            ),
+            (
+                "unknown_GIT_var_default_deny",
+                lambda repo_a, empty_repo: {"GIT_TOTALLY_MADE_UP": "anything"},
+            ),
+        ],
+    )
+    def test_git_env_vars_cannot_redirect_the_root(self, tmp_path: Path, case_id, env_builder):
+        """F1: no GIT_*-prefixed env var can redirect target-scoped discovery
+        away from the edited file's real owning repo — not just GIT_DIR and
+        GIT_WORK_TREE (the two that were ALREADY scrubbed before P1-B and so
+        prove nothing about the allowlist inversion). GIT_COMMON_DIR and
+        GIT_CEILING_DIRECTORIES are the two Codex reproduced as live
+        bypasses pre-fix; GIT_TOTALLY_MADE_UP locks the allowlist's
+        default-deny direction — an unrecognized GIT_* var must be
+        stripped, not kept, so a future git version's new env var is
+        stripped by default rather than silently trusted.
+        """
         repo_a = tmp_path / "repo-a"
         repo_a.mkdir()
         instr = self._armed_repo_with_instruction_file(repo_a)
@@ -946,10 +980,7 @@ class TestTargetScopedRootResolution:
         parsed, stdout, _stderr, _rc = _run(
             event,
             use_root_seam=False,
-            env={
-                "GIT_DIR": str(empty_repo / ".git"),
-                "GIT_WORK_TREE": str(empty_repo),
-            },
+            env=env_builder(repo_a, empty_repo),
         )
         self._assert_blocked_by_phase5(parsed, stdout)
 
