@@ -98,7 +98,7 @@ Use `mcp__codesight__query` with the appropriate operation:
 | `get-file-outline` | Quick scan of new files for exported surface area |
 | LSP | Run diagnostics on modified files — catch type errors across task boundaries |
 
-If `mcp__codesight__query` fails, degrade to Grep/Read — read `~/.claude/rules/codesight-fallback.md` before starting for the full retry-once-then-degrade protocol.
+If `mcp__codesight__query` fails, degrade to Grep/Read — read `~/.claude/rules/codesight-fallback.md` before starting for the full retry-once-then-degrade protocol, and `~/.claude/rules/mcp-resilience.md` for the repo-wide rule it instantiates.
 
 ## Calibration
 

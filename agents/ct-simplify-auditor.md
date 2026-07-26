@@ -87,7 +87,7 @@ Use `mcp__codesight__query` for deeper simplification analysis:
 | `search-references` | Count references for each symbol — low counts may indicate over-abstraction |
 | `get-dependencies` | Flag circular imports in modified files |
 
-If `mcp__codesight__query` fails, degrade to Grep/Read — read `~/.claude/rules/codesight-fallback.md` before starting for the full retry-once-then-degrade protocol. Do NOT skip duplicate detection.
+If `mcp__codesight__query` fails, degrade to Grep/Read — read `~/.claude/rules/codesight-fallback.md` before starting for the full retry-once-then-degrade protocol, and `~/.claude/rules/mcp-resilience.md` for the repo-wide rule it instantiates. Do NOT skip duplicate detection.
 
 ## Project-Specific Criteria
 

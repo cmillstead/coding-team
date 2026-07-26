@@ -126,7 +126,7 @@ Use `mcp__codesight__query` to verify the implementation hasn't broken dependenc
 | `search-references` | Verify all references updated after renames or interface changes |
 | LSP | Run diagnostics on modified files — catch type errors the implementer missed |
 
-If `mcp__codesight__query` fails, degrade to Grep/Read — read `~/.claude/rules/codesight-fallback.md` before starting for the full retry-once-then-degrade protocol.
+If `mcp__codesight__query` fails, degrade to Grep/Read — read `~/.claude/rules/codesight-fallback.md` before starting for the full retry-once-then-degrade protocol, and `~/.claude/rules/mcp-resilience.md` for the repo-wide rule it instantiates.
 
 ## Project-Specific Criteria
 
