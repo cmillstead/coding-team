@@ -31,6 +31,7 @@ from _lib.active_plan import (  # noqa: E402
     AmbiguousActivePlanError,
     MalformedInstructionAllowlistError,
     _parse_frontmatter,
+    find_active_plan,
     read_instruction_allowlist,
 )
 
@@ -899,6 +900,25 @@ class TestFrontmatterDuplicateKeyDetection:
         # Assert
         assert fm["status"] == "in-progress"
         assert fm["instruction_files"] == "SKILL.md"
+
+    def test_find_active_plan_names_offending_plan_on_duplicate_key(
+        self, tmp_path: Path
+    ):
+        # Arrange — a duplicate `status:` key inside a candidate plan file,
+        # discovered via find_active_plan()'s directory scan (not a direct
+        # _parse_frontmatter() call). The error must name the offending
+        # plan's path, not just the duplicated key, matching the sibling
+        # "unreadable plan" / "multiple in-progress" error paths.
+        plan = _write_plan(
+            tmp_path,
+            "dup-status.md",
+            "---\nstatus: planned\nstatus: in-progress\n---\n# x\n",
+        )
+        # Act / Assert
+        with pytest.raises(AmbiguousActivePlanError) as exc_info:
+            find_active_plan(plan_root=tmp_path)
+        assert str(plan) in str(exc_info.value)
+        assert "status" in str(exc_info.value)
 
 
 class TestReadInstructionAllowlist:

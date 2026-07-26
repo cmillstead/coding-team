@@ -374,7 +374,14 @@ def find_active_plan(*, plan_root: "Path | None" = _UNSET) -> Path | None:  # ty
                 f"unreadable plan: {plan} ({exc})"
             ) from exc
         # Frontmatter must be near top — only inspect first 4096 chars
-        fm = _parse_frontmatter(text[:4096])
+        try:
+            fm = _parse_frontmatter(text[:4096])
+        except AmbiguousActivePlanError as exc:
+            # Re-raise naming the offending plan, matching the sibling
+            # error paths below (unreadable plan / multiple in-progress),
+            # which both name the file. Keep the original reason (duplicate
+            # key detail) and exception type; add the path, don't replace it.
+            raise AmbiguousActivePlanError(f"{exc} (plan: {plan})") from exc
         if fm.get("status") == "in-progress":
             in_progress.append(plan)
 
