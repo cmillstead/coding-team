@@ -20,6 +20,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import time
 import uuid
 from pathlib import Path
 
@@ -34,6 +35,7 @@ HOOK_PATH = HOOKS_DIR / "write-guard.py"
 if str(HOOKS_DIR) not in sys.path:
     sys.path.insert(0, str(HOOKS_DIR))
 
+from _lib.active_plan import _CACHE_ENTRY_VERSION, _compute_signature  # noqa: E402
 from _lib.graduated_checks import check_c1_path_trust  # noqa: E402
 
 
@@ -2271,3 +2273,396 @@ class TestPaulPhaseGateFailOpen:
             # (the path is gone, but the function should handle it)
         except Exception as exc:  # noqa: BLE001  # testing fail-open
             pytest.fail(f"check_paul_phase_gate raised when stat fails: {exc}")
+
+
+class TestPhase5AllowlistAdversarial:
+    """Near-miss, traversal, and malformed inputs must never authorize an edit."""
+
+    def _armed_plan(self, repo: Path, declared: str) -> Path:
+        return _write_plan(
+            repo,
+            "plan.md",
+            body=(
+                f"---\nstatus: in-progress\n"
+                f"instruction_files: {declared}\n---\n\n# Plan\n"
+            ),
+        )
+
+    def _assert_blocked(
+        self, repo: Path, target: Path, why: str, reason_substring: str
+    ):
+        """Assert BLOCK for the SPECIFIC reason under test (D4 / P2-7b).
+
+        A bare `decision == "block"` passes against a hook that blocked for
+        the WRONG reason — e.g. a crash, or the ambiguity branch firing
+        instead of the allowlist branch — which is the exact vacuity a
+        regression could hide behind. `reason_substring` pins the check to
+        the gate actually under test; the `HOOK CRASH` exclusion additionally
+        guards against a crash message that happens to contain
+        `reason_substring` by coincidence.
+        """
+        event = {
+            "tool_name": "Edit",
+            "tool_input": {"file_path": str(target), "new_string": "altered"},
+        }
+        parsed, stdout, stderr, rc = _run(event, cwd=repo)
+        assert parsed is not None and parsed.get("decision") == "block", (
+            f"{why} — expected BLOCK, got {stdout!r}"
+        )
+        reason = parsed.get("reason", "")
+        assert "HOOK CRASH" not in reason, (
+            f"{why} — blocked via a hook crash, not the gate under test: "
+            f"{reason!r}"
+        )
+        assert reason_substring in reason, (
+            f"{why} — expected {reason_substring!r} in the block reason, "
+            f"got {reason!r}"
+        )
+
+    def test_suffix_near_miss_not_authorized(self, repo: Path):
+        """`agents/a.md.backup.md` must NOT be authorized by `agents/a.md`.
+
+        Deliberately NOT `a.md.bak`: `is_instruction_file()` gates on the
+        `.md` suffix, so a `.bak` file is never gated and would be allowed
+        for an unrelated reason — a green test proving nothing. The near-miss
+        must stay gated to exercise the matcher.
+        """
+        self._armed_plan(repo, "agents/a.md")
+        near_md = repo / "agents" / "a.md.backup.md"
+        near_md.parent.mkdir(parents=True)
+        near_md.write_text("x")
+        self._assert_blocked(
+            repo, near_md, "suffix near-miss must not match the declared path",
+            "behavioral instruction-file edit",
+        )
+
+    def test_nested_prefix_collision_not_authorized(self, repo: Path):
+        """`evil/agents/a.md` must NOT be authorized by `agents/a.md`."""
+        self._armed_plan(repo, "agents/a.md")
+        evil = repo / "evil" / "agents" / "a.md"
+        evil.parent.mkdir(parents=True)
+        evil.write_text("x")
+        self._assert_blocked(
+            repo, evil, "nested path collision must not match",
+            "behavioral instruction-file edit",
+        )
+
+    def test_traversal_entry_blocks_everything(self, repo: Path):
+        """A `../../../etc/passwd` entry is malformed -> fail closed."""
+        self._armed_plan(repo, "../../../etc/passwd")
+        agent = repo / "agents" / "a.md"
+        agent.parent.mkdir(parents=True)
+        agent.write_text("x")
+        self._assert_blocked(
+            repo, agent, "traversal entry must make the allowlist malformed",
+            "declaration is unusable",
+        )
+
+    def test_traversal_entry_does_not_authorize_its_target(self, repo: Path):
+        """The traversal target itself must not become editable."""
+        self._armed_plan(repo, "../outside/SKILL.md")
+        outside = repo.parent / "outside" / "SKILL.md"
+        outside.parent.mkdir(parents=True, exist_ok=True)
+        outside.write_text("x")
+        self._assert_blocked(
+            repo, outside, "a traversal entry must authorize nothing",
+            "declaration is unusable",
+        )
+
+    def test_absolute_entry_blocks_everything(self, repo: Path):
+        self._armed_plan(repo, "/etc/passwd")
+        agent = repo / "agents" / "a.md"
+        agent.parent.mkdir(parents=True)
+        agent.write_text("x")
+        self._assert_blocked(
+            repo, agent, "absolute entry must make the allowlist malformed",
+            "declaration is unusable",
+        )
+
+    def test_empty_value_blocks_everything(self, repo: Path):
+        _write_plan(
+            repo,
+            "plan.md",
+            body="---\nstatus: in-progress\ninstruction_files:\n---\n\n# Plan\n",
+        )
+        agent = repo / "agents" / "a.md"
+        agent.parent.mkdir(parents=True)
+        agent.write_text("x")
+        self._assert_blocked(
+            repo, agent, "empty instruction_files must fail closed",
+            "declaration is unusable",
+        )
+
+    def test_uppercase_basename_declaration_round_trips(self, repo: Path):
+        """`SKILL.md` must survive frontmatter parsing without lowercasing."""
+        self._armed_plan(repo, "skills/demo/SKILL.md")
+        skill = repo / "skills" / "demo" / "SKILL.md"
+        skill.parent.mkdir(parents=True)
+        skill.write_text("# Demo\nYou are demo.\n")
+        event = {
+            "tool_name": "Edit",
+            "tool_input": {"file_path": str(skill), "new_string": "altered"},
+        }
+        parsed, stdout, stderr, rc = _run(event, cwd=repo)
+        _assert_allowed(parsed, stdout, stderr, rc,
+                        "SKILL.md declaration must round-trip "
+                        "case-sensitively")
+
+    def test_override_env_still_works_with_allowlist_present(self, repo: Path):
+        """Constraint: WRITE_GUARD_ALLOW_INSTRUCTION_EDIT remains functional."""
+        self._armed_plan(repo, "agents/a.md")
+        other = repo / "agents" / "undeclared.md"
+        other.parent.mkdir(parents=True)
+        other.write_text("x")
+        event = {
+            "tool_name": "Edit",
+            "tool_input": {"file_path": str(other), "new_string": "altered"},
+        }
+        parsed, stdout, stderr, rc = _run(
+            event, cwd=repo, env={"WRITE_GUARD_ALLOW_INSTRUCTION_EDIT": "1"}
+        )
+        _assert_allowed(parsed, stdout, stderr, rc,
+                        "env override must still allow an undeclared "
+                        "edit")
+
+    def test_no_active_plan_gate_stays_dormant(self, repo: Path):
+        """No in-progress plan -> allowlist is irrelevant -> allow."""
+        _write_plan(
+            repo,
+            "done.md",
+            body=(
+                "---\nstatus: complete\n"
+                "instruction_files: agents/a.md\n---\n\n# Done\n"
+            ),
+        )
+        other = repo / "agents" / "undeclared.md"
+        other.parent.mkdir(parents=True)
+        other.write_text("x")
+        event = {
+            "tool_name": "Edit",
+            "tool_input": {"file_path": str(other), "new_string": "altered"},
+        }
+        parsed, stdout, stderr, rc = _run(event, cwd=repo)
+        _assert_allowed(parsed, stdout, stderr, rc,
+                        "a `status: complete` plan must not arm the "
+                        "gate")
+
+    def test_ambiguous_state_still_blocks_despite_allowlist(self, repo: Path):
+        """Two in-progress plans -> ambiguity block wins over the allowlist."""
+        for name in ("plan-a.md", "plan-b.md"):
+            _write_plan(
+                repo,
+                name,
+                body=(
+                    "---\nstatus: in-progress\n"
+                    "instruction_files: agents/a.md\n---\n\n# Plan\n"
+                ),
+            )
+        agent = repo / "agents" / "a.md"
+        agent.parent.mkdir(parents=True)
+        agent.write_text("x")
+        event = {
+            "tool_name": "Edit",
+            "tool_input": {"file_path": str(agent), "new_string": "altered"},
+        }
+        parsed, stdout, stderr, rc = _run(event, cwd=repo)
+        assert parsed is not None and parsed.get("decision") == "block", (
+            f"ambiguity must block even a declared file, got {stdout!r}"
+        )
+        assert "cannot determine active plan state" in parsed.get(
+            "reason", ""
+        ).lower()
+
+    def test_declared_but_unreadable_plan_blocks(self, repo: Path):
+        """chmod 000 on the arming plan -> fail closed.
+
+        NOTE the path this actually exercises: `find_active_plan()` raises
+        `AmbiguousActivePlanError` on an unreadable plan
+        (`_lib/active_plan.py:133-137`) BEFORE `check_phase5()` reaches the
+        allowlist reader, so this blocks via the ambiguity branch
+        (`write-guard.py:175-184`), NOT via the reader's own unreadable
+        branch. It is still a genuine fail-closed assertion and must stay —
+        it just is not evidence that the READER handles an unreadable plan.
+        That branch is covered only by T1's `test_unreadable_plan_raises`,
+        which calls the reader directly.
+        """
+        plan = self._armed_plan(repo, "agents/a.md")
+        agent = repo / "agents" / "a.md"
+        agent.parent.mkdir(parents=True)
+        agent.write_text("x")
+        plan.chmod(0)
+        try:
+            event = {
+                "tool_name": "Edit",
+                "tool_input": {"file_path": str(agent), "new_string": "x"},
+            }
+            parsed, stdout, stderr, rc = _run(event, cwd=repo)
+        finally:
+            plan.chmod(stat.S_IRUSR | stat.S_IWUSR)
+        assert parsed is not None and parsed.get("decision") == "block", (
+            f"unreadable arming plan must fail closed, got {stdout!r}"
+        )
+
+    def test_block_emits_exactly_one_json_object(self, repo: Path):
+        """Single-emission contract holds for the new block message."""
+        self._armed_plan(repo, "agents/a.md")
+        other = repo / "agents" / "undeclared.md"
+        other.parent.mkdir(parents=True)
+        other.write_text("x")
+        event = {
+            "tool_name": "Edit",
+            "tool_input": {
+                "file_path": str(other),
+                "new_string": "repoPath = '/tmp'\n",
+            },
+        }
+        parsed, stdout, stderr, rc = _run(event, cwd=repo)
+        lines = [ln for ln in stdout.strip().splitlines() if ln.strip()]
+        assert len(lines) == 1, (
+            f"expected exactly 1 JSON line, got {len(lines)}: {stdout!r}"
+        )
+        assert parsed["decision"] == "block"
+        reason = parsed.get("reason", "")
+        assert "HOOK CRASH" not in reason, f"blocked via a crash: {reason!r}"
+        assert "behavioral instruction-file edit" in reason, (
+            f"expected the undeclared-file block reason, got {reason!r}"
+        )
+
+    def test_declared_file_allowed_from_linked_worktree(self, tmp_path: Path):
+        """D2 regression lock, modeled on
+        TestTargetScopedRootResolution.test_worktree_consults_the_main_checkouts_plans
+        (same file). Pre-D2 this failed CLOSED (falsely BLOCKED): declared
+        entries resolved against `plan_root` (the main checkout, via
+        `--git-common-dir`) while `file_path` resolved to the worktree's own
+        top-level directory — the two paths could never structurally match.
+        Uses `use_root_seam=False` so REAL target-scoped git discovery runs;
+        with the seam on, the root is FORCED to `cwd` regardless of which
+        file is edited, which would make this test pass vacuously whether or
+        not D2 is implemented.
+        """
+        # Arrange
+        main_repo = tmp_path / "main-repo"
+        main_repo.mkdir()
+        _init_repo(main_repo)
+        _write_plan(
+            main_repo,
+            "plan.md",
+            body=(
+                "---\nstatus: in-progress\n"
+                "instruction_files: agents/declared.md\n---\n\n# Plan\n"
+            ),
+        )
+
+        worktree_dir = tmp_path / "wt-checkout"
+        subprocess.run(
+            [
+                "git", "-C", str(main_repo), "worktree", "add", "-q",
+                "-b", "wt-branch", str(worktree_dir),
+            ],
+            check=True,
+            capture_output=True,
+        )
+
+        declared = worktree_dir / "agents" / "declared.md"
+        declared.parent.mkdir(parents=True)
+        declared.write_text("# Agent\n")
+
+        # Act
+        event = {
+            "tool_name": "Edit",
+            "tool_input": {"file_path": str(declared), "new_string": "altered"},
+        }
+        parsed, stdout, stderr, rc = _run(event, use_root_seam=False)
+
+        # Assert
+        _assert_allowed(
+            parsed, stdout, stderr, rc,
+            "a file declared repo-relative to its own worktree must be "
+            "allowed, not falsely blocked by a main-checkout-rooted "
+            "resolution",
+        )
+
+    def test_stale_cache_hit_does_not_launder_a_misidentified_plan(
+        self, repo: Path
+    ):
+        """D1 regression lock.
+
+        CANNOT be constructed by two ordinary writes: `_compute_signature()`
+        (`hooks/_lib/active_plan.py:556`) hashes `st_mtime_ns` for every
+        `*.md` in the plans dir (candidates gathered at `:661-664`), so an
+        ordinary flip of plan B to `in-progress` changes B's mtime (or, if B
+        is newly created, changes the candidate list itself) and busts the
+        cached signature, forcing a rescan — the stale-positive hit this
+        test targets never occurs through ordinary status edits. It
+        requires a status change to B that does NOT move B's mtime (a
+        restore, a `touch -r` after an out-of-band edit, or — as here — a
+        directly hand-written cache entry via the `ACTIVE_PLAN_CACHE_FILE`
+        seam), which is why this test builds the cache entry by hand rather
+        than by performing two ordinary writes.
+
+        Without D1, this test would ALLOW the edit — honoring plan A's
+        `instruction_files` declaration while plan B is equally
+        `in-progress` and the authoritative uncached call would raise
+        `AmbiguousActivePlanError`. That silent allow is exactly the
+        authorization consequence D1 closes; the general caching hole
+        itself (why a signature-matching hand-written entry can exist at
+        all) remains open and is NOT what this test is proving closed.
+        """
+        # Arrange — two plans, both genuinely in-progress
+        plan_a = _write_plan(
+            repo, "plan-a.md",
+            body=(
+                "---\nstatus: in-progress\n"
+                "instruction_files: agents/a.md\n---\n\n# Plan A\n"
+            ),
+        )
+        _write_plan(
+            repo, "plan-b.md",
+            body="---\nstatus: in-progress\n---\n\n# Plan B\n",
+        )
+        agent = repo / "agents" / "a.md"
+        agent.parent.mkdir(parents=True)
+        agent.write_text("# Agent\n")
+
+        # Hand-write a cache entry whose signature matches the CURRENT
+        # candidate set (both plan-a.md and plan-b.md, as they exist right
+        # now) but whose plan_path claims A alone is the answer — the exact
+        # shape find_active_plan_cached() accepts as a hit, and the exact
+        # shape an honest uncached scan would instead reject as ambiguous.
+        session_id = f"test-d1-cache-{uuid.uuid4().hex[:12]}"
+        cache_file = repo / "d1-cache.json"
+        candidates = sorted((repo / "docs" / "plans").glob("*.md"))
+        signature = _compute_signature(candidates)
+        cache_file.write_text(json.dumps({
+            "version": _CACHE_ENTRY_VERSION,
+            "repo_root": str(repo),
+            "session_id": session_id,
+            "signature": signature,
+            "plan_path": str(plan_a),
+            "ts": time.time(),
+        }))
+
+        # Act
+        event = {
+            "tool_name": "Edit",
+            "tool_input": {"file_path": str(agent), "new_string": "altered"},
+        }
+        parsed, stdout, stderr, rc = _run(
+            event,
+            cwd=repo,
+            env={
+                "CLAUDE_CODE_SESSION_ID": session_id,
+                "ACTIVE_PLAN_CACHE_FILE": str(cache_file),
+            },
+        )
+
+        # Assert
+        assert parsed is not None and parsed.get("decision") == "block", (
+            f"a stale-POSITIVE cache hit must not authorize the edit via "
+            f"A's declaration, got {stdout!r}"
+        )
+        reason = parsed.get("reason", "").lower()
+        assert "cannot determine active plan state" in reason, (
+            f"expected the D1 uncached re-check's ambiguity block, got "
+            f"{reason!r}"
+        )
