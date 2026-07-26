@@ -96,6 +96,41 @@ for f in "$REPO_ROOT"/rules/*.md; do
     deploy "$f" "$CLAUDE_DIR/rules/$(basename "$f")"
 done
 
+# Reference: *.md — dispatch-context includes. Deployed to ~/.claude/reference/,
+# deliberately OUTSIDE ~/.claude/rules/, because anything under ~/.claude/rules/
+# auto-loads into every session AND every subagent. These files load only when a
+# prompt names them with an explicit `Read` line. See rules/README.md.
+for f in "$REPO_ROOT"/reference/*.md; do
+    [[ -f "$f" ]] || continue
+    deploy "$f" "$CLAUDE_DIR/reference/$(basename "$f")"
+done
+
+# Prune orphaned rule symlinks: a *.md symlink in CLAUDE_DIR/rules whose repo
+# source was deleted OR MOVED (e.g. relocated to reference/) is left dangling by
+# the loop above, since it only ever adds/updates links. Same safety rules as the
+# agent prune: only ever remove a symlink that (a) resolves INTO this repo's
+# rules/ dir (i.e. one we created) and (b) whose target no longer exists. A real
+# file, or a foreign symlink a user hand-placed pointing elsewhere, is never
+# touched.
+for f in "$CLAUDE_DIR"/rules/*.md; do
+    [[ -L "$f" ]] || continue
+
+    target_abs=$(python3 -c "import os,sys; d=os.path.dirname(sys.argv[1]); print(os.path.normpath(os.path.join(d, os.readlink(sys.argv[1]))))" "$f")
+    case "$target_abs" in
+        "$REPO_ROOT/rules/"*) ;;   # ours — eligible for prune
+        *) continue ;;             # foreign symlink — never touch
+    esac
+
+    [[ -e "$target_abs" ]] && continue
+
+    if $DRY_RUN; then
+        echo "[dry-run] rm $f"
+    else
+        rm -f "$f"
+        echo "pruned: $f"
+    fi
+done
+
 # Global config: CLAUDE.md, golden-principles.md, code-style.md
 for f in "$REPO_ROOT"/config/*.md; do
     [[ -f "$f" ]] || continue
