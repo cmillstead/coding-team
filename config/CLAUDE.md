@@ -83,8 +83,10 @@ genuinely ambiguous, default to global and say so.
 **A session stays in the directory it started in.** Never reach across repos to
 edit another project's files. If a task needs harness work (~/.claude,
 ~/.claude/skills/coding-team) but the session started in a product repo — or vice
-versa — STOP and restart the session rooted in the correct directory. This
-guarantees only one session touches the harness at a time.
+versa — STOP: write a handoff (see Context Management below) in the same turn,
+before telling the user to restart, then restart the session rooted in the
+correct directory. This guarantees only one session touches the harness at a
+time.
 
 **Exception (the resolver):** appending a rule to this CLAUDE.md is *recording an
 instruction*, not harness development — so it's allowed from any session.
@@ -93,10 +95,19 @@ still requires a harness-rooted session.
 
 ## Context Management
 
+### Handoff triggers
+Compaction is not the only trigger. Write an unprompted handoff, in the same turn, whenever:
+- You are about to recommend the user restart or relaunch the session, for any reason — wrong directory, stale env var, wedged state, anything.
+- Context reaches 80% (compaction imminent).
+- The user says they are stopping, or asks to pause.
+
+Known rationalization: "they can ask for one if they want it" — they should not have to. A restart recommendation with no handoff destroys the session's only durable record.
+
 ### Compaction awareness
 - At 50% context, start being concise — shorter explanations, less recapping
 - At 70% context, persist critical state: open files, current task, blockers
 - At 80% context, compaction is imminent — write a handoff note with: current task, files modified, what's left, decisions made. Prefer a durable in-repo location: `<repo>/docs/handoff/YYYY-MM-DD-<slug>.md` (git-tracked, survives across sessions/machines). Only fall back to `/tmp/claude-handoff-{session}.md` when not inside a git repo — `/tmp` is cleared between sessions, so handoffs written there are routinely lost.
+- The handoff MUST inventory every paused, queued, and blocked item: state, artifact path, and what resuming it means. A bare list of names is not a handoff — an item with no state and no path cannot be resumed.
 
 ### What to persist before compaction
 - Current branch and uncommitted file list
@@ -109,6 +120,7 @@ still requires a harness-rooted session.
 - Run `git status` and `git diff --stat` to see current working state
 - Read the most recently modified files to rebuild context
 - Do NOT restart work from scratch — continue from where compaction interrupted
+- Do NOT assert what a prior session did, finished, or lost without checking artifacts on disk first — verify a claim like "nothing was lost" against files, or say you don't know yet
 
 ## Model Routing (for coding-team agents, NOT for you)
 
