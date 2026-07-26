@@ -22,9 +22,13 @@ from _lib import event as _event
 from _lib import graduated_checks as _graduated_checks
 from _lib import output as _output
 from _lib.active_plan import (
-    find_active_plan_cached,
     AmbiguousActivePlanError,
+    INSTRUCTION_ALLOWLIST_KEY,
+    MalformedInstructionAllowlistError,
     _resolve_target_git_roots,
+    find_active_plan,
+    find_active_plan_cached,
+    read_instruction_allowlist,
 )
 
 
@@ -173,6 +177,37 @@ def is_instruction_file(file_path: str) -> bool:
     return False
 
 
+def _is_declared_instruction_file(
+    file_path: str, allowed: frozenset[Path]
+) -> bool:
+    """Return True only when file_path IS one of the plan-declared paths.
+
+    Comparison is structural `Path` equality on RESOLVED ABSOLUTE paths —
+    never a SUBSTRING or PREFIX test, never `startswith`, never raw string
+    equality (case study #35). The `in` below is set membership over
+    `Path` objects, which is `Path.__eq__` on whole resolved paths — that
+    is the safe operation, not the banned one. A declared `agents/x.md`
+    therefore does NOT authorize `evil/agents/x.md` (different parts) or
+    `agents/x.md.backup.md` (different final component).
+
+    Fails CLOSED: any resolution error returns False, which blocks.
+
+    Catches `RuntimeError` alongside `OSError`/`ValueError` — VERIFIED on
+    Python 3.11.14 (the version this repo targets): `Path.resolve()` on a
+    self-referential symlink (ELOOP) raises `RuntimeError`, not `OSError`.
+    Without this, an ELOOP path propagates past this function to the
+    top-level handler, which emits its own crash-block — so a negative test
+    on this path would pass BECAUSE THE HOOK CRASHED, not because the
+    matcher correctly rejected the path (P2-7, deferred from the
+    reachability plan; closed here since the matcher is new code this task
+    introduces).
+    """
+    try:
+        return Path(file_path).resolve() in allowed
+    except (OSError, ValueError, RuntimeError):
+        return False
+
+
 # Acknowledged-override escape hatch. This hook is a process-global
 # PreToolUse Edit|Write hook that fires identically inside a dispatched
 # sub-agent — Claude Code's PreToolUse event payload carries no reliable
@@ -248,18 +283,16 @@ def check_phase5(file_path: str) -> str | None:
     If multiple plans claim `status: in-progress` or a plan is
     unreadable, fail closed and block with a remediation message.
 
-    Escape hatch: set WRITE_GUARD_ALLOW_INSTRUCTION_EDIT=1 to allow a
-    deliberate instruction-file edit (the override also covers the
-    ambiguous/stale-state block so a wedged gate is recoverable).
+    Escape hatch: the active plan's `instruction_files` frontmatter key is
+    the PREFERRED route to a deliberate instruction-file edit — it declares
+    exactly which files the reviewed plan authorizes. Set
+    WRITE_GUARD_ALLOW_INSTRUCTION_EDIT=1 only as the EMERGENCY route (it
+    disarms the gate for every instruction file for the whole session; it
+    also covers the ambiguous/stale-state block so a wedged gate is
+    recoverable).
     """
     overridden = _instruction_edit_overridden()
-    # worktree_root (the first element) is unused here — F3 removed the
-    # /tmp exemption category entirely (see
-    # _orchestrator_exemption_category()'s docstring), so there is no
-    # longer any comparison against plan_root that needs it. Still
-    # requested from _resolve_target_git_roots() as part of its normal
-    # two-value contract.
-    _worktree_root, plan_root = _resolve_target_git_roots(file_path)
+    worktree_root, plan_root = _resolve_target_git_roots(file_path)
     if plan_root is None:
         # file_path is not inside any git repository -> not pipeline-gated.
         # Do NOT fall back to cwd here — that reintroduces the defect this
@@ -315,25 +348,134 @@ def check_phase5(file_path: str) -> str | None:
     if is_instruction_file(file_path):
         if overridden:
             return None
-        # DEFECT 3: name the arming plan so the block is diagnosable in one
-        # read, and surface staleness so an orphaned in-progress plan is
-        # obvious instead of silently wedging every instruction edit.
+
+        # Plan-scoped allowlist. The active plan may declare which
+        # instruction files it is authorized to edit. Declared -> allow.
+        # Undeclared, key absent, or unparseable -> BLOCK.
+        #
+        # FAIL CLOSED: every branch below that is not an explicit
+        # "declared" match returns a block reason. No `except` returns
+        # None (memory/feedback-hooks-fail-open.md, case study #44).
+
+        # --- D1: reject a stale-POSITIVE cache hit -------------------------
+        # `active` above came from `find_active_plan_cached()`. Re-resolve it
+        # via the AUTHORITATIVE UNCACHED path on THIS branch only, before any
+        # allowlist authority is attached to it. A cache hit can return plan A
+        # while the authoritative call would raise `AmbiguousActivePlanError`
+        # (`hooks/_lib/active_plan.py:467-474`). Because the allowlist
+        # attaches per-file authority to the SPECIFIC plan path returned,
+        # that misidentification is an authorization bug, not just a
+        # staleness quirk: plan A's declaration would be honored while plan B
+        # is the plan actually armed. This does not touch the general cache —
+        # it costs one extra directory scan only on this rare branch
+        # (instruction file being edited AND a plan armed), and it does not
+        # close the general stale-POSITIVE hole (still open — see the
+        # Deferred items subsection).
+        try:
+            find_active_plan(plan_root=plan_root)
+        except AmbiguousActivePlanError:
+            return (
+                f"BLOCKED: cannot determine active plan state — more than "
+                f"one plan is `status: in-progress`, or on-disk state "
+                f"changed since the cached lookup. This is a fail-closed "
+                f"block on the instruction-file gate specifically: the "
+                f"allowlist would otherwise attach edit authority to "
+                f"whichever plan the cache happened to return.\n\n"
+                f"File: {file_path}\n\n"
+                f"Resolve the ambiguity (finish or archive the extra "
+                f"plan(s)) and retry."
+            )
+
+        # --- D2: resolve declared entries against the file's OWN WORKTREE,
+        # not the plan's location -------------------------------------------
+        # `plan_root` (computed earlier in check_phase5 via
+        # `_resolve_target_git_roots()`) is derived through `--git-common-dir`
+        # and always lands on the MAIN checkout, even when `file_path` is
+        # under a linked worktree. Declared entries must resolve against
+        # `worktree_root` instead (Step 4a) so a correctly-declared file
+        # matches identically from the main checkout or any linked worktree.
+        # The plan itself is still found via the shared `plan_root` above —
+        # only the allowlist's root changes.
+        try:
+            allowed = read_instruction_allowlist(active, worktree_root)
+        except MalformedInstructionAllowlistError as exc:
+            return (
+                f"BLOCKED: the active plan's `{INSTRUCTION_ALLOWLIST_KEY}` "
+                f"declaration is unusable — {exc}\n\n"
+                f"File:        {file_path}\n"
+                f"Arming plan: {active}\n\n"
+                f"Repair the plan's frontmatter, then retry. The value is a "
+                f"COMMA-SEPARATED list of repo-root-relative paths:\n"
+                f"    {INSTRUCTION_ALLOWLIST_KEY}: agents/ct-qa-reviewer.md, "
+                f"hooks/write-guard.py\n"
+                f"To recover a wedged gate, set "
+                f"{INSTRUCTION_EDIT_OVERRIDE_ENV}=1 in the environment."
+            )
+        except Exception as exc:  # noqa: BLE001 — fail closed, never allow
+            return (
+                f"BLOCKED: could not evaluate the active plan's "
+                f"`{INSTRUCTION_ALLOWLIST_KEY}` allowlist — {exc!r}\n\n"
+                f"File:        {file_path}\n"
+                f"Arming plan: {active}\n\n"
+                f"This is a fail-closed block. Report it to the user. To "
+                f"recover, set {INSTRUCTION_EDIT_OVERRIDE_ENV}=1."
+            )
+
+        if allowed is not None and _is_declared_instruction_file(
+            file_path, allowed
+        ):
+            return None
+
+        if allowed is None:
+            declared_note = (
+                f"Declared `{INSTRUCTION_ALLOWLIST_KEY}`: (none — the arming "
+                f"plan declares no `{INSTRUCTION_ALLOWLIST_KEY}` key, so "
+                f"EVERY instruction-file edit is blocked)"
+            )
+        else:
+            rendered = ", ".join(sorted(str(p) for p in allowed))
+            declared_note = (
+                f"Declared `{INSTRUCTION_ALLOWLIST_KEY}`: {rendered}"
+            )
+
         return (
-            f"BLOCKED: behavioral instruction-file edit while a coding-team "
-            f"pipeline is in-progress.\n\n"
+            f"BLOCKED: behavioral instruction-file edit not authorized by the "
+            f"active plan.\n\n"
             f"File:        {file_path}\n"
-            f"Arming plan: {active}{_plan_staleness_note(active)}\n\n"
+            f"Arming plan: {active}{_plan_staleness_note(active)}\n"
+            f"{declared_note}\n\n"
             f"This is a process-global hook: dispatching the edit through the "
-            f"Agent tool fires this same guard inside the sub-agent, so that is "
-            f"NOT a way around it. Real paths to proceed:\n"
-            f"  1. Let the pipeline finish — when the arming plan reaches "
+            f"Agent tool fires this same guard inside the sub-agent, so that "
+            f"is NOT a way around it. Real paths to proceed:\n"
+            f"  1. PREFERRED — declare this file in the arming plan's "
+            f"frontmatter as a comma-separated, repo-root-relative list:\n"
+            f"         {INSTRUCTION_ALLOWLIST_KEY}: agents/ct-qa-reviewer.md, "
+            f"hooks/write-guard.py\n"
+            f"     Declare it only if the REVIEWED plan actually covers this "
+            f"edit. The declaration is inspectable process state, NOT an "
+            f"audit trail — `docs/plans/` is gitignored, so the declaration "
+            f"leaves no durable record.\n"
+            f"     Only files inside THIS repo can be declared. If the file "
+            f"belongs to another project, that is not a limitation to work "
+            f"around: cross-repo instruction edits are forbidden outright "
+            f"(`CLAUDE.md`, session-directory discipline). Restart the "
+            f"session rooted in the owning repo instead.\n"
+            f"  2. Let the pipeline finish — when the arming plan reaches "
             f"`status: complete` this gate disarms automatically.\n"
-            f"  2. If the plan is stale/abandoned, set the arming plan's "
-            f"frontmatter to `status: complete` (or remove `status: in-progress`).\n"
-            f"  3. For a deliberate one-off edit, set "
-            f"{INSTRUCTION_EDIT_OVERRIDE_ENV}=1 in the environment and retry.\n\n"
-            f"Known rationalization: 'This instruction file change is trivial' — "
-            f"impact surface determines routing, not perceived complexity."
+            f"  3. If the plan is stale/abandoned, set the arming plan's "
+            f"frontmatter to `status: complete` (or remove "
+            f"`status: in-progress`).\n"
+            f"  4. EMERGENCY ONLY — set {INSTRUCTION_EDIT_OVERRIDE_ENV}=1. "
+            f"This disarms the gate for the WHOLE session and is the recovery "
+            f"path for a wedged fail-closed state, not the routine way to "
+            f"edit an instruction file.\n\n"
+            f"Known rationalization: 'This instruction file change is "
+            f"trivial' — impact surface determines routing, not perceived "
+            f"complexity.\n"
+            f"Known rationalization: 'Just set the env var, declaring the "
+            f"file is bureaucracy' — the declaration is scoped to the files "
+            f"the plan names and is visible in the plan; the env var disarms "
+            f"every instruction file for the whole session."
         )
 
     # Non-instruction source code: allow (orchestrator judges ≤20-line threshold)

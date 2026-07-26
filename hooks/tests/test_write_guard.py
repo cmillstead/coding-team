@@ -862,6 +862,145 @@ class TestPhase5OverrideEscapeHatch:
             assert parsed.get("decision") != "block"
 
 
+def _assert_allowed(parsed, stdout, stderr, rc, what: str) -> None:
+    """Assert the hook ALLOWED — silently, or with an advisory allow.
+
+    Closes the vacuous-positive trap (an import-time crash also yields
+    `parsed is None`) WITHOUT asserting a silence the hook never promised:
+    check_identity_framing emits an advisory allow on agents/*.md and
+    SKILL.md edits that lack identity framing.
+    """
+    assert rc == 0, f"{what}: hook exited {rc}, stderr={stderr!r}"
+    assert "Traceback" not in stderr, f"{what}: hook crashed — {stderr!r}"
+    if parsed is None:
+        assert stdout.strip() == "", (
+            f"{what}: no JSON decision but stdout was not empty — {stdout!r}"
+        )
+    else:
+        assert parsed.get("decision") == "allow", (
+            f"{what}: expected an allow decision, got {stdout!r}"
+        )
+
+
+class TestPhase5InstructionAllowlist:
+    """A plan-declared instruction file is editable; an undeclared one is not."""
+
+    def _armed_plan(self, repo: Path, declared: str | None) -> Path:
+        body = "---\nstatus: in-progress\n"
+        if declared is not None:
+            body += f"instruction_files: {declared}\n"
+        body += "---\n\n# Plan\n"
+        return _write_plan(repo, "plan.md", body=body)
+
+    def _agent_file(self, repo: Path, name: str = "ct-qa-reviewer.md") -> Path:
+        agent = repo / "agents" / name
+        agent.parent.mkdir(parents=True, exist_ok=True)
+        agent.write_text("# Agent\nYou are the reviewer.\n")
+        return agent
+
+    def test_declared_file_is_allowed(self, repo: Path):
+        # Arrange
+        self._armed_plan(repo, "agents/ct-qa-reviewer.md")
+        agent = self._agent_file(repo)
+        # Act
+        event = {
+            "tool_name": "Edit",
+            "tool_input": {"file_path": str(agent), "new_string": "altered"},
+        }
+        parsed, stdout, stderr, rc = _run(event, cwd=repo)
+        # Assert
+        _assert_allowed(parsed, stdout, stderr, rc,
+                        "declared instruction file must be allowed")
+
+    def test_undeclared_file_is_blocked(self, repo: Path):
+        # Arrange
+        self._armed_plan(repo, "agents/ct-qa-reviewer.md")
+        other = self._agent_file(repo, "ct-spec-reviewer.md")
+        # Act
+        event = {
+            "tool_name": "Edit",
+            "tool_input": {"file_path": str(other), "new_string": "altered"},
+        }
+        parsed, stdout, stderr, rc = _run(event, cwd=repo)
+        # Assert
+        assert parsed is not None and parsed.get("decision") == "block", (
+            f"undeclared instruction file must be blocked, got {stdout!r}"
+        )
+
+    def test_block_message_names_the_declared_list(self, repo: Path):
+        # Arrange
+        self._armed_plan(repo, "agents/ct-qa-reviewer.md")
+        other = self._agent_file(repo, "ct-spec-reviewer.md")
+        # Act
+        event = {
+            "tool_name": "Edit",
+            "tool_input": {"file_path": str(other), "new_string": "altered"},
+        }
+        parsed, stdout, stderr, rc = _run(event, cwd=repo)
+        # Assert
+        assert parsed is not None, (
+            f"expected a block decision, got no JSON (rc={rc}, "
+            f"stderr={stderr!r})"
+        )
+        reason = parsed.get("reason", "")
+        assert "agents/ct-qa-reviewer.md" in reason, (
+            f"block message must name the declared allowlist, got {reason!r}"
+        )
+        assert "instruction_files" in reason, (
+            f"block message must say how to declare a file, got {reason!r}"
+        )
+
+    def test_multiple_declared_files_all_allowed(self, repo: Path):
+        # Arrange
+        self._armed_plan(
+            repo, "agents/ct-spec-reviewer.md, agents/ct-qa-reviewer.md"
+        )
+        # Act + Assert
+        for name in ("ct-spec-reviewer.md", "ct-qa-reviewer.md"):
+            agent = self._agent_file(repo, name)
+            event = {
+                "tool_name": "Edit",
+                "tool_input": {"file_path": str(agent), "new_string": "x"},
+            }
+            parsed, stdout, stderr, rc = _run(event, cwd=repo)
+            _assert_allowed(parsed, stdout, stderr, rc,
+                            f"{name} was declared but blocked")
+
+    def test_no_key_blocks_every_instruction_edit(self, repo: Path):
+        """BACK-COMPAT: an armed plan with no `instruction_files` key blocks
+        everything, exactly as it did before the allowlist existed."""
+        # Arrange
+        self._armed_plan(repo, None)
+        agent = self._agent_file(repo)
+        # Act
+        event = {
+            "tool_name": "Edit",
+            "tool_input": {"file_path": str(agent), "new_string": "altered"},
+        }
+        parsed, stdout, stderr, rc = _run(event, cwd=repo)
+        # Assert
+        assert parsed is not None and parsed.get("decision") == "block", (
+            f"no-key plan must block all instruction edits, got {stdout!r}"
+        )
+
+    def test_declared_file_does_not_unblock_non_instruction_paths(self, repo: Path):
+        """Declaring a file must not change the non-instruction allow path."""
+        # Arrange
+        self._armed_plan(repo, "agents/ct-qa-reviewer.md")
+        src = repo / "src" / "main.py"
+        src.parent.mkdir(parents=True)
+        src.write_text("x = 1\n")
+        # Act
+        event = {
+            "tool_name": "Edit",
+            "tool_input": {"file_path": str(src), "new_string": "x = 2\n"},
+        }
+        parsed, stdout, stderr, rc = _run(event, cwd=repo)
+        # Assert
+        _assert_allowed(parsed, stdout, stderr, rc,
+                        "non-instruction file must be allowed")
+
+
 def _assert_blocked_by_phase5(parsed, stdout: str) -> None:
     """Shared P2-D helper: a bare `decision == "block"` passes against a
     crashed hook too (write-guard.py's top-level handler turns ANY
