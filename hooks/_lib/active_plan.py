@@ -63,13 +63,26 @@ _FRONTMATTER_KEY_RE = re.compile(r"^([a-zA-Z_][\w-]*)\s*:\s*(.*?)\s*$")
 _FRONTMATTER_END_RE = re.compile(r"^---\s*$", re.MULTILINE)
 
 
-def _parse_frontmatter(text: str) -> dict[str, str]:
+def _parse_frontmatter(
+    text: str, preserve_case_keys: frozenset[str] = frozenset()
+) -> dict[str, str]:
     """Parse YAML frontmatter delimited by leading '---' lines.
 
     Returns {} if no frontmatter or malformed. Strips a leading UTF-8 BOM.
     Only handles flat `key: value` lines (sufficient for our schema).
-    Keys are lowercased; values are stripped of surrounding quotes and
-    lowercased for case-insensitive comparison.
+    Keys are always lowercased. Values are stripped of surrounding quotes and
+    lowercased for case-insensitive comparison, EXCEPT for keys listed in
+    `preserve_case_keys` — those keep their original case because they carry
+    case-sensitive data (file paths such as `SKILL.md` / `CLAUDE.md`).
+    Default is the empty set, so existing callers are unaffected.
+
+    Raises AmbiguousActivePlanError if the same key (after lowercasing)
+    appears more than once in one frontmatter block. A second `status:` or
+    `instruction_files:` line would otherwise silently overwrite the first
+    (last-write-wins) — unacceptable for keys that control gating and edit
+    authorization decisions. This is the same "cannot determine which value
+    is authoritative, refuse to guess" situation the class already models
+    for multiple in-progress plans; callers must fail closed on it.
     """
     # Strip UTF-8 BOM if present
     if text.startswith("﻿"):
@@ -86,11 +99,19 @@ def _parse_frontmatter(text: str) -> dict[str, str]:
     for line in body.splitlines():
         m = _FRONTMATTER_KEY_RE.match(line)
         if m:
+            key = m.group(1).lower()
             value = m.group(2).strip()
             # Strip matching surrounding quotes
             if len(value) >= 2 and value[0] == value[-1] and value[0] in ("\"", "'"):
                 value = value[1:-1]
-            out[m.group(1).lower()] = value.strip().lower()
+            if key not in preserve_case_keys:
+                value = value.lower()
+            if key in out:
+                raise AmbiguousActivePlanError(
+                    f"duplicate frontmatter key {key!r} — cannot determine "
+                    f"which value is authoritative, refusing to guess"
+                )
+            out[key] = value
     return out
 
 
@@ -363,6 +384,140 @@ def find_active_plan(*, plan_root: "Path | None" = _UNSET) -> Path | None:  # ty
             + ", ".join(str(p) for p in in_progress)
         )
     return in_progress[0] if in_progress else None
+
+
+# ---------------------------------------------------------------------------
+# Plan-scoped instruction-file allowlist
+# ---------------------------------------------------------------------------
+#
+# THREAT MODEL — read before changing anything below.
+#
+# This allowlist is PROCESS DISCIPLINE, not an adversarial security boundary.
+# Its job is to stop Claude from editing behavioral instruction files that the
+# reviewed plan never declared. It is NOT a defense against an attacker.
+#
+# The allowlist lives in the active plan file under `docs/plans/`, which is
+# gitignored (`.gitignore:2`). Anyone (or anything) able to write that plan can
+# authorize any path, and the change leaves no git audit trail. That is an
+# ACCEPTED limitation for the actual threat model. Do NOT describe this
+# mechanism as a security control anywhere in code, tests, or docs.
+#
+# The path checks below (reject absolute entries, reject entries that escape
+# the repo root, compare structurally rather than by substring) exist to stop
+# ACCIDENTS and typos — a declared `agents/x.md` must never silently authorize
+# `evil/agents/x.md` or `agents/x.md.bak` — not to stop a determined attacker.
+
+INSTRUCTION_ALLOWLIST_KEY = "instruction_files"
+
+
+class MalformedInstructionAllowlistError(RuntimeError):
+    """The active plan declares `instruction_files` but the value is unusable.
+
+    Callers MUST fail closed and BLOCK the edit. Never treat this as "no
+    allowlist declared" — that would turn a typo into a silent full allow.
+    """
+
+
+def read_instruction_allowlist(
+    plan: Path, root: Path
+) -> frozenset[Path] | None:
+    """Return the instruction files the given plan authorizes editing.
+
+    `root` is the repository root that CONTAINS `plan`, supplied by the
+    caller. The reader does NOT re-derive it. Active-plan discovery has
+    already resolved the root in order to find `plan` at all; deriving it a
+    second time here would add a second `git rev-parse` that can fail
+    independently, and could bind entries to a different root than the one
+    the plan was found under.
+
+    Returns None when the plan declares no `instruction_files` key. Callers
+    MUST treat None as "nothing is authorized" and block every
+    instruction-file edit — that is the pre-allowlist behavior and it must
+    not regress into an allow.
+
+    Returns a frozenset of RESOLVED ABSOLUTE paths otherwise. Comparison at
+    the call site is therefore plain `Path` equality on resolved paths, never
+    a substring or prefix test (case study #35).
+
+    Raises MalformedInstructionAllowlistError when the key is present but
+    unusable: unreadable plan, empty value, an EMPTY ENTRY (leading,
+    trailing, or doubled comma), an absolute entry, an entry that resolves
+    outside the repo root, a duplicate `instruction_files` key in the plan's
+    own frontmatter, or a root that is not an existing directory. Callers
+    MUST fail closed on this and BLOCK.
+    """
+    try:
+        text = plan.read_text(encoding="utf-8", errors="replace")
+    except (OSError, PermissionError) as exc:
+        raise MalformedInstructionAllowlistError(
+            f"unreadable plan {plan}: {exc}"
+        ) from exc
+
+    try:
+        fm = _parse_frontmatter(
+            text[:4096], preserve_case_keys=frozenset({INSTRUCTION_ALLOWLIST_KEY})
+        )
+    except AmbiguousActivePlanError as exc:
+        # Translate: this function's documented contract is to raise only
+        # MalformedInstructionAllowlistError. A duplicate key is exactly as
+        # unusable as any other malformed declaration below — fail closed.
+        raise MalformedInstructionAllowlistError(
+            f"`{INSTRUCTION_ALLOWLIST_KEY}` in {plan} has a duplicate "
+            f"frontmatter key: {exc}"
+        ) from exc
+    raw = fm.get(INSTRUCTION_ALLOWLIST_KEY)
+    if raw is None:
+        return None
+
+    # `str.split(",")` always returns at least one element, so `all()` alone
+    # is the whole check: it is False iff some entry is empty, which covers
+    # both an empty value and a leading/trailing/doubled comma.
+    entries = [e.strip() for e in raw.split(",")]
+    if not all(entries):
+        raise MalformedInstructionAllowlistError(
+            f"`{INSTRUCTION_ALLOWLIST_KEY}` in {plan} is malformed — it "
+            f"declares no paths, or has an empty entry from a leading, "
+            f"trailing, or doubled comma. Remove the key, or list at least "
+            f"one repo-relative path with no empty entries. A malformed "
+            f"declaration is NEVER silently normalized into a valid one: "
+            f"`a.md,,b.md` is a typo, and quietly honouring `a.md` and `b.md` "
+            f"would authorize an edit the author did not clearly declare."
+        )
+
+    try:
+        root = root.resolve()
+    except (OSError, ValueError) as exc:
+        raise MalformedInstructionAllowlistError(
+            f"cannot resolve repository root {root}: {exc}"
+        ) from exc
+    if not root.is_dir():
+        raise MalformedInstructionAllowlistError(
+            f"repository root {root} is not an existing directory — refusing "
+            f"to evaluate `{INSTRUCTION_ALLOWLIST_KEY}`"
+        )
+
+    allowed: set[Path] = set()
+    for entry in entries:
+        candidate = Path(entry)
+        if candidate.is_absolute():
+            raise MalformedInstructionAllowlistError(
+                f"`{INSTRUCTION_ALLOWLIST_KEY}` entries must be repo-relative; "
+                f"got an absolute path: {entry}"
+            )
+        try:
+            resolved = (root / candidate).resolve()
+        except (OSError, ValueError) as exc:
+            raise MalformedInstructionAllowlistError(
+                f"cannot resolve `{INSTRUCTION_ALLOWLIST_KEY}` entry "
+                f"{entry!r}: {exc}"
+            ) from exc
+        if not resolved.is_relative_to(root):
+            raise MalformedInstructionAllowlistError(
+                f"`{INSTRUCTION_ALLOWLIST_KEY}` entry escapes the repository "
+                f"root: {entry!r}"
+            )
+        allowed.add(resolved)
+    return frozenset(allowed)
 
 
 # ---------------------------------------------------------------------------

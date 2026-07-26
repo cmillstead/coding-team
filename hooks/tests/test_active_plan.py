@@ -12,15 +12,27 @@ hits vs misses observable across subprocess boundaries without mock introspectio
 
 import json
 import os
+import stat
 import subprocess
+import sys
 import time
 import uuid
 from pathlib import Path
 
 import pytest
 
-
 HOOKS_DIR = Path(__file__).resolve().parent.parent  # tests/ -> hooks/
+
+if str(HOOKS_DIR) not in sys.path:
+    sys.path.insert(0, str(HOOKS_DIR))
+
+from _lib.active_plan import (  # noqa: E402
+    INSTRUCTION_ALLOWLIST_KEY,
+    AmbiguousActivePlanError,
+    MalformedInstructionAllowlistError,
+    _parse_frontmatter,
+    read_instruction_allowlist,
+)
 
 ACTIVE_FRONTMATTER = "---\nstatus: in-progress\n---\n\n"
 PLANNED_FRONTMATTER = "---\nstatus: planned\n---\n\n"
@@ -813,3 +825,178 @@ print(json.dumps({"root": str(result) if result else None}))
         assert r.returncode == 0, r.stderr
         out = json.loads(r.stdout)
         assert out["root"] == str(empty_dir)
+
+
+class TestFrontmatterPreserveCase:
+    """The `preserve_case_keys` opt-in must not change any existing behavior."""
+
+    def test_default_still_lowercases_values(self):
+        # Arrange
+        text = "---\nstatus: In-Progress\n---\n# x\n"
+        # Act
+        fm = _parse_frontmatter(text)
+        # Assert — back-compat: `status` comparison stays case-insensitive
+        assert fm["status"] == "in-progress"
+
+    def test_preserved_key_keeps_original_case(self):
+        # Arrange
+        text = "---\ninstruction_files: agents/A.md, SKILL.md\n---\n# x\n"
+        # Act
+        fm = _parse_frontmatter(
+            text, preserve_case_keys=frozenset({"instruction_files"})
+        )
+        # Assert
+        assert fm["instruction_files"] == "agents/A.md, SKILL.md"
+
+    def test_non_preserved_key_in_same_document_still_lowercased(self):
+        # Arrange
+        text = "---\nstatus: In-Progress\ninstruction_files: SKILL.md\n---\n"
+        # Act
+        fm = _parse_frontmatter(
+            text, preserve_case_keys=frozenset({"instruction_files"})
+        )
+        # Assert
+        assert fm["status"] == "in-progress"
+        assert fm["instruction_files"] == "SKILL.md"
+
+
+class TestFrontmatterDuplicateKeyDetection:
+    """A repeated key (after lowercasing) within one frontmatter block is a
+    HARD ERROR, not last-write-wins. Silent last-wins on a key that will
+    control edit authorization is unacceptable — a plan could declare one
+    allowlist and have a different one honored (D3)."""
+
+    def test_duplicate_status_key_raises(self):
+        # Arrange — two `status:` lines in the same frontmatter block
+        text = "---\nstatus: planned\nstatus: in-progress\n---\n# x\n"
+        # Act / Assert
+        with pytest.raises(AmbiguousActivePlanError):
+            _parse_frontmatter(text)
+
+    def test_duplicate_instruction_files_key_raises(self, tmp_path: Path):
+        # Arrange — two `instruction_files:` lines in the same plan
+        plans = tmp_path / "docs" / "plans"
+        plans.mkdir(parents=True)
+        plan = plans / "plan.md"
+        plan.write_text(
+            "---\nstatus: in-progress\n"
+            f"{INSTRUCTION_ALLOWLIST_KEY}: agents/a.md\n"
+            f"{INSTRUCTION_ALLOWLIST_KEY}: agents/b.md\n---\n"
+        )
+        # Act / Assert — read_instruction_allowlist preserves its documented
+        # single-exception contract (MalformedInstructionAllowlistError),
+        # translating the underlying AmbiguousActivePlanError.
+        with pytest.raises(MalformedInstructionAllowlistError):
+            read_instruction_allowlist(plan, tmp_path)
+
+    def test_no_duplicate_keys_parses_normally(self):
+        # Arrange — control: distinct keys, no duplicates
+        text = "---\nstatus: in-progress\ninstruction_files: SKILL.md\n---\n"
+        # Act
+        fm = _parse_frontmatter(
+            text, preserve_case_keys=frozenset({"instruction_files"})
+        )
+        # Assert
+        assert fm["status"] == "in-progress"
+        assert fm["instruction_files"] == "SKILL.md"
+
+
+class TestReadInstructionAllowlist:
+    """read_instruction_allowlist() returns resolved absolute paths or None,
+    and raises MalformedInstructionAllowlistError on anything unusable."""
+
+    def _plan(self, repo: Path, body: str) -> Path:
+        plans = repo / "docs" / "plans"
+        plans.mkdir(parents=True, exist_ok=True)
+        p = plans / "plan.md"
+        p.write_text(body)
+        return p
+
+    def test_returns_none_when_key_absent(self, allowlist_repo: Path):
+        plan = self._plan(allowlist_repo, "---\nstatus: in-progress\n---\n")
+        assert read_instruction_allowlist(plan, allowlist_repo) is None
+
+    def test_returns_resolved_absolute_paths(self, allowlist_repo: Path):
+        plan = self._plan(
+            allowlist_repo,
+            "---\nstatus: in-progress\n"
+            "instruction_files: agents/a.md, hooks/b.py\n---\n",
+        )
+        result = read_instruction_allowlist(plan, allowlist_repo)
+        assert result == frozenset({
+            (allowlist_repo / "agents" / "a.md").resolve(),
+            (allowlist_repo / "hooks" / "b.py").resolve(),
+        })
+
+    def test_preserves_uppercase_basename(self, allowlist_repo: Path):
+        plan = self._plan(
+            allowlist_repo,
+            "---\nstatus: in-progress\ninstruction_files: SKILL.md\n---\n",
+        )
+        result = read_instruction_allowlist(plan, allowlist_repo)
+        assert result == frozenset({(allowlist_repo / "SKILL.md").resolve()})
+
+    def test_empty_value_raises(self, allowlist_repo: Path):
+        plan = self._plan(
+            allowlist_repo,
+            "---\nstatus: in-progress\ninstruction_files:\n---\n",
+        )
+        with pytest.raises(MalformedInstructionAllowlistError):
+            read_instruction_allowlist(plan, allowlist_repo)
+
+    def test_absolute_entry_raises(self, allowlist_repo: Path):
+        plan = self._plan(
+            allowlist_repo,
+            "---\nstatus: in-progress\ninstruction_files: /etc/passwd\n---\n",
+        )
+        with pytest.raises(MalformedInstructionAllowlistError):
+            read_instruction_allowlist(plan, allowlist_repo)
+
+    def test_traversal_entry_raises(self, allowlist_repo: Path):
+        plan = self._plan(
+            allowlist_repo,
+            "---\nstatus: in-progress\n"
+            "instruction_files: ../../../etc/passwd\n---\n",
+        )
+        with pytest.raises(MalformedInstructionAllowlistError):
+            read_instruction_allowlist(plan, allowlist_repo)
+
+    def test_unreadable_plan_raises(self, allowlist_repo: Path):
+        plan = self._plan(
+            allowlist_repo,
+            "---\nstatus: in-progress\ninstruction_files: agents/a.md\n---\n",
+        )
+        plan.chmod(0)
+        try:
+            with pytest.raises(MalformedInstructionAllowlistError):
+                read_instruction_allowlist(plan, allowlist_repo)
+        finally:
+            plan.chmod(stat.S_IRUSR | stat.S_IWUSR)
+
+    def test_empty_entry_blocks_everything(self, allowlist_repo: Path):
+        """A leading, trailing, or doubled comma each produce an empty
+        entry — every one of the three must be blocked, not silently
+        normalized into the valid entries that surround it."""
+        for body in (
+            "---\nstatus: in-progress\ninstruction_files: ,agents/a.md\n---\n",
+            "---\nstatus: in-progress\ninstruction_files: agents/a.md,\n---\n",
+            "---\nstatus: in-progress\ninstruction_files: agents/a.md,,agents/b.md\n---\n",
+        ):
+            plan = self._plan(allowlist_repo, body)
+            with pytest.raises(MalformedInstructionAllowlistError):
+                read_instruction_allowlist(plan, allowlist_repo)
+
+    def test_nonexistent_root_blocks(self, allowlist_repo: Path):
+        plan = self._plan(
+            allowlist_repo,
+            "---\nstatus: in-progress\ninstruction_files: agents/a.md\n---\n",
+        )
+        missing_root = allowlist_repo / "does-not-exist"
+        with pytest.raises(MalformedInstructionAllowlistError):
+            read_instruction_allowlist(plan, missing_root)
+
+
+@pytest.fixture
+def allowlist_repo(tmp_path: Path) -> Path:
+    """A repo root for in-process reader calls, passed explicitly as `root`."""
+    return tmp_path
