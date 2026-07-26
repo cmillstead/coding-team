@@ -1,17 +1,31 @@
 """Tests for agent rule-file and reference-file references in agents/ct-*.md.
 
+Guards two deployed directories that agent instruction files reference by
+absolute path, and rejects the repo-relative form for both, since a
+repo-relative path does not resolve when the agent runs in an arbitrary
+target repo:
+
+- `~/.claude/rules/<name>.md`, sourced from this repo's `rules/` — these
+  files are auto-loaded into every session and every subagent's context,
+  without the agent needing to name them.
+- `~/.claude/reference/<name>.md`, sourced from this repo's `reference/`
+  — these files are NOT auto-loaded; they are read only when a prompt
+  explicitly names the path, so an agent must reference the correct
+  deployed location to ever see the content.
+
 Verifies that every `~/.claude/rules/<name>.md` reference in an agent
 instruction file points to a rule that actually exists in the repo's
 rules/ source (and will therefore be deployed to ~/.claude/rules/ by
-deploy.sh), and that no agent still uses the old relative `rules/<name>.md`
-form, which does not resolve when the agent runs in an arbitrary target
-repo.
+deploy.sh), that every `~/.claude/reference/<name>.md` reference points
+to a real reference/ source file, and that no agent still uses the old
+relative `rules/<name>.md` or `reference/<name>.md` forms.
 
 Also guards the same convention for `agents/reference/...` and
-`skills/.../SKILL.md` references: unlike rules/, these files are NOT
-deployed standalone by deploy.sh (only agents/ct-*.md and rules/ are), so
-their absolute form is the repo location `~/.claude/skills/coding-team/...`,
-not `~/.claude/agents/...` or `~/.claude/rules/...`.
+`skills/.../SKILL.md` references: unlike rules/ and reference/, these
+files are NOT deployed standalone by deploy.sh (only agents/ct-*.md,
+rules/, and reference/ are), so their absolute form is the repo location
+`~/.claude/skills/coding-team/...`, not `~/.claude/agents/...`,
+`~/.claude/rules/...`, or `~/.claude/reference/...`.
 """
 
 import re
@@ -21,9 +35,12 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]  # tests/ -> hooks/ -> repo root
 AGENTS_DIR = REPO_ROOT / "agents"
 RULES_DIR = REPO_ROOT / "rules"
+REFERENCE_DIR = REPO_ROOT / "reference"
 
 ABSOLUTE_RULE_REF = re.compile(r"~/\.claude/rules/([\w-]+)\.md")
 RELATIVE_RULE_REF = re.compile(r"`rules/([\w-]+)\.md`")
+ABSOLUTE_REFERENCE_REF = re.compile(r"~/\.claude/reference/([\w-]+)\.md")
+RELATIVE_REFERENCE_DIR_REF = re.compile(r"`reference/([\w-]+)\.md`")
 RELATIVE_REFERENCE_REF = re.compile(r"`(agents/reference/[\w.-]+\.md)`")
 RELATIVE_SKILL_REF = re.compile(r"`(skills/[\w./-]+/SKILL\.md)`")
 
@@ -53,19 +70,27 @@ class TestAgentRuleRefs:
                 source = RULES_DIR / f"{name}.md"
                 if not source.exists():
                     missing.append(f"{agent_file.name} references {name}.md, but {source} does not exist")
+            for name in ABSOLUTE_REFERENCE_REF.findall(text):
+                source = REFERENCE_DIR / f"{name}.md"
+                if not source.exists():
+                    missing.append(f"{agent_file.name} references {name}.md, but {source} does not exist")
 
         assert not missing, "\n".join(missing)
 
     def test_no_agent_uses_relative_rule_path(self):
-        """No agent file may reference a rule via the old backticked
-        relative form `rules/<name>.md` — it does not resolve when the
-        agent runs in an arbitrary target repo. References must use the
-        deployed absolute path `~/.claude/rules/<name>.md` instead."""
+        """No agent file may reference a rule or reference doc via the old
+        backticked relative form `rules/<name>.md` or `reference/<name>.md`
+        — neither resolves when the agent runs in an arbitrary target
+        repo. References must use the deployed absolute path
+        `~/.claude/rules/<name>.md` or `~/.claude/reference/<name>.md`
+        instead."""
         offenders = []
         for agent_file in sorted(AGENTS_DIR.glob("ct-*.md")):
             text = agent_file.read_text()
             for name in RELATIVE_RULE_REF.findall(text):
                 offenders.append(f"{agent_file.name} still references relative `rules/{name}.md`")
+            for name in RELATIVE_REFERENCE_DIR_REF.findall(text):
+                offenders.append(f"{agent_file.name} still references relative `reference/{name}.md`")
 
         assert not offenders, "\n".join(offenders)
 
@@ -90,10 +115,14 @@ class TestAgentRuleRefs:
 
     def test_at_least_one_absolute_rule_ref_found(self):
         """Sanity check: the scan itself must find references, otherwise
-        the two assertions above would trivially pass on an empty match."""
+        the assertions above would trivially pass on an empty match."""
         found = []
         for agent_file in sorted(AGENTS_DIR.glob("ct-*.md")):
             text = agent_file.read_text()
             found.extend(ABSOLUTE_RULE_REF.findall(text))
+            found.extend(ABSOLUTE_REFERENCE_REF.findall(text))
 
-        assert found, "expected at least one ~/.claude/rules/<name>.md reference in agents/ct-*.md"
+        assert found, (
+            "expected at least one ~/.claude/rules/<name>.md or "
+            "~/.claude/reference/<name>.md reference in agents/ct-*.md"
+        )
