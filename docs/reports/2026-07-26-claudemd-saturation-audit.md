@@ -151,10 +151,19 @@ Buckets: **AE** = already-enforced (hook cited) · **M** = mechanizable · **NME
 
 ### F3 — P2 · Verify · observability · Deployed-only files are invisible to drift detection
 
+> **CORRECTION, 2026-07-26 (post-Phase 1).** This finding originally claimed the
+> 5 files were untracked, with "no git history, no review, no rollback." **That is
+> false.** They are committed content of the parent `claude-harness` repo. The
+> original text inferred "no repository" from their absence in *this* repo's
+> `git ls-files` without checking whether the directory above was a repo. It is.
+> The observability gap below is real; the data-loss risk was not. See
+> `memory/feedback-nested-repo-blind-spot.md`.
+
 - **Component:** `hooks/deploy-drift-check.py:19-22` — *"Only files that exist in source are checked (deployed-only files are ignored)."*
-- **Gap:** 5 of the 12 always-loaded rules files exist **only** at `~/.claude/rules/` with no repo source: `scan-finding-completeness.md` (29), `defensive-simplify-guard.md` (16), `no-known-broken.md` (15), `text-discipline.md` (14), `exemption-override.md` (5) — **79 lines, 34% of the rules surface, untracked.** Verified by `ls -la ~/.claude/rules/`: these 5 are regular files (mode 644); the other 7 are symlinks (mode 755) into `skills/coding-team/rules/`.
-- **Risk:** 79 lines of always-loaded behavioral policy with no git history, no review, no rollback, invisible to every audit that starts from the repo. Directly violates `memory/feedback-track-artifacts-in-repo.md`. A `rm` or a bad editor save silently removes standing policy.
-- **Fix:** (a) move all 5 into `rules/` in the repo and re-run `scripts/deploy.sh` to convert them to symlinks; (b) extend `find_drift` to also walk `deployed_dir` and report deployed-only files as drift. **No new hook** — one existing SessionStart hook, one added direction.
+- **Topology (verified by command):** `~/.claude` is a git repo (`cmillstead/claude-harness`) that tracks `rules/` directly and carries `skills/coding-team` as a **submodule** (`.gitmodules`). So `~/.claude/rules/` has **two owners**: 7 symlinks (mode `120000`) deployed from this repo, and 5 regular files (mode `100644`) owned by the parent.
+- **Gap:** the 5 parent-owned files — `scan-finding-completeness.md` (29), `defensive-simplify-guard.md` (16), `no-known-broken.md` (15), `text-discipline.md` (14), `exemption-override.md` (5), **79 lines, 68% of the post-Phase-1 rules surface** — are invisible to any audit or drift check that starts from this repo. They have history (`2e6a014`, `b8efdc8`); they are simply owned one level up.
+- **Risk:** not data loss — **split source of truth.** A drift check rooted here sees 7 of 12 always-loaded files and reports clean. Anyone reading only this repo will conclude the rules surface is 37 lines when it is 116, and will size later reduction phases against the wrong number.
+- **Fix:** (a) **do NOT move the 5 into this repo's `rules/`** as originally advised — two repos deploying to one directory is the actual defect, and duplicating the source makes it worse. Decide ownership explicitly, in one direction, and record it. (b) extend `find_drift` to walk `deployed_dir` and report deployed-only files, labelled by owning repo so parent-owned files read as *foreign*, not as *drift*. **No new hook** — one existing SessionStart hook, one added direction.
 - **Principle:** GP#2 Repository Is Source of Truth.
 - **Effort:** Low · **Impact:** High · **Core**
 
