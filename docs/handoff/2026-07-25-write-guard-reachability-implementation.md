@@ -3,10 +3,10 @@
 Successor to `2026-07-24-write-guard-allowlist-and-claudemd-audit.md` (832 lines, the planning
 arc). That file is history — do not edit it. This one covers implementation.
 
-**Branch:** `fix/write-guard-plan-allowlist` · **Tip at write time:** `6aca97d`
+**Branch:** `fix/write-guard-plan-allowlist` · **Tip at last update:** `b10d80a`
 **Baseline:** `python3 -m pytest hooks/tests/ --ignore=hooks/tests/test_prompt_dispatcher.py -q`
-→ **1002 passed, 0 failed, 9 skipped**. `python3 -m ruff check .` clean. Both verified by the
-orchestrator, not taken from an agent report.
+→ **1003 passed, 0 failed, 9 skipped**. `python3 -m ruff check .` clean. Live hook probed healthy.
+All verified by the orchestrator, not taken from an agent report.
 
 **Working tree:** clean except two PRE-EXISTING, not-ours files — `.claude/settings.local.json`
 (modified) and an untracked `skills/second-opinion/codex-learnings.d/2026072 3-...-self-heal-...md`.
@@ -26,6 +26,8 @@ Never stage either.
 | `14d1a50`, `851dc73` | doc-drift: stale line citations → symbol/section anchors |
 | `fce95de` | `"I'm only finishing my own in-flight refactor"` rationalization + `docs/tickets/2026-07-25-self-modifying-hook-no-safe-edit-path.md` |
 | `6aca97d` | Review fix batch — all 9 QA/Codex findings |
+| `d25a241` | this handoff |
+| `b10d80a` | Codex re-review F1/F2/F3 — git-env test coverage, crash-vacuous PAUL tests, dead `/tmp` branch deleted |
 
 Plan file `docs/plans/2026-07-25-write-guard-reachability.md` is **gitignored** and stays at
 `status: planned`. **Do NOT flip it.** The gate had to stay dormant to edit the code implementing
@@ -33,31 +35,45 @@ it, and the allowlist that would authorize those edits still does not exist.
 
 ---
 
-## IN FLIGHT — agent `wg-task2` is working these three right now
+## Codex re-review (no P1s) — F1/F2/F3 LANDED in `b10d80a`, verified
 
-From the Codex re-review (no P1s; the fixes hold). All three verified by the orchestrator. If the
-agent is gone, re-dispatch from this section — it is complete.
+All three accepted only after independent orchestrator verification, not from the agent report:
 
-**F1 [P2] `hooks/tests/test_write_guard.py:930-951` — git-env test covers the wrong variables.**
-It sets `GIT_DIR`/`GIT_WORK_TREE`, the two that never bypassed anything. Zero coverage for
-`GIT_COMMON_DIR`, `GIT_CEILING_DIRECTORIES`, or unknown-`GIT_*` default-deny. Add all three
-(invented var e.g. `GIT_TOTALLY_MADE_UP` locks fail-closed); each asserts block, excludes
-`HOOK CRASH`, requires the Phase-5 reason.
+- **F1** — `test_git_env_vars_cannot_redirect_the_root` is now parametrized over 4 cases:
+  `GIT_DIR`+`GIT_WORK_TREE`, `GIT_COMMON_DIR`, `GIT_CEILING_DIRECTORIES`, and
+  `GIT_TOTALLY_MADE_UP` (locks the allowlist's default-deny direction). All route through
+  `_assert_blocked_by_phase5`.
+- **F2** — both PAUL tests assert UNCONDITIONALLY now, exclude `HOOK CRASH`, exclude the *wrong*
+  gate's reason, and positively require `check_paul_phase_gate`'s own
+  `PAUL phase '03-x' isn't assumed`. `grep "if parsed is not None and parsed"` returns zero hits.
+- **F3** — the `/tmp` branch plus `_TMP_ROOT`/`_TMP_ROOT_RESOLVED`/`_tmp_root_resolved()` deleted.
+  Safety premise re-verified independently: `_orchestrator_exemption_category` has exactly ONE
+  production call site (`write-guard.py:279`), guarded by the `plan_root is None` early return
+  above it — the branch was genuinely unreachable. The end-to-end P1-A lock
+  `test_linked_worktree_under_real_tmp_is_not_exempted` SURVIVES; only unit tests covering the
+  retired containment framing were dropped. Probed scrubbed: an unowned `/tmp` instruction file
+  still allows (no regression).
 
-**F2 [P3] `test_write_guard.py:615` — the ambiguous-`.paul` test cannot fail.** Its assertions sit
-inside `if parsed is not None and parsed.get("decision") == "block":`, so a silent allow (what
-removing `check_paul_phase_gate` produces) skips every assertion. Assert positively. Expected
-reason, reproduced scrubbed: `BLOCKED: PAUL phase '03-x' isn't assumed — ASSUMPTIONS.md is missing`.
-**Fix the Task 1 sibling too** — `test_paul_artifact_is_NOT_blocked_by_an_armed_plan` has the
-identical shape (different expected PAUL reason; assert each one's actual reason).
+`hooks/tests/conftest.py`'s task-#12 root-cause docstring was also corrected (it described the
+now-deleted exemption as a live mechanism). Docstring-only — `config.addinivalue_line` untouched.
 
-**F3 [P3] `hooks/write-guard.py:133` — `return "tmp"` is dead production code.** `check_phase5`
-returns early on `plan_root is None` and otherwise always passes non-`None`, so the guard always
-fires. Preference: DELETE the `/tmp` branch; its only production effect duplicates the fallthrough,
-and leaving it invites restoring the exemption. Check `TestOrchestratorExemptionCategory`'s
-`plan_root=None` spelling tests — delete any made meaningless rather than keeping the branch alive
-to satisfy them. Then update `phases/execution.md:22` + docstring: `/tmp` is no longer an exemption
-root at all.
+## IN FLIGHT — agent `wg-drift`, two P3 doc-drift residues F3's sweep missed
+
+Comments and markdown ONLY; behavior is settled and must not change. Re-dispatch from here if lost.
+
+**V1 `SKILL.md:181`** — the Phase 5 Edit Routing table still lists `/tmp/*` as "Orchestrator edits
+directly", unqualified. `phases/execution.md:22` was updated and explicitly defers to this table
+("See 'Phase 5 Edit Routing' in SKILL.md"), so the authority and the prose now disagree — and
+unqualified `/tmp` describes the P1-A bypass shape (linked worktree under `/tmp` inside an armed
+repo) as permitted policy. Same row's `memory/*.md` cell is likewise missing execution.md:22's
+instruction-file qualifier.
+
+**V2 `hooks/write-guard.py` `~:256`, `~:274`, `~:300`** — three comments inside `check_phase5` still
+describe `/tmp` as a live conditional exemption. `:274` claims `memory/` and `/tmp` "are
+re-evaluated below"; nothing re-evaluates `/tmp`. `:300`'s conclusion ("only memory needs the
+conjunction") is right but its stated reason is now false. Re-ground, don't just delete — these sit
+in the very function a future reader would "restore" the branch from, which the F3 docstring names
+as how P1-A came to exist.
 
 ---
 
