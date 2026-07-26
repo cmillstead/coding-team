@@ -35,7 +35,7 @@ from _lib.active_plan import (
 # /tmp scratch-space root, checked in both spellings: on macOS /tmp is a
 # symlink to /private/tmp, and the OS may hand back either spelling. Computed
 # once at import time — never resolve the FILE PATH under test, only these
-# two fixed constants (see is_orchestrator_file's docstring).
+# two fixed constants (see _orchestrator_exemption_category's docstring).
 _TMP_ROOT = Path("/tmp")
 
 
@@ -50,10 +50,7 @@ _TMP_ROOT_RESOLVED = _tmp_root_resolved()
 
 
 def _orchestrator_exemption_category(
-    file_path: str,
-    *,
-    plan_root: "Path | None" = None,
-    target_worktree_root: "Path | None" = None,
+    file_path: str, *, plan_root: "Path | None" = None
 ) -> "str | None":
     """Return which orchestrator-exempt root FILE_PATH matches, or None.
 
@@ -61,19 +58,21 @@ def _orchestrator_exemption_category(
     one root (e.g. a memory/ dir nested inside .paul/), and the four roots
     are NOT interchangeable: some are unconditional, one is not, so the
     caller must know exactly which root matched rather than a bare bool.
-    is_orchestrator_file() below is a thin bool wrapper over this for the
-    common case; check_phase5() calls this directly so it can apply the
-    memory/-specific conjunction with is_instruction_file() without
-    re-deriving which root actually matched.
+    check_phase5() calls this directly so it can apply the memory/-specific
+    conjunction with is_instruction_file() without re-deriving which root
+    actually matched. No other production caller exists (P2-C removed the
+    is_orchestrator_file() wrapper — it had zero production callers and its
+    own tests never exercised the /tmp branch the way check_phase5 actually
+    calls it, which is why P1-A shipped green).
 
-    `target_worktree_root`, when supplied, is FILE_PATH's own resolved
-    worktree root (`--show-toplevel`, from the caller's target-scoped git
-    discovery — see _lib/active_plan.py's _resolve_target_git_roots()).
-    This function never resolves anything itself (see is_orchestrator_file's
-    docstring); target_worktree_root is a caller-resolved value passed in
-    purely for the /tmp branch's containment check below, alongside (not
-    instead of) the pre-existing lexical `plan_root` check — see that
-    check's comment for why both are needed.
+    `plan_root`, when supplied, is the repo the CALLER already resolved as
+    owning FILE_PATH and confirmed to be armed (check_phase5 derives it from
+    FILE_PATH's own git identity via _resolve_target_git_roots(), then only
+    reaches this function once find_active_plan_cached(plan_root=plan_root)
+    found an active plan for that exact repo). So `plan_root is not None`
+    already MEANS "FILE_PATH belongs to an armed repo" — see the /tmp branch
+    below (P1-A) for why this makes containment comparisons unnecessary and
+    in fact wrong.
     """
     try:
         path = Path(file_path)
@@ -109,34 +108,31 @@ def _orchestrator_exemption_category(
         if "memory" in parts:
             return "memory"
 
-        # /tmp — CONDITIONAL on repo containment. A scratch file in /tmp
-        # stays exempt; a harness repo that happens to live under /tmp does
-        # not get its whole gate switched off. Path.is_relative_to() (never
-        # startswith) so /tmpfoo does not falsely match either root spelling.
+        # /tmp — CONDITIONAL on plan_root being unset. P1-A: the exemption
+        # is voided UNCONDITIONALLY once plan_root is supplied — not via a
+        # containment comparison. The previous design compared FILE_PATH's
+        # own resolved worktree root against plan_root and exempted on
+        # equality; for an ORDINARY checkout those two values are the SAME
+        # thing by construction (both come from the same git identity), so
+        # the comparison was a tautology that was always true — the ONE
+        # case where it could differ was a file reached through a LINKED
+        # WORKTREE, and there the comparison went false, so the file was
+        # wrongly EXEMPTED instead of blocked (a real /tmp worktree bypass,
+        # reproduced against the live hook). At the only production call
+        # site (check_phase5), plan_root is derived from FILE_PATH's own
+        # git identity and is only ever passed here once that exact repo
+        # was confirmed armed — so plan_root being set already means
+        # FILE_PATH belongs to the armed repo, full stop; no comparison can
+        # add information a containment check hasn't already made true by
+        # construction. A GENUINELY unowned /tmp scratch file (no armed
+        # owning repo at all) never reaches this branch with plan_root set
+        # in production, because check_phase5 returns early on
+        # `plan_root is None` before this function is ever called — see
+        # its docstring. Path.is_relative_to() (never startswith) so
+        # /tmpfoo does not falsely match either root spelling.
         for tmp_root in (_TMP_ROOT, _TMP_ROOT_RESOLVED):
             if path.is_relative_to(tmp_root):
-                # Lexical containment: catches the case where the arming
-                # repo's own root is spelled starting with /tmp (e.g. a CI
-                # sandbox), so every file in it is lexically "under /tmp".
-                # This alone CANNOT catch a /tmp path that is a symlink
-                # ALIAS into the armed repo (e.g. /tmp/alias -> /repo) —
-                # `path` here is FILE_PATH exactly as spelled, never
-                # resolved, so "/tmp/alias/x" is never lexically relative
-                # to a resolved "/repo".
-                if plan_root is not None and path.is_relative_to(plan_root):
-                    return None
-                # Resolved containment: closes the alias gap above. The
-                # CALLER resolves FILE_PATH's own worktree root via real
-                # git discovery (this function still performs no resolution
-                # itself) and passes it in; if that resolved identity IS
-                # the armed repo, the /tmp spelling is irrelevant — the
-                # file belongs to the pipeline being gated regardless of
-                # how the path to reach it was spelled.
-                if (
-                    target_worktree_root is not None
-                    and plan_root is not None
-                    and target_worktree_root == plan_root
-                ):
+                if plan_root is not None:
                     return None
                 return "tmp"
 
@@ -147,48 +143,6 @@ def _orchestrator_exemption_category(
         # input today, since nothing above resolves it — kept as defensive
         # depth, not a hot path.
         return None
-
-
-def is_orchestrator_file(
-    file_path: str,
-    *,
-    plan_root: "Path | None" = None,
-    target_worktree_root: "Path | None" = None,
-) -> bool:
-    """Return True only for files the orchestrator may always edit during Phase 5.
-
-    The four exempt roots are heterogeneous, NOT a single uniform rule —
-    see _orchestrator_exemption_category() for the per-root rationale and
-    which ones are unconditional vs. conditional. Do not collapse this back
-    into a flat OR of substring checks; that reintroduces both the P1-1
-    instruction-file-laundering bug and the /tmp vs /tmpfoo substring bug.
-
-    All matching on FILE_PATH itself is STRUCTURAL (Path.parts /
-    Path.is_relative_to()), never substring, and runs on FILE_PATH exactly
-    as spelled — this function never resolves FILE_PATH. That is deliberate:
-    resolving it would canonicalize every edited path (an extra syscall on
-    every Edit/Write) and would mean a symlink alias into an exempt root
-    becomes exempt too. The fail-closed direction here is that a symlink
-    alias is NOT exempt via the unconditional roots (.paul, vault, memory).
-
-    `plan_root`, when supplied, is the arming plan's repo root; it narrows
-    the /tmp exemption LEXICALLY so a harness repo whose own root is spelled
-    starting with /tmp does not get a free pass. It does not affect the
-    other three roots.
-
-    `target_worktree_root`, when supplied, is FILE_PATH's own RESOLVED
-    worktree root (the caller's target-scoped git discovery result — see
-    _lib/active_plan.py's _resolve_target_git_roots()). This closes the one
-    gap the lexical `plan_root` check above cannot: a /tmp path that is a
-    symlink ALIAS into the armed repo. Passing it is what makes the alias
-    case NOT exempt, without this function performing any resolution itself.
-    """
-    return (
-        _orchestrator_exemption_category(
-            file_path, plan_root=plan_root, target_worktree_root=target_worktree_root
-        )
-        is not None
-    )
 
 
 # Behavioral instruction files: high-impact surface — always delegate
@@ -210,7 +164,7 @@ def is_orchestrator_file(
 # Everything else co-located under /skills/ (references/, docs/, cookbook/,
 # memory/, top-level *-learnings.md / reference.md / README.md, etc.) is a
 # reference/data doc and is NOT gated. memory/ is also covered by
-# is_orchestrator_file().
+# _orchestrator_exemption_category().
 BEHAVIORAL_INSTRUCTION_BASENAMES = {"SKILL.md", "SKILL.md.tmpl", "CLAUDE.md"}
 BEHAVIORAL_INSTRUCTION_DIRS = {
     "agents",
@@ -329,12 +283,33 @@ def check_phase5(file_path: str) -> str | None:
     ambiguous/stale-state block so a wedged gate is recoverable).
     """
     overridden = _instruction_edit_overridden()
-    worktree_root, plan_root = _resolve_target_git_roots(file_path)
+    # worktree_root (the first element) is unused here (P1-A) — the /tmp
+    # exemption no longer compares it against plan_root; see
+    # _orchestrator_exemption_category()'s docstring. Still requested from
+    # _resolve_target_git_roots() as part of its normal two-value contract.
+    _worktree_root, plan_root = _resolve_target_git_roots(file_path)
     if plan_root is None:
         # file_path is not inside any git repository -> not pipeline-gated.
         # Do NOT fall back to cwd here — that reintroduces the defect this
         # target-scoped resolution exists to close (P1-5).
         return None
+
+    # P2-A: compute the exemption category BEFORE the active-plan lookup,
+    # and return early for the UNCONDITIONAL roots (.paul, vault), so an
+    # ambiguous plan state (multiple in-progress plans, or an unreadable
+    # one) cannot shadow them. check_paul_phase_gate() (main()'s own
+    # downstream gate) must stay reachable regardless of plan state —
+    # conjoining .paul with the ambiguity block below made it unreachable
+    # exactly when two plans race to in-progress, silently killing the
+    # PAUL workflow at the worst possible moment. memory/ and /tmp are NOT
+    # unconditional (see _orchestrator_exemption_category()'s docstring)
+    # and are re-evaluated below, once an active plan is confirmed — this
+    # does not weaken the ambiguity block for them or for any non-exempt
+    # path, which still fails closed exactly as before.
+    category = _orchestrator_exemption_category(file_path, plan_root=plan_root)
+    if category in ("paul", "vault"):
+        return None
+
     try:
         active = find_active_plan_cached(plan_root=plan_root)
     except AmbiguousActivePlanError as exc:
@@ -350,16 +325,13 @@ def check_phase5(file_path: str) -> str | None:
     if active is None:
         # No active plan -> no pipeline state to gate.
         return None
-    category = _orchestrator_exemption_category(
-        file_path, plan_root=plan_root, target_worktree_root=worktree_root
-    )
     if category is not None:
         # memory/ is the one exempt root that is NOT unconditional — an
-        # instruction file must not be laundered through it. The other
-        # three (vault, .paul, /tmp) are already fully resolved by
-        # _orchestrator_exemption_category() itself (vault/.paul
-        # unconditionally; /tmp via the plan_root containment check
-        # above), so only "memory" needs this extra conjunction here.
+        # instruction file must not be laundered through it. /tmp is
+        # already fully resolved by _orchestrator_exemption_category()
+        # itself (P1-A: void whenever plan_root is set), so only "memory"
+        # needs this extra conjunction here. ("paul" and "vault" already
+        # returned above — they can't reach this point.)
         if category != "memory" or not is_instruction_file(file_path):
             return None
 

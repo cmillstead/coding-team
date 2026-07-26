@@ -33,14 +33,15 @@ def pytest_addoption(parser):
 def pytest_configure(config):
     """Register custom markers and root pytest's tmp dirs outside /tmp.
 
-    Root cause (task #12): write-guard.py's is_orchestrator_file() treats
-    ANY path starting with the literal prefix "/tmp" as an always-allowed
-    orchestrator scratch file (by design, for real /tmp scratch work). On
-    Linux (incl. GitHub Actions ubuntu-latest), /tmp is a real, non-symlinked
-    directory, so pytest's default tmp_path base resolves to a literal
-    /tmp/pytest-of-<user>/... path — a Phase5 test repo built under tmp_path
-    then silently satisfies is_orchestrator_file() and the guard under test
-    never fires, regardless of active-plan detection. On macOS this never
+    Root cause (task #12): write-guard.py's _orchestrator_exemption_category()
+    treats ANY path starting with the literal prefix "/tmp" as an
+    always-allowed orchestrator scratch file when no plan_root is known (by
+    design, for real /tmp scratch work). On Linux (incl. GitHub Actions
+    ubuntu-latest), /tmp is a real, non-symlinked directory, so pytest's
+    default tmp_path base resolves to a literal /tmp/pytest-of-<user>/...
+    path — a Phase5 test repo built under tmp_path then silently satisfies
+    the /tmp exemption and the guard under test never fires, regardless of
+    active-plan detection. On macOS this never
     reproduces because /tmp is a symlink to /private/tmp and pytest resolves
     tmp_path through it, so local runs looked green while CI was red.
     Rooting tmp dirs at the repo root (NOT under hooks/ — write-guard.py's

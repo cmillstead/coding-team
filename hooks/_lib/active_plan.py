@@ -43,6 +43,7 @@ Two resolution modes populate `plan_root`:
     follow the edited file regardless of the process's cwd.
 """
 
+import hashlib
 import json
 import os
 import re
@@ -145,7 +146,73 @@ def _git_main_root() -> Path | None:
     return Path(raw)
 
 
-_GIT_ENV_SCRUB_KEYS = ("GIT_DIR", "GIT_WORK_TREE")
+# Allowlist, not deny-list (P1-B): a deny-list of GIT_* vars already failed
+# once — GIT_DIR/GIT_WORK_TREE alone left GIT_COMMON_DIR and
+# GIT_CEILING_DIRECTORIES open, both independently redirecting repo
+# discovery (reproduced against the live hook: GIT_COMMON_DIR pointed at
+# an unrelated empty repo's .git redirects plan_root there; setting
+# GIT_CEILING_DIRECTORIES to the armed repo's own root makes git refuse to
+# discover it at all, yielding (None, None) and hitting check_phase5's
+# `plan_root is None` early return — fail OPEN). Git exposes far more
+# GIT_*-prefixed variables than any deny-list can enumerate and stay
+# current (GIT_DISCOVERY_ACROSS_FILESYSTEM, GIT_OBJECT_DIRECTORY,
+# GIT_ALTERNATE_OBJECT_DIRECTORIES, GIT_INDEX_FILE, GIT_NAMESPACE, ...).
+# Default-deny instead: strip EVERY environment variable whose name starts
+# with "GIT_" from the discovery subprocess's env, except this explicit
+# allowlist of vars confirmed to affect only editing/authoring/transport
+# UI — never WHICH repository or working tree `git rev-parse` resolves to.
+# An unrecognized GIT_* var is stripped by default (fail closed), not kept.
+_GIT_ENV_ALLOWLIST = {
+    "GIT_EDITOR",
+    "GIT_PAGER",
+    "GIT_ASKPASS",
+    "GIT_SSH",
+    "GIT_SSH_COMMAND",
+    "GIT_TERMINAL_PROMPT",
+    "GIT_HTTP_LOW_SPEED_LIMIT",
+    "GIT_HTTP_LOW_SPEED_TIME",
+    "GIT_CURL_VERBOSE",
+    "GIT_PROTOCOL",
+    "GIT_MERGE_VERBOSITY",
+    "GIT_FLUSH",
+    "GIT_REFLOG_ACTION",
+    "GIT_EXTERNAL_DIFF",
+    "GIT_DIFF_OPTS",
+    "GIT_SEQUENCE_EDITOR",
+    "GIT_AUTHOR_NAME",
+    "GIT_AUTHOR_EMAIL",
+    "GIT_AUTHOR_DATE",
+    "GIT_COMMITTER_NAME",
+    "GIT_COMMITTER_EMAIL",
+    "GIT_COMMITTER_DATE",
+    "GIT_TRACE",
+    "GIT_TRACE_PACK_ACCESS",
+    "GIT_TRACE_PACKET",
+    "GIT_TRACE_PERFORMANCE",
+    "GIT_TRACE_SETUP",
+    # Not git's own var — this repo's git-safety-guard hook flag, which
+    # merely happens to share the "GIT_" string prefix. Kept for
+    # documentation only: this scrubbed dict is used SOLELY as the env for
+    # the discovery subprocess below, never propagated to write-guard.py's
+    # own process or any other hook, so its presence or absence here
+    # cannot affect git-safety-guard.py's behavior either way.
+    "GIT_SAFETY_ALLOW_COMPOUND",
+}
+
+
+def _scrub_git_env() -> dict:
+    """Return a copy of the process env with every GIT_*-prefixed variable
+    removed EXCEPT _GIT_ENV_ALLOWLIST above.
+
+    Used only for the git-discovery subprocess env in
+    _resolve_target_git_roots() below — never for write-guard.py's own
+    process env or any other subprocess.
+    """
+    return {
+        k: v
+        for k, v in os.environ.items()
+        if not k.startswith("GIT_") or k in _GIT_ENV_ALLOWLIST
+    }
 
 
 def _resolve_target_git_roots(file_path: str) -> "tuple[Path | None, Path | None]":
@@ -168,14 +235,22 @@ def _resolve_target_git_roots(file_path: str) -> "tuple[Path | None, Path | None
         only in the main checkout, but every worktree's plan_root resolves
         to it.
 
-    GIT_DIR and GIT_WORK_TREE are scrubbed from the subprocess environment
-    before invoking git, so ambient values pointing at an unrelated repo
-    cannot redirect discovery away from file_path's real owning repo.
+    Every GIT_*-prefixed environment variable (except _GIT_ENV_ALLOWLIST)
+    is scrubbed from the subprocess environment before invoking git — see
+    _scrub_git_env() — so an ambient value pointing at an unrelated repo
+    (GIT_DIR, GIT_WORK_TREE, GIT_COMMON_DIR, GIT_CEILING_DIRECTORIES, or
+    any other discovery-affecting GIT_* var) cannot redirect discovery
+    away from file_path's real owning repo.
 
-    Returns (None, None) if file_path is not inside any git repository, or
-    on any resolution failure. Callers must treat that as "not
-    pipeline-gated" and must NOT fall back to cwd-based resolution — that
-    would reintroduce the exact defect this function exists to fix.
+    Returns (None, None) if file_path is not inside any git repository,
+    file_path is not an ABSOLUTE path (P3-A — a relative path would make
+    the ancestor walk below land on the PROCESS's cwd, reintroducing the
+    exact cwd-scoped defect this function exists to close; not reachable
+    through the real Edit/Write client, which always supplies absolute
+    paths, but defended anyway), or on any resolution failure. Callers
+    must treat all of these as "not pipeline-gated" and must NOT fall
+    back to cwd-based resolution — that would reintroduce the exact
+    defect this function exists to fix.
 
     Test seam: see _test_seam_root() — when active, both worktree_root and
     plan_root are the single overridden path (the test fixtures this seam
@@ -187,6 +262,8 @@ def _resolve_target_git_roots(file_path: str) -> "tuple[Path | None, Path | None
 
     try:
         target = Path(file_path)
+        if not target.is_absolute():
+            return None, None
         start = target
         while not start.exists():
             parent = start.parent
@@ -200,9 +277,7 @@ def _resolve_target_git_roots(file_path: str) -> "tuple[Path | None, Path | None
     except (OSError, ValueError):
         return None, None
 
-    scrubbed_env = {
-        k: v for k, v in os.environ.items() if k not in _GIT_ENV_SCRUB_KEYS
-    }
+    scrubbed_env = _scrub_git_env()
     try:
         raw = subprocess.check_output(
             [
@@ -294,15 +369,32 @@ def find_active_plan(*, plan_root: "Path | None" = _UNSET) -> Path | None:  # ty
 # Cross-invocation persistent cache
 # ---------------------------------------------------------------------------
 
-def _cache_file_path() -> Path:
+def _cache_file_path(plan_root: "Path | None" = None) -> Path:
     """Return the path for the persistent active-plan cache file.
 
-    The path is overridable via ACTIVE_PLAN_CACHE_FILE (used in tests).
-    Defaults to a fixed name in the system temp directory.
+    The path is overridable via ACTIVE_PLAN_CACHE_FILE (used in tests) —
+    the override always wins and is NOT further keyed by plan_root.
+
+    Otherwise (P3-B), the filename is keyed by a hash of `plan_root`: a
+    single fixed filename would be shared by every repo AND by both
+    resolution modes (process-scoped `_git_main_root()` for
+    coding-team-lifecycle.py vs. target-scoped `_resolve_target_git_roots()`
+    for write-guard.py), since the cache entry holds only ONE result at a
+    time and each write overwrites the whole file. Alternating lookups
+    across repos (or across the two resolution modes) would then evict
+    each other's entry on every call — a near-0% hit rate, plus a stat+scan
+    per repo on every hook invocation (still fail-safe: correctness is
+    unaffected, since `repo_root` is also checked in the hit condition; the
+    entry would just always miss and be recomputed). Hashing plan_root
+    into the filename gives each repo its own cache file, so alternating
+    between repos no longer evicts either one.
     """
     override = os.environ.get("ACTIVE_PLAN_CACHE_FILE")
     if override:
         return Path(override)
+    if plan_root is not None:
+        digest = hashlib.sha256(str(plan_root).encode("utf-8")).hexdigest()[:16]
+        return Path(tempfile.gettempdir()) / f"coding-team-active-plan-cache-{digest}.json"
     return Path(tempfile.gettempdir()) / "coding-team-active-plan-cache.json"
 
 
@@ -419,7 +511,7 @@ def find_active_plan_cached(
         # Can't stat candidates — fall through to uncached
         return find_active_plan(plan_root=plan_root)
 
-    cache_path = _cache_file_path()
+    cache_path = _cache_file_path(plan_root)
     now = time.time()
 
     # Attempt to read and validate the cache

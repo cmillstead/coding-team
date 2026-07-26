@@ -123,6 +123,10 @@ def _counting(counter_path=counter_path, _orig=_original, **kwargs):
     counter_path.write_text(json.dumps(count + 1))
     return result
 
+# mock-ok: real counting side-channel wrapper around the REAL
+# find_active_plan (still calls _orig(**kwargs) and returns its actual
+# result) — not a behavior stub. See the module docstring's "sentinel
+# counter pattern".
 _ap.find_active_plan = _counting
 
 result = find_active_plan_cached(ttl_seconds=60)
@@ -153,6 +157,10 @@ def _counting(counter_path=counter_path, _orig=_original, **kwargs):
     counter_path.write_text(json.dumps(count + 1))
     return result
 
+# mock-ok: real counting side-channel wrapper around the REAL
+# find_active_plan (still calls _orig(**kwargs) and returns its actual
+# result) — not a behavior stub. See the module docstring's "sentinel
+# counter pattern".
 _ap.find_active_plan = _counting
 
 result = find_active_plan_cached(ttl_seconds=60)
@@ -288,8 +296,10 @@ print(json.dumps({{"plan": str(result) if result else None, "has_x": "[x]" in pl
         assert parsed.get("decision") == "block", (
             f"expected block, got {parsed}; stderr={result.stderr}"
         )
-        reason = parsed.get("reason", "").lower()
-        assert "instruction file" in reason or "in-progress" in reason
+        reason = parsed.get("reason", "")
+        assert "HOOK CRASH" not in reason, f"block came from a hook crash: {parsed!r}"
+        reason_lower = reason.lower()
+        assert "instruction file" in reason_lower or "in-progress" in reason_lower
 
     def test_cached_result_equals_uncached(self, repo: Path, session_env: dict):
         """Cached result must equal what find_active_plan() returns directly."""
@@ -337,6 +347,10 @@ def _counting(_orig=_original, **kwargs):
     counter.write_text(json.dumps(c + 1))
     return result
 
+# mock-ok: real counting side-channel wrapper around the REAL
+# find_active_plan (still calls _orig(**kwargs) and returns its actual
+# result) — not a behavior stub. See the module docstring's "sentinel
+# counter pattern".
 _ap.find_active_plan = _counting
 result = find_active_plan_cached(ttl_seconds=60)
 print(json.dumps({{"plan": str(result) if result else None}}))
@@ -362,6 +376,10 @@ def _counting(_orig=_original, **kwargs):
     counter.write_text(json.dumps(c + 1))
     return result
 
+# mock-ok: real counting side-channel wrapper around the REAL
+# find_active_plan (still calls _orig(**kwargs) and returns its actual
+# result) — not a behavior stub. See the module docstring's "sentinel
+# counter pattern".
 _ap.find_active_plan = _counting
 result = find_active_plan_cached(ttl_seconds=60)
 print(json.dumps({{"plan": str(result) if result else None}}))
@@ -412,6 +430,10 @@ def _counting(_orig=_original, **kwargs):
     counter.write_text(json.dumps(c + 1))
     return result
 
+# mock-ok: real counting side-channel wrapper around the REAL
+# find_active_plan (still calls _orig(**kwargs) and returns its actual
+# result) — not a behavior stub. See the module docstring's "sentinel
+# counter pattern".
 _ap.find_active_plan = _counting
 result = find_active_plan_cached(ttl_seconds=0)
 print(json.dumps({{"plan": str(result) if result else None}}))
@@ -600,6 +622,10 @@ def _counting(_orig=_original, **kwargs):
     c = json.loads(counter_path.read_text())
     counter_path.write_text(json.dumps(c + 1))
     return result
+# mock-ok: real counting side-channel wrapper around the REAL
+# find_active_plan (still calls _orig(**kwargs) and returns its actual
+# result) — not a behavior stub. See the module docstring's "sentinel
+# counter pattern".
 _ap.find_active_plan = _counting
 
 result = _ap.find_active_plan_cached(ttl_seconds=60)
@@ -654,6 +680,10 @@ def _counting(_orig=_original, **kwargs):
     c = json.loads(counter_path.read_text())
     counter_path.write_text(json.dumps(c + 1))
     return result
+# mock-ok: real counting side-channel wrapper around the REAL
+# find_active_plan (still calls _orig(**kwargs) and returns its actual
+# result) — not a behavior stub. See the module docstring's "sentinel
+# counter pattern".
 _ap.find_active_plan = _counting
 
 result = _ap.find_active_plan_cached(ttl_seconds=60)
@@ -668,6 +698,72 @@ print(json.dumps({{"plan": str(result) if result else None}}))
         assert count == 1, (
             f"an entry with a future ts must be rejected (cache miss, "
             f"triggering a rescan), got {count} rescans"
+        )
+
+
+class TestResolveTargetGitRootsRejectsRelativePaths:
+    """P3-A: a relative file_path must not fall back to cwd-scoped
+    resolution. Without this guard, the ancestor walk in
+    _resolve_target_git_roots() would land on Path(".") for a relative
+    input, and `git -C .` would then run against the PROCESS's cwd —
+    reintroducing the exact cwd-scoped defect this function exists to
+    close (P1-5). Not reachable through the real Edit/Write client (its
+    file_path is always absolute), but defended anyway.
+    """
+
+    def test_relative_path_returns_none_none_regardless_of_armed_cwd(self, repo: Path):
+        """cwd is a real, armed git repo — if the guard were absent, a
+        relative file_path would resolve INTO this repo via cwd. No
+        CODING_TEAM_TEST_SEAM is set, so real git discovery actually runs.
+        """
+        _write_plan(repo, "plan.md")
+        code = """
+import json
+from _lib.active_plan import _resolve_target_git_roots
+worktree_root, plan_root = _resolve_target_git_roots("hooks/x.py")
+print(json.dumps({
+    "worktree_root": str(worktree_root) if worktree_root else None,
+    "plan_root": str(plan_root) if plan_root else None,
+}))
+"""
+        r = run_python(code, cwd=repo)
+        assert r.returncode == 0, r.stderr
+        out = json.loads(r.stdout)
+        assert out["worktree_root"] is None, (
+            f"a relative file_path must not resolve via cwd, got {out!r}"
+        )
+        assert out["plan_root"] is None, (
+            f"a relative file_path must not resolve via cwd, got {out!r}"
+        )
+
+
+class TestCacheFileKeyedByPlanRoot:
+    """P3-B: the cache filename is keyed by a hash of plan_root, so
+    alternating lookups between two different repos don't evict each
+    other's entry. A single shared filename would: the cache entry holds
+    only ONE result at a time and every write overwrites the whole file,
+    so alternating repos would thrash — each call's miss evicting the
+    other repo's just-written entry.
+    """
+
+    def test_different_plan_roots_get_different_cache_files(self):
+        code = """
+import json
+from pathlib import Path
+from _lib.active_plan import _cache_file_path
+p1 = _cache_file_path(Path("/some/repo-a"))
+p2 = _cache_file_path(Path("/some/repo-b"))
+p1_again = _cache_file_path(Path("/some/repo-a"))
+print(json.dumps({"p1": str(p1), "p2": str(p2), "p1_again": str(p1_again)}))
+"""
+        r = run_python(code)
+        assert r.returncode == 0, r.stderr
+        out = json.loads(r.stdout)
+        assert out["p1"] != out["p2"], (
+            f"different plan_roots must get different cache files, got {out!r}"
+        )
+        assert out["p1"] == out["p1_again"], (
+            f"the same plan_root must consistently map to the same cache file, got {out!r}"
         )
 
 
