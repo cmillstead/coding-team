@@ -1,10 +1,9 @@
 ---
-alwaysApply: true
 description: Retry a failed MCP tool call exactly once, then degrade gracefully to built-in tools for the rest of the session.
 ---
 
 # MCP Resilience
-<!-- Deploy source: scripts/deploy.sh copies this to ~/.claude/rules/ -->
+<!-- Deploy source: scripts/deploy.sh copies this to ~/.claude/reference/ — loaded only when a prompt names it with an explicit `Read` line, NOT auto-loaded. -->
 
 When an MCP tool call fails (timeout, connection error, server unavailable):
 

@@ -312,7 +312,6 @@ class TestDeploySymlinks:
         assert result1.returncode == 0, f"first deploy failed:\n{result1.stderr}"
 
         foreign_target = tmp_path / "foreign-source.md"
-        foreign_target.write_text("# not part of the coding-team repo\n")
 
         foreign = claude_dir / "agents" / "ct-FOREIGN.md"
         foreign.symlink_to(foreign_target)
@@ -388,7 +387,6 @@ class TestDeploySymlinks:
             # Foreign symlink pointing outside the repo's rules/ dir must
             # never be pruned, even though its "source" does not exist.
             foreign_target = tmp_path / "foreign-rule-source.md"
-            foreign_target.write_text("# not part of the coding-team repo\n")
             foreign = claude_dir / "rules" / "foreign-rule.md"
             foreign.symlink_to(foreign_target)
 
@@ -405,6 +403,30 @@ class TestDeploySymlinks:
         finally:
             if tmp_source.exists():
                 tmp_source.unlink()
+
+    def test_prune_leaves_real_rule_file_untouched(self, tmp_path: Path):
+        """A real (non-symlink) *.md file in CLAUDE_DIR/rules with no repo
+        source must never be pruned — the prune loop only ever acts on
+        symlinks, per its `[[ -L "$f" ]]` guard."""
+        claude_dir = tmp_path / "claude_dir"
+        claude_dir.mkdir()
+
+        result1 = run_deploy(claude_dir)
+        assert result1.returncode == 0, f"first deploy failed:\n{result1.stderr}"
+
+        real_file = claude_dir / "rules" / "hand-authored-rule.md"
+        original_content = "# hand-authored rule note, not a repo symlink\n"
+        real_file.write_text(original_content)
+
+        result2 = run_deploy(claude_dir)
+        assert result2.returncode == 0, f"second deploy failed:\n{result2.stderr}"
+
+        assert real_file.exists() and not os.path.islink(real_file), (
+            "hand-authored-rule.md must remain a real file, not be removed or replaced"
+        )
+        assert real_file.read_text() == original_content, (
+            "prune must not alter the content of a real file"
+        )
 
     def test_dry_run_creates_no_files(self, tmp_path: Path):
         """--dry-run must not create any symlinks or files in CLAUDE_DIR."""
