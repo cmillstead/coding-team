@@ -21,24 +21,102 @@ from pathlib import Path
 from _lib import event as _event
 from _lib import graduated_checks as _graduated_checks
 from _lib import output as _output
-from _lib.active_plan import find_active_plan_cached, AmbiguousActivePlanError
+from _lib.active_plan import (
+    AmbiguousActivePlanError,
+    INSTRUCTION_ALLOWLIST_KEY,
+    MalformedInstructionAllowlistError,
+    _resolve_target_git_roots,
+    find_active_plan,
+    find_active_plan_cached,
+    read_instruction_allowlist,
+)
 
 
 # ---------------------------------------------------------------------------
 # Phase 5 edit guard
 # ---------------------------------------------------------------------------
-def is_orchestrator_file(file_path: str) -> bool:
-    """Return True only for files the orchestrator may always edit during Phase 5."""
-    path_str = str(file_path)
-    if path_str.startswith("/tmp"):
-        return True
-    if "/Documents/obsidian-vault/" in path_str:
-        return True
-    if "/memory/" in path_str or path_str.endswith("/memory"):
-        return True
-    if "/.paul/" in path_str:
-        return True
-    return False
+
+
+def _orchestrator_exemption_category(
+    file_path: str, *, plan_root: "Path | None" = None
+) -> "str | None":
+    """Return which orchestrator-exempt root FILE_PATH matches, or None.
+
+    Checked in priority order — a path could structurally match more than
+    one root (e.g. a memory/ dir nested inside .paul/), and the roots are
+    NOT interchangeable: some are unconditional, one is not, so the caller
+    must know exactly which root matched rather than a bare bool.
+    check_phase5() calls this directly so it can apply the memory/-specific
+    conjunction with is_instruction_file() without re-deriving which root
+    actually matched. No other production caller exists (P2-C removed the
+    is_orchestrator_file() wrapper — it had zero production callers and its
+    own tests never exercised how check_phase5 actually calls this
+    function, which is why the P1-A worktree bypass shipped green).
+
+    `plan_root`, when supplied, is the repo the CALLER already resolved as
+    owning FILE_PATH and confirmed to be armed (check_phase5 derives it from
+    FILE_PATH's own git identity via _resolve_target_git_roots(), then only
+    reaches this function once find_active_plan_cached(plan_root=plan_root)
+    found an active plan for that exact repo). So `plan_root is not None`
+    already MEANS "FILE_PATH belongs to an armed repo".
+
+    F3: there used to be a fourth, /tmp-based root here ("a scratch file in
+    /tmp stays exempt"), removed as DEAD PRODUCTION CODE. check_phase5 only
+    ever calls this function once plan_root has been confirmed non-None (it
+    returns early on `plan_root is None` before ever reaching this call —
+    see its docstring), so a /tmp branch keyed on `plan_root is not None`
+    could never return anything but None in production; the "genuinely
+    exempt /tmp scratch" case it was meant to protect was ALREADY handled
+    by that same upstream early return, one level up. Keeping an
+    unreachable exemption branch in a security-adjacent guard invites a
+    future reader to "restore" it — which is exactly how the P1-A worktree
+    bypass came to exist in the first place (a containment comparison
+    added to this same branch, which went the wrong way on a linked
+    worktree). A /tmp path is therefore not a distinct exemption root at
+    all now; it falls through this function like any other path that
+    doesn't match .paul, vault, or memory/.
+    """
+    try:
+        path = Path(file_path)
+        parts = path.parts
+
+        # .paul/ — UNCONDITIONAL. check_paul_phase_gate() (main()'s second
+        # blocking check) governs everything under .paul/phases/<dir>/, and
+        # those artifacts (DISCOVERY.md, GROUND.md, ...) classify as
+        # behavioral instruction files. Conjoining this with
+        # is_instruction_file() would block them here, before
+        # check_paul_phase_gate ever runs — making that gate unreachable
+        # and killing the PAUL workflow. Component match, not substring, so
+        # `x.paul.bak` does not falsely match.
+        if ".paul" in parts:
+            return "paul"
+
+        # Obsidian vault — UNCONDITIONAL. Vault notes are KB reference
+        # material; nothing loads agent prompts from the vault, so a note
+        # nested under a component literally named "agents" or "phases" is
+        # still just a note (204 real vault notes live this way). Match the
+        # consecutive component pair rather than anchoring to
+        # ~/Documents/obsidian-vault (the vault may be reached via a
+        # symlinked $HOME) or a bare "obsidian-vault" component (too loose).
+        for i in range(len(parts) - 1):
+            if parts[i] == "Documents" and parts[i + 1] == "obsidian-vault":
+                return "vault"
+
+        # memory/ — CONDITIONAL. Orchestrator-owned data, but a behavioral
+        # instruction file could plausibly be laundered through it, so the
+        # caller additionally requires `not is_instruction_file(...)`
+        # before treating a memory/ match as exempt. Component match, not
+        # substring, so `mymemory/` does not falsely match.
+        if "memory" in parts:
+            return "memory"
+
+        return None
+    except Exception:
+        # Any path-construction/comparison failure -> not exempt
+        # (fail-closed: None means "gate applies"). Not reachable via the
+        # input today, since nothing above resolves it — kept as defensive
+        # depth, not a hot path.
+        return None
 
 
 # Behavioral instruction files: high-impact surface — always delegate
@@ -60,7 +138,7 @@ def is_orchestrator_file(file_path: str) -> bool:
 # Everything else co-located under /skills/ (references/, docs/, cookbook/,
 # memory/, top-level *-learnings.md / reference.md / README.md, etc.) is a
 # reference/data doc and is NOT gated. memory/ is also covered by
-# is_orchestrator_file().
+# _orchestrator_exemption_category().
 BEHAVIORAL_INSTRUCTION_BASENAMES = {"SKILL.md", "SKILL.md.tmpl", "CLAUDE.md"}
 BEHAVIORAL_INSTRUCTION_DIRS = {
     "agents",
@@ -97,6 +175,37 @@ def is_instruction_file(file_path: str) -> bool:
         return True
 
     return False
+
+
+def _is_declared_instruction_file(
+    file_path: str, allowed: frozenset[Path]
+) -> bool:
+    """Return True only when file_path IS one of the plan-declared paths.
+
+    Comparison is structural `Path` equality on RESOLVED ABSOLUTE paths —
+    never a SUBSTRING or PREFIX test, never `startswith`, never raw string
+    equality (case study #35). The `in` below is set membership over
+    `Path` objects, which is `Path.__eq__` on whole resolved paths — that
+    is the safe operation, not the banned one. A declared `agents/x.md`
+    therefore does NOT authorize `evil/agents/x.md` (different parts) or
+    `agents/x.md.backup.md` (different final component).
+
+    Fails CLOSED: any resolution error returns False, which blocks.
+
+    Catches `RuntimeError` alongside `OSError`/`ValueError` — VERIFIED on
+    Python 3.11.14 (the version this repo targets): `Path.resolve()` on a
+    self-referential symlink (ELOOP) raises `RuntimeError`, not `OSError`.
+    Without this, an ELOOP path propagates past this function to the
+    top-level handler, which emits its own crash-block — so a negative test
+    on this path would pass BECAUSE THE HOOK CRASHED, not because the
+    matcher correctly rejected the path (P2-7, deferred from the
+    reachability plan; closed here since the matcher is new code this task
+    introduces).
+    """
+    try:
+        return Path(file_path).resolve() in allowed
+    except (OSError, ValueError, RuntimeError):
+        return False
 
 
 # Acknowledged-override escape hatch. This hook is a process-global
@@ -152,9 +261,18 @@ def _plan_staleness_note(plan: Path) -> str:
 def check_phase5(file_path: str) -> str | None:
     """Check coding-team pipeline edit guard. Returns block reason or None.
 
+    Root resolution is TARGET-scoped (P1-5): both the active-plan lookup and
+    the orchestrator-exemption containment check use the repo that OWNS
+    file_path, resolved via `_resolve_target_git_roots()` — never the
+    process's cwd. This means relocating the working directory (e.g.
+    running from an unrelated repo, or a repo with an empty docs/plans/)
+    cannot disarm or rearm the gate for a given file; only the file's own
+    git identity can. If file_path is not inside any git repository, the
+    gate is dormant for it (there is no pipeline-owning repo to consult).
+
     Pipeline state is derived from the active plan file (under
-    `$MAIN_ROOT/docs/plans/`) via `find_active_plan()`. The active plan
-    is the unique plan whose YAML frontmatter declares
+    `<owning repo>/docs/plans/`) via `find_active_plan_cached()`. The
+    active plan is the unique plan whose YAML frontmatter declares
     `status: in-progress`. When such a plan exists, behavioral
     instruction-file edits are blocked — a 1-line change to an agent
     prompt, skill, or hook can cascade through the entire pipeline.
@@ -165,13 +283,41 @@ def check_phase5(file_path: str) -> str | None:
     If multiple plans claim `status: in-progress` or a plan is
     unreadable, fail closed and block with a remediation message.
 
-    Escape hatch: set WRITE_GUARD_ALLOW_INSTRUCTION_EDIT=1 to allow a
-    deliberate instruction-file edit (the override also covers the
-    ambiguous/stale-state block so a wedged gate is recoverable).
+    Escape hatch: the active plan's `instruction_files` frontmatter key is
+    the PREFERRED route to a deliberate instruction-file edit — it declares
+    exactly which files the reviewed plan authorizes. Set
+    WRITE_GUARD_ALLOW_INSTRUCTION_EDIT=1 only as the EMERGENCY route (it
+    disarms the gate for every instruction file for the whole session; it
+    also covers the ambiguous/stale-state block so a wedged gate is
+    recoverable).
     """
     overridden = _instruction_edit_overridden()
+    worktree_root, plan_root = _resolve_target_git_roots(file_path)
+    if plan_root is None:
+        # file_path is not inside any git repository -> not pipeline-gated.
+        # Do NOT fall back to cwd here — that reintroduces the defect this
+        # target-scoped resolution exists to close (P1-5).
+        return None
+
+    # P2-A: compute the exemption category BEFORE the active-plan lookup,
+    # and return early for the UNCONDITIONAL roots (.paul, vault), so an
+    # ambiguous plan state (multiple in-progress plans, or an unreadable
+    # one) cannot shadow them. check_paul_phase_gate() (main()'s own
+    # downstream gate) must stay reachable regardless of plan state —
+    # conjoining .paul with the ambiguity block below made it unreachable
+    # exactly when two plans race to in-progress, silently killing the
+    # PAUL workflow at the worst possible moment. memory/ is NOT
+    # unconditional (see _orchestrator_exemption_category()'s docstring)
+    # and is re-evaluated below, once an active plan is confirmed — this
+    # does not weaken the ambiguity block for it or for any non-exempt
+    # path (/tmp included, since F3 it isn't a distinct category at all),
+    # which still fails closed exactly as before.
+    category = _orchestrator_exemption_category(file_path, plan_root=plan_root)
+    if category in ("paul", "vault"):
+        return None
+
     try:
-        active = find_active_plan_cached()
+        active = find_active_plan_cached(plan_root=plan_root)
     except AmbiguousActivePlanError as exc:
         if overridden:
             return None
@@ -185,8 +331,16 @@ def check_phase5(file_path: str) -> str | None:
     if active is None:
         # No active plan -> no pipeline state to gate.
         return None
-    if is_orchestrator_file(file_path):
-        return None
+    if category is not None:
+        # memory/ is the one exempt root that is NOT unconditional — an
+        # instruction file must not be laundered through it. "paul" and
+        # "vault" already returned above, so only "memory" can still be
+        # non-None here — it's the only remaining category this extra
+        # conjunction needs to apply to. (/tmp isn't a category
+        # _orchestrator_exemption_category() can return at all since F3,
+        # so it can't reach this point either.)
+        if category != "memory" or not is_instruction_file(file_path):
+            return None
 
     # Behavioral instruction files: ALWAYS delegate — high-impact surface
     # regardless of edit size. Source code: allowed for small edits
@@ -194,25 +348,134 @@ def check_phase5(file_path: str) -> str | None:
     if is_instruction_file(file_path):
         if overridden:
             return None
-        # DEFECT 3: name the arming plan so the block is diagnosable in one
-        # read, and surface staleness so an orphaned in-progress plan is
-        # obvious instead of silently wedging every instruction edit.
+
+        # Plan-scoped allowlist. The active plan may declare which
+        # instruction files it is authorized to edit. Declared -> allow.
+        # Undeclared, key absent, or unparseable -> BLOCK.
+        #
+        # FAIL CLOSED: every branch below that is not an explicit
+        # "declared" match returns a block reason. No `except` returns
+        # None (memory/feedback-hooks-fail-open.md, case study #44).
+
+        # --- D1: reject a stale-POSITIVE cache hit -------------------------
+        # `active` above came from `find_active_plan_cached()`. Re-resolve it
+        # via the AUTHORITATIVE UNCACHED path on THIS branch only, before any
+        # allowlist authority is attached to it. A cache hit can return plan A
+        # while the authoritative call would raise `AmbiguousActivePlanError`
+        # (`hooks/_lib/active_plan.py:467-474`). Because the allowlist
+        # attaches per-file authority to the SPECIFIC plan path returned,
+        # that misidentification is an authorization bug, not just a
+        # staleness quirk: plan A's declaration would be honored while plan B
+        # is the plan actually armed. This does not touch the general cache —
+        # it costs one extra directory scan only on this rare branch
+        # (instruction file being edited AND a plan armed), and it does not
+        # close the general stale-POSITIVE hole (still open — see the
+        # Deferred items subsection).
+        try:
+            find_active_plan(plan_root=plan_root)
+        except AmbiguousActivePlanError:
+            return (
+                f"BLOCKED: cannot determine active plan state — more than "
+                f"one plan is `status: in-progress`, or on-disk state "
+                f"changed since the cached lookup. This is a fail-closed "
+                f"block on the instruction-file gate specifically: the "
+                f"allowlist would otherwise attach edit authority to "
+                f"whichever plan the cache happened to return.\n\n"
+                f"File: {file_path}\n\n"
+                f"Resolve the ambiguity (finish or archive the extra "
+                f"plan(s)) and retry."
+            )
+
+        # --- D2: resolve declared entries against the file's OWN WORKTREE,
+        # not the plan's location -------------------------------------------
+        # `plan_root` (computed earlier in check_phase5 via
+        # `_resolve_target_git_roots()`) is derived through `--git-common-dir`
+        # and always lands on the MAIN checkout, even when `file_path` is
+        # under a linked worktree. Declared entries must resolve against
+        # `worktree_root` instead (Step 4a) so a correctly-declared file
+        # matches identically from the main checkout or any linked worktree.
+        # The plan itself is still found via the shared `plan_root` above —
+        # only the allowlist's root changes.
+        try:
+            allowed = read_instruction_allowlist(active, worktree_root)
+        except MalformedInstructionAllowlistError as exc:
+            return (
+                f"BLOCKED: the active plan's `{INSTRUCTION_ALLOWLIST_KEY}` "
+                f"declaration is unusable — {exc}\n\n"
+                f"File:        {file_path}\n"
+                f"Arming plan: {active}\n\n"
+                f"Repair the plan's frontmatter, then retry. The value is a "
+                f"COMMA-SEPARATED list of repo-root-relative paths:\n"
+                f"    {INSTRUCTION_ALLOWLIST_KEY}: agents/ct-qa-reviewer.md, "
+                f"hooks/write-guard.py\n"
+                f"To recover a wedged gate, set "
+                f"{INSTRUCTION_EDIT_OVERRIDE_ENV}=1 in the environment."
+            )
+        except Exception as exc:  # noqa: BLE001 — fail closed, never allow
+            return (
+                f"BLOCKED: could not evaluate the active plan's "
+                f"`{INSTRUCTION_ALLOWLIST_KEY}` allowlist — {exc!r}\n\n"
+                f"File:        {file_path}\n"
+                f"Arming plan: {active}\n\n"
+                f"This is a fail-closed block. Report it to the user. To "
+                f"recover, set {INSTRUCTION_EDIT_OVERRIDE_ENV}=1."
+            )
+
+        if allowed is not None and _is_declared_instruction_file(
+            file_path, allowed
+        ):
+            return None
+
+        if allowed is None:
+            declared_note = (
+                f"Declared `{INSTRUCTION_ALLOWLIST_KEY}`: (none — the arming "
+                f"plan declares no `{INSTRUCTION_ALLOWLIST_KEY}` key, so "
+                f"EVERY instruction-file edit is blocked)"
+            )
+        else:
+            rendered = ", ".join(sorted(str(p) for p in allowed))
+            declared_note = (
+                f"Declared `{INSTRUCTION_ALLOWLIST_KEY}`: {rendered}"
+            )
+
         return (
-            f"BLOCKED: behavioral instruction-file edit while a coding-team "
-            f"pipeline is in-progress.\n\n"
+            f"BLOCKED: behavioral instruction-file edit not authorized by the "
+            f"active plan.\n\n"
             f"File:        {file_path}\n"
-            f"Arming plan: {active}{_plan_staleness_note(active)}\n\n"
+            f"Arming plan: {active}{_plan_staleness_note(active)}\n"
+            f"{declared_note}\n\n"
             f"This is a process-global hook: dispatching the edit through the "
-            f"Agent tool fires this same guard inside the sub-agent, so that is "
-            f"NOT a way around it. Real paths to proceed:\n"
-            f"  1. Let the pipeline finish — when the arming plan reaches "
+            f"Agent tool fires this same guard inside the sub-agent, so that "
+            f"is NOT a way around it. Real paths to proceed:\n"
+            f"  1. PREFERRED — declare this file in the arming plan's "
+            f"frontmatter as a comma-separated, repo-root-relative list:\n"
+            f"         {INSTRUCTION_ALLOWLIST_KEY}: agents/ct-qa-reviewer.md, "
+            f"hooks/write-guard.py\n"
+            f"     Declare it only if the REVIEWED plan actually covers this "
+            f"edit. The declaration is inspectable process state, NOT an "
+            f"audit trail — `docs/plans/` is gitignored, so the declaration "
+            f"leaves no durable record.\n"
+            f"     Only files inside THIS repo can be declared. If the file "
+            f"belongs to another project, that is not a limitation to work "
+            f"around: cross-repo instruction edits are forbidden outright "
+            f"(`CLAUDE.md`, session-directory discipline). Restart the "
+            f"session rooted in the owning repo instead.\n"
+            f"  2. Let the pipeline finish — when the arming plan reaches "
             f"`status: complete` this gate disarms automatically.\n"
-            f"  2. If the plan is stale/abandoned, set the arming plan's "
-            f"frontmatter to `status: complete` (or remove `status: in-progress`).\n"
-            f"  3. For a deliberate one-off edit, set "
-            f"{INSTRUCTION_EDIT_OVERRIDE_ENV}=1 in the environment and retry.\n\n"
-            f"Known rationalization: 'This instruction file change is trivial' — "
-            f"impact surface determines routing, not perceived complexity."
+            f"  3. If the plan is stale/abandoned, set the arming plan's "
+            f"frontmatter to `status: complete` (or remove "
+            f"`status: in-progress`).\n"
+            f"  4. EMERGENCY ONLY — set {INSTRUCTION_EDIT_OVERRIDE_ENV}=1. "
+            f"This disarms the gate for the WHOLE session and is the recovery "
+            f"path for a wedged fail-closed state, not the routine way to "
+            f"edit an instruction file.\n\n"
+            f"Known rationalization: 'This instruction file change is "
+            f"trivial' — impact surface determines routing, not perceived "
+            f"complexity.\n"
+            f"Known rationalization: 'Just set the env var, declaring the "
+            f"file is bureaucracy' — the declaration is scoped to the files "
+            f"the plan names and is visible in the plan; the env var disarms "
+            f"every instruction file for the whole session."
         )
 
     # Non-instruction source code: allow (orchestrator judges ≤20-line threshold)

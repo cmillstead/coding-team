@@ -1,0 +1,832 @@
+# Handoff — 2026-07-24 — write-guard allowlist, spec-silence (paused), CLAUDE.md audit
+
+Session started on `main` in `~/.claude/skills/coding-team`. Three workstreams, two paused/pending.
+Currently on branch `fix/write-guard-plan-allowlist`. Only uncommitted file: `.claude/settings.local.json` (pre-existing, unrelated).
+No commits on any branch this session — all work so far is plans and audits.
+
+---
+
+## Operator directives issued this session (standing)
+
+1. **Root cause over symptom.** Verbatim: *"I never want to see a fix like ff866aa again. we solve problems by dealing with the underlying issue, not by masking the symptoms."* Rule text drafted (below), NOT yet written anywhere — deliberately blocked on the CLAUDE.md audit.
+2. **Compliance complaint, substantiated.** Verbatim: *"you ignore all your standing rules."* Confirmed violations this session: the "don't summarize what you just did at the end of responses" rule (violated repeatedly via end-of-turn status blocks) and the future-tense narration ban in `~/.claude/rules/text-discipline.md`. Do not repeat these.
+3. Merge decision: local `git merge --no-ff` into main stays BLOCKED. PR-merge remains the only path. No work required.
+
+### Rule text to land (pending audit outcome)
+
+> **Root Cause Over Symptom.** Fix the underlying problem. Never ship a change whose effect is to make a problem *less visible* while leaving it in place. **A blocked mechanism is not a blocked problem** — the dangerous case is diagnosing the root cause correctly, finding the obvious fix impossible, and then treating the *problem* as unfixable. When the first mechanism fails, find a second; do not improve the error message and move on. Symptom-masking includes: rewriting an error message so a broken path reads as intended, adding an override/flag/env var to bypass, widening a permission, catching an exception without addressing what raised it, documenting a limitation instead of removing it. If you must ship a mitigation, say plainly that it is one, record the unresolved root cause and the constraint that blocked it, and note what would have to change to fix it properly. Rationalizations: "the platform doesn't support it" (it blocks ONE mechanism — find another); "this was investigated and found impossible" (check what was actually ruled out — usually one approach, not the goal); "the fix makes the failure clear to the user" (clarity about a defect is not repair); "it's the sanctioned escape hatch" (an escape hatch used routinely is a design defect).
+
+---
+
+## Workstream 1 — write-guard plan-scoped allowlist (ACTIVE, highest priority)
+
+Branch `fix/write-guard-plan-allowlist`. Plan: `docs/plans/2026-07-24-write-guard-plan-allowlist.md` (64.7K, `status: planned`, 5 tasks, tier **Medium**).
+
+### Why
+
+`hooks/write-guard.py` blocks edits to behavioral instruction files whenever a plan has `status: in-progress`. Commit `ff866aa` (PR #59) diagnosed defect D1 "Unsatisfiable remediation": the harness policy says instruction edits MUST be delegated to the Agent tool, but the hook is a process-global `PreToolUse` hook that fires identically inside subagents, so the prescribed route loops back into the block. That commit fixed the *error message* and made `WRITE_GUARD_ALLOW_INSTRUCTION_EDIT=1` — a session-wide disarm — the routine route. This is the `ff866aa` the operator never wants to see repeated.
+
+### The fix
+
+Active plan declares `instruction_files: agents/a.md, agents/b.md` in frontmatter; guard authorizes exactly those, blocks all others. Strictly tighter than the env var (per-file and plan-reviewed vs. session-wide blanket disarm). Needs no subagent detection.
+
+### Settled — do NOT re-open
+
+**Subagent detection is permanently unavailable.** Researched this session by a Claude Code hooks specialist: `PreToolUse` exposes only `session_id`, `transcript_path`, `cwd`, `permission_mode`, `hook_event_name`, `tool_name`, `tool_input`; `session_id` and `transcript_path` are SHARED between parent and subagents; the upstream request to add `agent_id`/`agent_type` to PreToolUse was closed as NOT PLANNED; `SubagentStart`/`SubagentStop` carry identity but fire at spawn/exit, not per tool call. Independently corroborated by `hooks/write-guard.py:102-111`. **Do not propose "detect the subagent instead" — it is not implementable.** (Upstream issue numbers were cited by the specialist but NOT independently verified; do not repeat them as fact.)
+
+### Verified facts (checked by command — trust these)
+
+- `SKILL.md` is **198** lines; 200-line cap enforced by `check_skill_line_cap` at `hooks/write-guard.py:506`. **2 lines of headroom** — the doc task must rewrite in place, never append, or it blocks its own plan.
+- `check_path_safety` at `hooks/write-guard.py:719` flags `.startswith()` on path vars in `.py` writes (case study #35) — a substring implementation would trip the repo's own hook.
+- `_parse_frontmatter()` (`hooks/_lib/active_plan.py:50-78`) handles ONLY flat `key: value` and **lowercases every value** (`:77`). A YAML list will not parse; unmodified, it would corrupt `SKILL.md`/`CLAUDE.md` entries to `skill.md`/`claude.md`. Plan adds opt-in `preserve_case_keys`.
+- `hooks/tests/conftest.py:120-142` scrubs `WRITE_GUARD_ALLOW_INSTRUCTION_EDIT` for the whole test session — new tests inherit it.
+- `~/.claude/hooks/write-guard.py` is a relative symlink to repo source. Edit SOURCE then `bash scripts/deploy.sh`. Never hand-edit deployed.
+- `docs/plans/` is gitignored (`.gitignore:2`) → plans survive branch switches, and the allowlist has no git audit trail (threat-model note: process discipline, NOT a security boundary — must not be oversold).
+- `find_active_plan()` fails closed if MORE THAN ONE plan claims `status: in-progress`. Two plans now exist; only one may ever be armed.
+
+### In flight when compacted
+
+- `wg-reviewer` (Coding Team Plan Doc Reviewer) — reviewing the plan. Priorities: fail-closed completeness, path-matching soundness, `_parse_frontmatter` regression risk, back-compat proof, SKILL.md 2-line headroom, deploy/declare ordering.
+- `wg-codex` (Codex gate, Medium tier REQUIRED) — told it MUST prove execution (command line, tee'd path, byte size), because a prior agent silently never dispatched.
+
+### Next steps
+
+1. Collect both gate results; reject false findings by command (see Discipline below).
+2. Apply accepted findings, then implement Tasks 1-5.
+3. Task 5 declares `instruction_files: agents/ct-spec-reviewer.md, agents/ct-qa-reviewer.md` in the spec-silence plan — the end-to-end proof.
+4. Full hook test suite + ruff must be green. `bash scripts/deploy.sh` is mandatory.
+
+---
+
+## Workstream 2 — spec-silence meta-rule (PAUSED at end of Phase 4)
+
+Branch `feat/spec-silence-meta-rule` (**no commits** — Phase 5 never ran). Plan: `docs/plans/2026-07-24-spec-silence-meta-rule.md` (39.2K, `status: planned`, 4 tasks, tier Medium). Untracked/gitignored, survives branch switches — verified intact after the switch.
+
+### What it does
+
+New `rules/spec-silence.md` + symlink into `~/.claude/rules/` via `scripts/deploy.sh`, referenced by a one-line pointer from exactly TWO agents: `agents/ct-spec-reviewer.md` (Misunderstandings group, ~line 107) and `agents/ct-qa-reviewer.md` (`## Named Rationalizations`, ~line 123). The other seven `ct-*.md` are deliberately OUT of edit scope (Task 4 Step 5 greps them report-only).
+
+Rule content: before filing "code violates invariant X", check whether the spec PINS X. If silent/ambiguous → still file, retitled **SPEC-AMENDMENT CANDIDATE**. Three suppression routes closed across two review rounds: **COUNT** (still filed), **SEVERITY** (unchanged by retitling), **DISPOSITION** (not advisory; still blocks). Rule body is 46 lines against a `≤ 50` assertion.
+
+### Outstanding
+
+**Codex plan gate NEVER RAN.** The `codex-gate` agent idled without dispatching (verified: nothing written to `/tmp/second-opinion-*` or scratchpad in 90 min) and was stopped. Medium tier REQUIRES it — re-run from scratch on resume.
+
+Reusable pre-flight (mode=plan, live count 31):
+- applicable (23): C4 C10 C12 C13 C14 C15 C16 C18 C19 C20 C21 C22 C25 C26 C27 P1 P2 P3 P4 P30 P32 P33 P34
+- dismissed (8): scope-mismatch C2 C3 C5 C23 C24; no-signal C11 C17 P31
+- battery: path-equality 0, select-threading 0, metric-aggregate 0 (absent); concurrency-lock 14, command-grammar 31 (fire, both over-matches on prose)
+
+### Resume condition
+
+After the write-guard fix lands: `instruction_files` is added to this plan's frontmatter (done by the fix's own Task 5), flip `status: in-progress`, run Phase 5 **with no env var and no session relaunch**. Anchors verified verbatim against live files; both target agents stay under 200 lines (152→153, 155→156).
+
+---
+
+## Workstream 3 — CLAUDE.md saturation audit (RUNNING)
+
+`claudemd-audit` (Coding Team Harness Engineer) auditing `config/CLAUDE.md`.
+
+**Finding that triggered it:** `config/CLAUDE.md` is **226 lines**, symlinked to `~/.claude/CLAUDE.md` and therefore always loaded in every session. That is past the 200-line threshold `hooks/hook-health-check.py` enforces and past the point `feedback-context-saturation` / case study #24 record as where MANDATORY labels stop binding. This is the root cause of "you ignore all your standing rules" — so the fix is to SHRINK and HARDEN, not to add rule N+1.
+
+Audit asks: enumerate every rule; classify each as ALREADY-ENFORCED (cite hook file:line) / MECHANIZABLE (propose hook, applying the reliability budget — operator deliberately cut 28 hooks to 9) / NOT-MECHANIZABLE-ESSENTIAL / SITUATIONAL (extract to on-demand); report line arithmetic; flag contradictions and dead references; and say where the new root-cause rule belongs and what it displaces.
+
+**Decision made:** do not add the root-cause rule until this audit returns. Adding line 227 to a saturated file is itself the symptom-masking move the rule prohibits.
+
+---
+
+## Discipline notes for the next session (earned the hard way)
+
+**Verify state claims by command.** Six findings from agents this session were FALSE, and every single one was an unverified claim about working-tree or environment state — current branch, file line counts, file existence, BSD grep behavior — while the same agents' file-CONTENT analysis was consistently accurate and valuable. Reject the false premise, keep the rest, tell the agent which is which. Saved as `memory/feedback-unverified-premise-findings.md`.
+
+I made this error too: claimed `hooks/write-guard.py` was untracked by git. Cause — an earlier `cd` into a subdirectory persisted in the shell, so `hooks/` and `.gitignore` resolved relative to the wrong directory. **The Bash tool's working directory persists between calls.** Use absolute paths or re-`cd` to repo root.
+
+**Agents finish work but often never send the report.** Four times this session (`planner`, `plan-reviewer-2`, `cc-hooks-expert`, `wg-planner`). On an idle notification with no report: inspect the ARTIFACT first (the work is usually done), then ping asking them to re-send, and explicitly offer `Status: BLOCKED` as an honest alternative to reconstructing from memory. Do NOT re-dispatch a fresh agent — that discards completed work. Saved as `memory/feedback-agent-idle-without-report.md`.
+
+**Guard state:** currently 0 plans with `status: in-progress`, so `write-guard.py` is dormant and hook/instruction edits are allowed. If a future session finds edits blocked, check for a stale `in-progress` plan before reaching for the env var.
+
+---
+
+## Plan review results — write-guard allowlist (received post-handoff)
+
+`wg-reviewer` returned **Issues Found**: 7 findings (1 Critical, 2 High, 2 Medium, 2 Low). It ran NO shell
+commands (no Bash tool in its dispatch), said so explicitly, and grounded every claim in file:line content.
+No tree-state claims — nothing to reject as false premise. Treat these as sound.
+
+### BLOCKING — must be fixed before implementation
+
+**R1. Bootstrap deadlock — the plan blocks its own execution (Critical).**
+All six files in the plan's File Structure table (`:85-91`) are gated by `is_instruction_file()`:
+`hooks/_lib/active_plan.py`, `hooks/tests/test_active_plan.py`, `hooks/write-guard.py`,
+`hooks/tests/test_write_guard.py` (`"hooks" in parts and suffix in (".py",".sh")`, `write-guard.py:92`);
+`SKILL.md` (`BEHAVIORAL_INSTRUCTION_BASENAMES`, `:64`, `:84-85`); `phases/execution.md`
+(`BEHAVIORAL_INSTRUCTION_DIRS`, `:65-72`, matched `:96-97`). The plan is `status: planned` with NO
+`instruction_files` key. Flipping to `in-progress` at Phase 5 entry makes `check_phase5` (`:194-216`)
+block Tasks 1-4. Self-declaration cannot rescue Tasks 1-2 — they run BEFORE the allowlist code exists,
+so the old guard ignores the key.
+FIX: explicit prerequisite — `WRITE_GUARD_ALLOW_INSTRUCTION_EDIT=1` for Tasks 1-2 ONLY; once Task 2 lands
+(hook live via symlink), add `instruction_files:` to THIS plan's own frontmatter covering all six files
+and UNSET the env var so Tasks 3-5 dogfood the new mechanism. That is also a stronger E2E proof than the
+current Task 5 Step 4.
+
+**R2. New routing text is unsatisfiable for out-of-repo instruction files (High). REPRODUCES ff866aa's D1.**
+`is_instruction_file()` gates by path SHAPE anywhere on disk — no repo-root constraint (`:75-99`) — but
+`read_instruction_allowlist()` rejects absolute entries and anything escaping the repo root (plan `:374-391`).
+So `~/.claude/CLAUDE.md`, `~/.claude/agents/*.md`, and instruction files in OTHER repos can never be
+declared; the env var remains their only route — while the new block message labels declaration
+**PREFERRED** (`:684-689`) and the SKILL.md row (`:1029`) states it unconditionally.
+This is the same "unsatisfiable remediation" defect class as D1, which the plan itself cites at `:23`.
+**EM DECISION REQUIRED** (operator directive: root cause over symptom — do NOT just scope the claim, that
+is documenting a limitation):
+  (a) Make out-of-repo instruction files declarable — permit entries resolving under a known harness root
+      (`~/.claude`) in addition to the arming plan's repo. Threat model is process discipline, not an
+      adversarial boundary, so a second known root is acceptable. PREFERRED — actually fixes it.
+  (b) Scope the block message + SKILL.md claim to in-repo files only. Honest but leaves the gap = the
+      symptom-masking move the operator just prohibited. Only if (a) proves unworkable.
+
+### IMPORTANT
+
+**R3. Task 1's import instruction is wrong; tests would fail at collection (High).**
+Plan `:246` says to match the file's existing import style, but `hooks/tests/test_active_plan.py:13-20`
+has NO module-level import of `_lib.active_plan` and never does `sys.path.insert` — it reaches the library
+only via `run_python()` subprocess snippets (`:50-63`), which is incompatible with the new in-process calls.
+Result: `ModuleNotFoundError: _lib` at collection, masked by Step 2's predicted `ImportError` (`:250-251`).
+FIX: specify BOTH `sys.path.insert(0, str(HOOKS_DIR))` and explicit `from _lib.active_plan import ...`.
+Precedent: `hooks/tests/test_write_guard.py:29-32`.
+
+**R4. Failure-modes table claims coverage three tests do not provide (Medium).** Load-bearing, since that
+table is the plan's fail-closed evidence.
+- `:1160` repo-root-unresolvable — the `allowlist_repo` fixture (`:229-241`) always SETS
+  `CODING_TEAM_MAIN_ROOT` and never unsets it; branch at plan `:359-364` is untested.
+- `:1156` `test_declared_but_unreadable_plan_blocks` (`:926-943`) never reaches the reader's unreadable
+  branch — `find_active_plan()` raises `AmbiguousActivePlanError` first (`active_plan.py:130-137`,
+  handled `write-guard.py:175-184`). Passes for the wrong reason. (T1's `test_unreadable_plan_raises`
+  does cover it.)
+- `:1163` "unexpected exception → covered by bare-except" — nothing forces one. Untested.
+
+**R5. Exception-type mismatch (Medium).** Reader catches only `OSError` (`:380-386`); matcher catches
+`(OSError, ValueError)` (`:611-614`). `Path.resolve()` raises `ValueError` on an embedded NUL, which
+survives `read_text(errors="replace")` and `_FRONTMATTER_KEY_RE`'s `(.*?)` (`active_plan.py:46`), so it
+escapes as raw `ValueError`, contradicting the reader's docstring (`:332-335`). Still FAILS CLOSED via
+`check_phase5`'s broad `except Exception` (`:648`), but the unit contract is wrong.
+FIX: `except (OSError, ValueError)`.
+
+### MINOR
+**R6 (Low).** Dead code in `test_suffix_near_miss_not_authorized` (`:774-786`): `near` is created but never
+asserted on; reads half-edited. Reasoning is correct (`is_instruction_file` keys off `path.suffix`).
+**R7 (Low, advisory).** `except Exception` at `:648` conflicts with `~/.claude/code-style.md:6`, but is
+load-bearing here (it is what turns R5's `ValueError` into a block). KEEP IT — state the deliberate
+exception in the plan so a later auditor doesn't narrow it and reopen a fail-open path.
+
+### Verified sound by the reviewer — do not re-audit
+- Fail-closed: no input found that yields an ALLOW; only `return None` in new logic is the exact-match
+  branch (`:658-661`). (Apart from R5's exception TYPE.)
+- Path matching holds for `a.md.bak`, `evil/agents/a.md`, `agents/../agents/a.md`, absolute targets,
+  trailing whitespace, duplicates. A declared DIRECTORY authorizes nothing (no wildcard leak). A symlink to
+  a declared file resolves to it and is allowed — semantically correct. Case variation on APFS OVER-blocks
+  (fail-closed direction).
+- `preserve_case_keys` default is byte-identical to `active_plan.py:77`; the ONLY in-repo caller of that
+  `_parse_frontmatter` is `find_active_plan` at `:139` (other grep hits are unrelated same-named local
+  functions). No `find_active_plan()` regression.
+- Back-compat IS proven by test (`test_no_key_blocks_every_instruction_edit`, `:539-554`), honestly flagged
+  at `:577` as a regression lock rather than red-green.
+- SKILL.md 198/200 headroom handled: Task 4's edits are 1→1 in place, table stays 2 rows, net 0.
+- Test helpers verified: `_run(event, cwd, env)` (`test_write_guard.py:94-96`), `_write_plan(body=...)`
+  (`:83-91`), `stat` already imported at `:18`.
+- Stale-doc inventory complete: `SKILL.md:159`, `:179-180`, `:185`, `phases/execution.md:22` all carry the
+  "go through the Agent tool" claim verbatim.
+
+### Next action after compaction
+Apply R1-R5 to the plan (R1 and R2 are blocking; R2 needs the EM decision above, defaulting to option (a)),
+then re-review, then implement. `wg-codex` (Codex gate, REQUIRED at Medium) was still running.
+
+---
+
+## Round 2 — Codex gate returned, R1-R5 + Codex findings APPLIED (post-compaction)
+
+`wg-codex` completed: 438K transcript at `scratchpad/wg-codex-r1.txt`. **VERDICT: REVISE**, ~6 P1 /
+~12 P2 / ~4 P3. It ran for real this time (unlike the earlier silent `codex-gate` no-op).
+
+### Cross-model agreement (highest confidence)
+Codex independently found **R1's bootstrap deadlock**. Two models, two methods, same defect.
+
+### Applied to the plan — all of R1-R5 plus every Codex P1
+
+**Design changes (not patches):**
+1. **Reader takes `root` as a parameter** instead of calling `_git_main_root()` a second time.
+   `check_phase5` derives it as `active.resolve().parents[2]` — `find_active_plan()` only ever globs
+   `<root>/docs/plans/*.md`, so that IS the root by construction. This single change killed four
+   findings at once: the double-git-call P2, the "root is None → full hook ALLOWS" P1 fail-open, the
+   "nonexistent root accepted" P1, AND the `allowlist_repo` fixture's `CODING_TEAM_MAIN_ROOT`
+   env-mutation problem (R4's first half). No `git rev-parse` remains on this codepath.
+2. **Empty entries now REJECT** rather than being filtered. `a.md,,b.md` was silently normalized into a
+   valid declaration — a typo becoming an authorization.
+3. **`_assert_silent_allow()` helper** replaces all six vacuous `if parsed is not None:` positive
+   assertions. Codex's sharpest finding: an import-time crash also yields `parsed is None`, so those
+   tests passed green against a completely broken hook. Now asserts rc==0, empty stdout, no traceback.
+   All 13 `_run` sites changed from `_stderr, _rc` to captured `stderr, rc`.
+4. **Bootstrap section added** (R1): env var for Tasks 1-2 only → deploy Task 2 → self-declare in this
+   plan's own frontmatter → unset env var → flip `in-progress` → Tasks 3-5 dogfood the allowlist.
+   Includes a verification gate at the handoff point.
+
+**R2 — DECISION REVERSED, and this matters.** The pre-compaction default was "add `~/.claude` as a
+second root." Investigation killed it: every `ct-*` agent, every coding-team rule, and
+`~/.claude/CLAUDE.md` are **symlinks into this repo** (`~/.claude/CLAUDE.md` →
+`skills/coding-team/config/CLAUDE.md`). The matcher `.resolve()`s both sides, so all of them are
+ALREADY declarable as repo-relative paths. The only genuinely undeclarable gated files are
+`~/.claude/agents/bt-*.md`, which belong to the brainstorming-team project — and editing those from a
+coding-team session is already forbidden by session-directory discipline in `CLAUDE.md`. So the block
+is CORRECT, not a limitation; a second root would have authorized what another rule forbids. The block
+message now names the real remedy (restart in the owning repo). This is not ff866aa's D1: that
+documented an *unreachable* route, this documents a *reachable* one.
+
+**Plan-accuracy corrections** (Codex found ~8 of these — the plan asserted things about existing files
+that were false):
+- Task 1 import instruction (R3): `test_active_plan.py` has NO `_lib.active_plan` import and no
+  `sys.path` setup — it uses subprocess + sentinel counters. Now specifies the `sys.path` block from
+  `test_write_guard.py:29-32` explicitly.
+- Failure-modes table rows claiming tests that were never written are now marked **MUST ADD** with
+  named tests, plus a note that the table is a checklist, not a record.
+- `test_declared_but_unreadable_plan_blocks` (R4 second half) passes for the wrong reason —
+  `find_active_plan()` raises `AmbiguousActivePlanError` at `active_plan.py:133-137` before the reader
+  runs. Verified by reading the source. Test kept, relabeled; the row now credits only T1's unit test.
+- `except (OSError, ValueError)` on both resolve sites (R5) — NUL bytes raise `ValueError`.
+- "audit trail" / "auditable" claims removed — they contradicted the plan's own Context Brief item 5
+  (`docs/plans/` is gitignored).
+- `test_agent_rule_refs.py` is NOT in the smoke job (`ci.yml:30`); it's gated by the full-suite job
+  (`:61`). Verified by reading the workflow.
+- Task 4's "complete set" of stale docs omitted `phases/named-rationalizations.md:21`. Added — but its
+  ROUTING rule is deliberately retained; only the *sufficiency* implication is stale. Step 5's grep
+  expectation changed from "no matches" to "exactly one match".
+- Task 5 Step 4 split into **4a (reader check, honestly labeled NOT end-to-end)** and **4b (genuine
+  E2E)** — the old step claimed "temporary flip and restore" while explicitly doing neither, and never
+  invoked the hook. 4b now runs `write-guard.py` as a process in a disposable git repo and asserts
+  declared→allow AND undeclared→block.
+- `git add -A` → explicit paths (the tree carries unrelated `.claude/settings.local.json`).
+
+### Recorded but deliberately NOT fixed here
+Three **pre-existing** `is_instruction_file()` holes, now in the plan's "Known gaps" section per
+`rules/finding-integrity.md`. They let a payload skip classification before any allowlist logic runs,
+so they are orthogonal — neither blocked by nor fixed by this work:
+1. Ungated symlink alias (`notes/x.txt` → `agents/X.md` classifies as non-instruction).
+2. Case-insensitive APFS (`skills/demo/skill.md` == `SKILL.md` on disk, not in the basename set).
+3. Frontmatter past the 4096-char window, and unterminated frontmatter, both silently disarm the gate.
+
+Each needs its own plan. They widen scope from "who is authorized" to "what counts as an instruction
+file" — a different review.
+
+### Verified, not asserted
+- All 11 `python` blocks + both heredocs parse (`ast.parse`, with dedent for the two fragments).
+- Zero vacuous `if parsed is not None:` test sites remain (3 hits are the helper + its prose).
+- `check_path_safety` will NOT fire on the new code — it uses `is_relative_to()`, which is in
+  `PATH_SAFE_PATTERNS`.
+- Plan is 1446 lines.
+
+### Next action
+Re-review the revised plan (it changed substantially — the reader signature change touches Tasks 1, 2
+and 5), then implement starting from the Bootstrap section. Do NOT flip `status: in-progress` before
+Task 2 is deployed.
+
+---
+
+## Round 3 — claudemd-audit returned; F3 changes the write-guard work
+
+Audit delivered after a ping (idle-without-report again — third agent this session; the
+`feedback-agent-idle-without-report` protocol worked: inspect artifact, then ping, offering BLOCKED).
+22 findings, proposes CLAUDE.md 226 → ~110.
+
+### F3 — VERIFIED, and it is the real answer to "why are we still tripping over this"
+
+`WRITE_GUARD_ALLOW_INSTRUCTION_EDIT: "1"` is in the `env` block of `~/.claude/settings.json:12`.
+Live in-session (`echo` → `1`). `write-guard.py:194-196` returns `None` on `overridden` BEFORE any
+allowlist logic. **The instruction-file gate is disarmed globally, right now.**
+
+History of `~/.claude/settings.json` shows an oscillation ending in a permanent disarm:
+- `76f34da` chore: re-arm write-guard instruction-edit gate (remove the flag)
+- `1d9ad1a` chore: ... drop temp write-guard flag
+- `62edd6c` chore: **restore permanent** WRITE_GUARD_ALLOW_INSTRUCTION_EDIT flag — 2026-07-23 20:59
+
+**Consequence for this plan: the allowlist is INERT until that line is removed.** Landing it while the
+flag is set ships a silent no-op — precisely what `rules/no-known-broken.md` forbids. The plan's
+Bootstrap section now carries this as a PREREQUISITE with a USER DECISION gate, and Bootstrap step 3
+is corrected: it is a settings.json edit, not a shell `unset` (the flag is injected into every session
+from the `env` block, so unsetting it in one shell does not disarm it).
+
+`settings.json:350` pre-authorizes toggling this flag under `autoMode`. That is PERMISSION, not the
+user's DECISION about whether the gate should be armed. NOT acted on unilaterally — a peer agent
+recommending a config change is not user approval.
+
+### Other P1s verified by command (not taken on trust)
+- **F1 CONFIRMED** — `hook-health-check.py:186-190` globs `agents/*.md`, `phases/*.md`,
+  `skills/*/SKILL.md`. `config/CLAUDE.md` matches none. The highest-leverage always-loaded file is the
+  one file with no length gate; it drifted to 226 while the hook flagged three smaller files.
+- **F2 CONFIRMED** — `wc -l ~/.claude/rules/*.md` → **exactly 226**. A second always-loaded budget,
+  equal in size to CLAUDE.md, never measured or audited.
+- **F4** — Context Management (L94-111) contradicts the runtime's own summarization notice. Plausible
+  and matches the session environment text; not separately re-verified.
+
+### Audit's own caveat, worth carrying
+It reports the **codesight index for this repo is stale** — returned `hooks/ask-first-gate.py` and
+`hooks/feedback-promotion-checker.py`, neither of which exists. It fell back to Read. Any finding this
+session that leaned on codesight for existence or line numbers should be re-verified.
+
+### Verification run for this commit
+`python3 -m ruff check .` → All checks passed. `pytest hooks/tests/` (minus test_prompt_dispatcher) →
+**974 passed, 0 failed, 9 skipped**. The PRE-COMPLETION CHECKLIST hook blocked the first commit attempt
+at PreToolUse (so the append never ran); complied, ran both, retried.
+
+### Open decisions the audit surfaced (needs user)
+- **F3 fix** — remove the permanent flag. Blocks the allowlist being real.
+- **F13** — CLAUDE.md L7 routes everything through `/coding-team`, but
+  `feedback-always-route-through-build.md` says audit fix batches go through `/build`, and both are
+  deployed side by side. The always-loaded rule names the older entry point. Audit declined to guess.
+- **F12** — force-push prose is broader than enforcement; narrow the prose or build a refspec parser.
+
+---
+
+## Round 4 — F3 RESOLVED: permanent flag removed on user decision
+
+User approved removal. `WRITE_GUARD_ALLOW_INSTRUCTION_EDIT` deleted from the `env` block of
+`~/.claude/settings.json`; JSON re-validated (`json.load` OK, key absent). Committed **`f6c70b9`** in
+the `~/.claude` repo — note that repo was on `feat/harness-map-s2-m3-git-age`, pre-existing unrelated
+in-flight work, so the commit sits on that branch.
+
+### Why the removal was safe to do immediately
+Tested the hook against a temp repo with the override stripped from the environment:
+
+| Plan state | Decision |
+|---|---|
+| `status: planned` (nothing armed) | **allow** |
+| `status: in-progress` | **block** |
+
+The gate is DORMANT unless some plan is `in-progress` (`write-guard.py:185-187`). No plan is armed,
+so re-arming cost nothing today. Friction returns only during armed Phase 5 work — which is exactly
+where the allowlist is meant to carry it.
+
+### Session caveat — carry this to Task 3
+The `env` block is read at SESSION START. **This session still has the flag live** (`echo` → `1`) even
+though the file no longer contains it. Consequence:
+- Tasks 1–2: unaffected (gate dormant either way, no plan armed).
+- **Task 3 onward MUST run in a session where `echo "[$WRITE_GUARD_ALLOW_INSTRUCTION_EDIT]"` prints
+  `[]`.** Otherwise the override short-circuits the allowlist and every "declared file allowed" result
+  is meaningless. Relaunch — the flag cannot be cleared from inside a running session.
+
+Plan Bootstrap updated accordingly, and its step 1 was CORRECTED: Tasks 1–2 need no override at all
+(leave the plan at `status: planned`; the gate is dormant). The earlier draft wrongly said they should
+run under the global override — that was worse, since it depends on a permanent global flag rather
+than a time-bounded unarmed window.
+
+### Memory written
+`memory/feedback-escape-hatch-granularity.md` — an escape hatch costlier to use than the friction it
+relieves gets left permanently on, silently disabling the control. Match hatch granularity to the
+block's granularity (per-edit block ⇒ per-edit release, not per-session). Indexed in MEMORY.md.
+
+---
+
+## Round 5 — plan re-review (wg-reviewer-2): 13 findings, 12 applied, 1 rejected
+
+Same-model round 2 on the revised plan. It ran NO shell commands (no Bash in that agent) and said so,
+grounding every claim in file content — so its citations were checkable and mostly right.
+
+### H1 (blocking) — a defect I INTRODUCED in round 1
+The `_assert_silent_allow` helper I added asserted `stdout.strip() == ""`. But `check_identity_framing`
+(`write-guard.py:816-825`, `is_identity_file()` `:435-440`, `_output.advisory`
+`hooks/_lib/output.py:19-26`) emits an advisory allow decision on `agents/*.md` and
+`skills/*/SKILL.md` edits whose `new_string` lacks identity framing. Every one of those tests targets
+exactly those paths, so **5 of 6 would have FAILED against a correct implementation.**
+
+Independently confirmed from my own earlier probe this session: running the hook against
+`agents/ct-qa-reviewer.md` returned a parsed allow, not the silent sentinel. I had that evidence and
+did not connect it.
+
+Root of the mistake: I saw the existing suite's loose `if parsed is not None:` spelling, judged it
+sloppy, and "fixed" it. It was tolerating real behavior (`test_override_env_allows_instruction_edit`,
+`hooks/tests/test_write_guard.py:585-600` does the same thing for the same reason). Helper is now
+`_assert_allowed`: rc 0, no traceback, and `parsed is None` (with empty stdout) OR an affirmative
+allow decision — never merely "not block". The plan now documents WHY the loose spelling exists so it
+does not get re-broken.
+
+### H2, H3 (blocking)
+- **H2** — Bootstrap's self-declaration omitted `phases/execution.md`, which Task 4 Step 4 edits.
+  `phases` is in `BEHAVIORAL_INSTRUCTION_DIRS`, so Task 4 would have been blocked BY ITS OWN FEATURE
+  mid-flight. Declaration is now the canonical 7-file set, with an instruction to cross-check it
+  against every staging command in Tasks 1-5. Also added the missing `phases/named-rationalizations.md`
+  row to the File Structure table (the two lists disagreed in opposite directions).
+- **H3** — Bootstrap step 3 still instructed editing `~/.claude/settings.json:12`. Stale after
+  `f6c70b9`. Verified: the key is absent from the env block; the only occurrence is a
+  permissions-rationale string at `:349`. Step 3 is now purely the session check.
+
+### Applied MEDIUM/LOW
+- **M7 (real directional fail-open)** — `active.resolve().parents[2]` resolved BEFORE taking the
+  grandparent, so a symlinked plan file (or symlinked `docs/`/`docs/plans/`) would yield the TARGET's
+  grandparent — a foreign root — and could authorize instruction files OUTSIDE the repo, contradicting
+  the block message's own claim. Now `active.parents[2].resolve()`. One token; a comment explains the
+  ordering so it is not "simplified" back.
+- **M4** — Task 5 Step 7 staged files already committed by Tasks 1-4; its only change is gitignored, so
+  the commit would exit non-zero. Now asserts there is nothing to stage.
+- **M6** — File Structure prose still claimed "all repo-root knowledge stays in `active_plan.py`",
+  false after the signature change. Corrected on both rows.
+- **L8** — removed the PROMPT_CRAFT_ADVISORY block from Tasks 1, 3, 5, where "this task writes CC
+  instructions" is FALSE (Python / Python tests / YAML+bash). Kept on Tasks 2 and 4. Minus 27 lines.
+- **L9, L10, L12** — citation fixes (`HOOKS_DIR` is `:23`; conftest range; **ci.yml is ONE job with
+  multiple steps, not two jobs — that error was mine from this session**), plus an
+  `assert parsed is not None` guard and removal of a dead `not entries` clause.
+
+### REJECTED — M5, by command
+Claimed `SKILL.md` is 199 lines (trailing blank) leaving 1 line of headroom. FALSE: `wc -l` is 198,
+`awk END NR` is 198, and a hexdump of the last bytes shows no trailing blank line. `splitlines()`
+yields 198; headroom is 2 as stated. The reviewer flagged its own uncertainty and asked for the
+command — correct instinct, wrong guess. Triage was sent back naming which finding was rejected.
+
+### Harness false positive worth noting
+The PRE-COMPLETION CHECKLIST hook fired on a plain `cat >>` append with NO git invocation, because the
+appended TEXT mentions staging/commit verbs. Complied (ran lint, retried) rather than rewording around
+the matcher, per `rules/hook-bypass.md`. Candidate finding for the harness backlog: the matcher should
+inspect the command, not heredoc payload content.
+
+### State
+Plan is 1507 lines. All python blocks and both heredocs parse under `ast.parse`. `wg-codex-2`
+dispatched as the round-2 Codex gate with proof-of-execution requirements (command line, tee'd path,
+byte size) because an earlier codex agent silently no-opped.
+
+---
+
+## Round 6 — Codex gate round 2 (wg-codex-2): REVISE, 6 P1 + 1 P2. STRATEGIC FORK.
+
+Proof of execution supplied and checked: `codex exec ... | tee /tmp/second-opinion-review-wg2r2a1.txt`,
+369093 bytes, Codex v0.144.5, model gpt-5.6-sol, session 019f96fa-8ae0-7b81-9b1c-ce379f46b03d. Codex
+read the source itself and reproduced the cache bug. All 6 cited paths exist in-repo.
+
+### THE FINDING — four of six P1s are "the new branch is never reached"
+
+Codex's answer to "what do the same-model rounds share a blind spot on": both same-model rounds
+reasoned about the new allowlist branch in isolation and never traced what executes BEFORE it. This
+reframes the whole workstream.
+
+Verified by command this session:
+
+1. **P1-1 — `is_orchestrator_file()` bypasses the allowlist entirely.** Called at
+   `write-guard.py:188`, BEFORE `is_instruction_file()` at `:194`. It matches
+   `path_str.startswith("/tmp")` — no separator check, so `/tmpfoo/...` matches — and
+   `"/memory/" in path_str`, plus obsidian and `.paul`. So `/tmp/repo/agents/a.md` and
+   `/repo/memory/SKILL.md` are ALLOWED without the allowlist ever being consulted. These are raw
+   substring path tests: the exact case-study-#35 defect the repo's OWN `check_path_safety` hook
+   exists to flag, sitting inside the guard. The plan's "NOT in scope" bullet claiming these "are
+   already unconditionally allowed and are not instruction files" is FALSE per the classifier.
+2. **P1-6 — the bypass is DOCUMENTED AS PROCEDURE.** `phases/named-rationalizations.md:64`, under a
+   heading reading "do not work around them silently", says: *"Workaround: harness work on coding-team
+   itself runs from a parent directory whose `docs/plans/` is empty (e.g., `~/.claude/plans/` is not a
+   git repo, so `find_active_plan()` returns None when invoked from there)."* A written instruction to
+   evade the guard, in the file whose purpose is naming rationalizations. Also missed by the plan's
+   "complete set" grep: `phases/execution.md:39`.
+3. **P1-5 — `CODING_TEAM_MAIN_ROOT` is a second, undocumented production override.**
+   `_lib/active_plan.py:91` honors it unconditionally (not test-gated). Point it at an empty dir and
+   every instruction edit is allowed. Verified it is NOT in conftest's `_WRITE_GUARD_AMBIENT_FLAGS`
+   (`:120-124` lists only the three WRITE_GUARD/GIT_SAFETY flags), so it also defeats test isolation.
+4. **P1-4 — the active-plan cache can serve a stale `None`, disarming the gate.** Codex REPRODUCED it.
+   Signature is only `[path, st_mtime_ns]` (`active_plan.py:167`); rewrite a plan to `in-progress` and
+   restore mtime within the 5s TTL and the gate stays dormant.
+5. **P1-3 — duplicate `instruction_files` keys convert malformed to allow.** `_parse_frontmatter()`
+   overwrites duplicate normalized keys, so a malformed first line is silently discarded and the
+   second authorizes. `Instruction_Files` collides identically (keys lowercased).
+6. **P2-7 — ELOOP raises `RuntimeError`.** VERIFIED on this machine (Python 3.11.14): `Path.resolve()`
+   on a self-referential symlink raises `RuntimeError`, NOT `OSError`/`ValueError`. The proposed
+   matcher catches only `(OSError, ValueError)`, so it propagates to the top-level handler — which
+   emits a block, so the negative test would pass BECAUSE THE HOOK CRASHED. Also: `_assert_blocked()`
+   asserts no reason substring, so the traversal/absolute/empty/near-miss negatives stay green even if
+   the reader is never reached (the old hook blocks every instruction file anyway).
+
+### Defects in MY OWN output this round
+- **Task 5 Step 4b E2E uses `tempfile.TemporaryDirectory()`** = `/tmp` on Linux, which satisfies
+  `is_orchestrator_file()`. It would PASS VACUOUSLY ON CI while appearing to prove the gate works.
+  `conftest.py:40-64` reroots pytest basetemp to `<repo>/.pytest-tmp` for exactly this reason, with a
+  comment that macOS looked green while CI was red. My local run passed because macOS tempdirs are
+  under `/var`. Must be fixed regardless of sequencing.
+- **PF-2 — Task 4 has no step editing `phases/named-rationalizations.md`.** I added it to the File
+  Structure table, the grep table, Step 5's verification and Step 7's staging, but never wrote the
+  step. As written Task 4 stages a file it never modified and Step 5's verification fails.
+- **PF-1** — the plan's `git grep -l WRITE_GUARD_ALLOW_INSTRUCTION_EDIT` claim names 4 files; the real
+  count is 5 (misses this handoff, which is tracked).
+
+### Bootstrap: sound
+Codex walked it literally and found the ordering correct — the 7-file declaration covers every gated
+edit, Task 5 touches only an ungated `docs/plans/*.md`. Two caveats: the stale-cache P1 can misbehave
+mid-bootstrap, and Step 4b cannot pass on Linux until P1-1 is fixed. Codex independently confirmed
+this session still carries `WRITE_GUARD_ALLOW_INSTRUCTION_EDIT=1`, so the documented relaunch before
+step 3 is mandatory.
+
+### STRATEGIC FORK — awaiting user decision
+Building the allowlist first fits a better lock to a door with four open windows, one described in the
+manual. Options put to the user:
+1. **RESEQUENCE (recommended)** — fix the five upstream reachability bypasses first as their own tight
+   batch (all pre-existing, none depend on the allowlist), then land the allowlist.
+2. Fold all six P1s into the current 1507-line plan and continue.
+3. Ship the allowlist with the bypasses as documented known gaps — argued AGAINST: it is the
+   mitigation-labelled-as-fix shape the operator banned.
+
+### Memory written
+`memory/feedback-review-upstream-of-the-change.md` — trace reachability (early returns, caches, env
+seams) BEFORE reviewing a new branch's logic; per-item authorization is meaningless if the gate is not
+reached. Indexed in MEMORY.md.
+
+### Round budget
+Codex round 2 of max 5. Skill requires a green verification run (baseline first) before re-dispatch.
+Telemetry not emitted: `harness` not on PATH (stated once, proceeding, per skill rule).
+
+---
+
+## Round 7 — RESEQUENCED. New plan: write-guard reachability.
+
+User chose option 1. Reachability fixes go FIRST; the allowlist is blocked behind them (task #2
+blockedBy #5). New plan: `docs/plans/2026-07-25-write-guard-reachability.md` (539 lines, deliberately
+~1/3 the allowlist plan's size — over-specification was the recurring defect source there).
+
+**Scope decision.** Only FOUR of the six Codex findings are true reachability bugs in shipped code:
+P1-1 (orchestrator exemption), P1-5 (`CODING_TEAM_MAIN_ROOT`), P1-4 (stale-`None` cache), P1-6
+(documented bypass). P1-3, P2-7 and P1-2 are defects in code that does not exist yet (the matcher, the
+reader's duplicate-key handling, worktree declaration matching) — deferred to the allowlist plan and
+enumerated there so they cannot be lost.
+
+### rx-reviewer round 1 — HIGH finding, and it was a self-inflicted outage in MY plan
+
+My Task 1 "Fix A" was a blanket `is_orchestrator_file(...) and not is_instruction_file(...)`.
+Every claim below was re-verified by command here:
+
+- **204 obsidian-vault `.md` files** live under path components named `agents/`/`phases/`
+  (`find ~/Documents/obsidian-vault -name '*.md' | grep -cE '/(agents|phases|prompts|commands|steps|workers)/'`
+  → 204). KB notes with zero behavioral effect — nothing loads agent prompts from the vault. The
+  blanket conjunction blocks all 204 during any armed plan.
+- **The PAUL workflow dies.** `.paul/phases/<dir>/*.md` classifies as an instruction file, and
+  `check_phase5` runs at `write-guard.py:773` — BEFORE `check_paul_phase_gate` at `:779`. Verified by
+  reading both call sites. `.paul/` dirs live inside product repos (`~/src/engram/.paul` et al) and
+  there is a LIVE PAUL project at Phase 6.
+- **The suite stays green through both** — PAUL tests call `check_paul_phase_gate()` directly
+  (`test_write_guard.py:1319-1361`), never through `check_phase5`. No end-to-end coverage existed.
+
+**Root of my error: I treated the exemption list as homogeneous.** It is not — the four roots are
+exempt for three different reasons:
+
+| Root | Why exempt | Conjunction? |
+|---|---|---|
+| obsidian vault | content is never harness instructions; path shape is coincidence | NO |
+| `.paul/` | governed by a DIFFERENT gate downstream (`:779`) | NO — conditioning makes that gate unreachable |
+| `memory/` | orchestrator-owned data inside a repo | YES — `not is_instruction_file(...)` |
+| `/tmp` | scratch — UNLESS a real repo lives there | YES — keyed on repo containment, not file shape |
+
+Verified zero instruction-shaped files exist in any `memory/` dir today, so that conjunction breaks
+nothing. The `/tmp`-contains-a-repo case is the only genuinely exploitable part of P1-1.
+
+Plan now states the list is heterogeneous and instructs against collapsing it back — "simplifying" it
+is precisely how the outage returns. Added the missing end-to-end PAUL regression test.
+
+### Other applied findings
+- Task 2's E2E test must pass `CODING_TEAM_TEST_SEAM=""` explicitly, or once `_run()` sets the
+  sentinel the assertion inverts and looks like an implementation bug. Also corrected the plan's
+  claim about what `setdefault`→assignment fixes (it is the AMBIENT value, not the caller's).
+- Task 2 blast radius is bounded: exactly 4 in-repo setters, all one-line migrations, no external
+  consumer. Named them in the plan.
+- Task 4's verification grep is now scoped `-- phases/`; unscoped it matches this handoff at
+  `:478-479`, which QUOTES the workaround as review record and must not be edited to satisfy a step.
+- Task 3 must INVERT `test_no_plan_cached_as_none` (`test_active_plan.py:315-368`) — it asserts
+  `count == 1` and its name encodes None-caching as a feature. Named explicitly so it is not read as
+  a safety test and used to soften the fix.
+- Fix A + Fix B must land in ONE commit: Fix B alone WIDENS the exemption on macOS
+  (`/private/tmp/...` does not currently satisfy `startswith("/tmp")`).
+- Fix B must NOT resolve the input path (macOS `/tmp` handled by comparing against both spellings) —
+  resolving would canonicalize every edited path and add a syscall to every Edit/Write.
+- `phases/execution.md:22` documents the exemption Task 1 changes; added to Task 1 Step 6.
+- No deploy step needed anywhere in this plan: `~/.claude/hooks/write-guard.py` is a symlink to the
+  repo file and no copy of `_lib/active_plan.py` exists under `~/.claude/hooks/`.
+- Measurement target for Task 3: `docs/plans/` holds 38 `.md` files, each read IN FULL
+  (`_lib/active_plan.py:132`) before slicing to 4096 chars (`:139`).
+
+**No finding was rejected this round** — every rx-reviewer claim verified. Notable given how many
+false state-claims earlier rounds produced; this agent grounded everything in file content and said
+up front it had no Bash.
+
+### In flight
+`rx-codex` is running the Medium-tier Codex gate against the PRE-REVISION plan (Task 1's design has
+since changed materially). Letting it finish rather than killing it: its Tasks 2/3/4 findings remain
+valid, and any Task 1 finding that survives the redesign is worth having. Triage must mark which is
+which.
+
+### Advisory, out of scope (from rx-reviewer)
+`SKILL.md:161` still calls `/tmp/coding-team-session.json` a "structural dependency for Phase 5 edit
+guards, completeness checks, and recursion protection". Stale twice over — state is plan-file-derived
+now, and the recursion guard was removed (`phases/named-rationalizations.md:65`). Same family as Task
+4's false-claim cleanup; separate ticket.
+
+---
+
+## Round 8 — Codex gate on the reachability plan (rx-codex): REVISE, 3 P1 + 3 P2
+
+Proof supplied and checked: `codex exec ... | tee /tmp/second-opinion-review-rxcodex1.txt`, **262485**
+bytes, Codex v-, model gpt-5.6-sol, session 019f973e-3727-7390-9076-402dfbbd1260. Codex ran live repro
+subprocesses (real `git init` temp repos, real `find_active_plan_cached()` calls). All cited paths
+exist in-repo. Reviewed the PRE-REVISION plan, but nearly everything survived — Task 1's redesign did
+not touch Tasks 2-4.
+
+### P1-A — THE finding. My Task 4 was symptom-masking.
+
+`_git_main_root()` answers **"what repo is this PROCESS in?"** when the question that matters is
+**"what repo does this FILE belong to?"** That single authority-model mismatch produces all of:
+- `CODING_TEAM_MAIN_ROOT` honored unconditionally (`_lib/active_plan.py:91`)
+- `git rev-parse` invoked with NO env scrubbing, so `GIT_DIR`/`GIT_WORK_TREE` redirect the root
+- running from an unrelated repo, a non-repo cwd, or any repo with an empty `docs/plans/` disarms it
+- **the documented bypass at `phases/named-rationalizations.md:64` works BECAUSE of this**
+
+Task 4 deleted the sentence describing the technique while leaving the technique working. That is
+exactly the operator's banned pattern. **Task 2 is now the real fix:** derive the protected root from
+the EDITED FILE, walking up to the nearest ancestor containing `docs/plans/`. Resolve the target
+first (harness instruction files are reached through symlinks). No `docs/plans/` ancestor → dormant,
+with an explicit instruction NOT to fall back to cwd. Also scrub `GIT_DIR`/`GIT_WORK_TREE`, and keep
+`CODING_TEAM_MAIN_ROOT` only behind a paired `CODING_TEAM_TEST_SEAM=1`. Task 4 is now labelled
+documentation cleanup that does NOT close the hole.
+
+### P1-B — my plan overclaimed; claim rescoped
+
+Goal was "Make the instruction-file gate actually reachable" and the failure table closed with "No
+row's failure mode is a silent allow". Both FALSE. Verified open routes, now in a new
+**Accepted residual risk** table in the plan:
+- `CT_PRETOOLUSE_DISPATCHER_DISABLE=1` → `pretooluse-dispatcher.py:140`, `sys.exit(0)`, no guard runs
+- `CT_PRETOOLUSE_DISPATCHER_SKIP=write-guard.py` → `:63`, targeted skip
+- `write-guard.py:764` — `if tool_name not in ("Edit","Write"): return`, so a Bash `write_text()`
+  never reaches the guard
+- `write-guard.py:769` — falsey `file_path` silently returns
+- handler missing/timeout/start-failure → dispatcher returns `("","",0)` → fail-open
+
+Goal retitled to "Close four of the paths that disarm the gate". A follow-up ticket is required before
+anyone calls the gate sound.
+
+### P1-C — "never cache a None" was write-side only
+
+`_lib/active_plan.py:245-246` is `stored = entry.get("plan_path"); return Path(stored) if stored else
+None`. Ceasing to WRITE negative entries does not stop the reader SERVING a legacy or hand-written
+one; Codex reproduced it. Task 3 now requires all four: never write null entries; treat a falsey
+`plan_path` as a cache MISS on read; invalidate legacy entries via a version field; and bound `ts`
+against the future (the TTL check `now - ts < ttl` ACCEPTS a future timestamp, so a forged entry never
+expires). `ACTIVE_PLAN_CACHE_FILE` lets anything choose where that file lives.
+
+Stale POSITIVE results deferred to the allowlist plan's prerequisites: cached `a.md` while `b.md` is
+flipped with mtime restored returns `a.md` while the authoritative call raises Ambiguous — fails
+closed today, but MISIDENTIFIES the arming plan, which becomes an authorization hole once per-file
+authority attaches to that path. Also noted: plan create/delete/rename ARE already covered
+(`_compute_signature` gets a fresh glob); content-flip-with-restored-mtime is the only real hole.
+
+### P2 items applied
+- **P2-E, all three verified.** `phases/execution.md` is **218 lines**, so the plan's "neither file may
+  exceed 200" was unsatisfiable in place — now says edit in place, do not grow, file the trim
+  separately. `git grep` CANNOT see two more evasion copies at
+  `docs/plans/2026-06-14-coding-team-fastlane.md:567,:586` because `docs/plans/` is gitignored
+  (`.gitignore:2`) — verification switched to `grep -rn` over explicit paths, with `docs/handoff/`
+  excluded because it QUOTES the workaround as review record and must not be edited.
+- **P2-F.** Block assertions must exclude `HOOK CRASH`: `write-guard.py:828-846` converts ANY uncaught
+  exception into `decision: block`, so `assert decision == "block"` passes against a crashed hook.
+  Also flagged the three tests that already PASS pre-fix as regression locks, so the implementer does
+  not hunt a nonexistent fixture bug, and fixed the `-k` expression to select the unit class.
+- **P2-D.** Vault rule now pinned to the consecutive component pair `("Documents","obsidian-vault")`,
+  and all component checks declared LEXICAL (consistent with the no-resolve-input rule) — a symlink
+  alias into an exempt root is deliberately NOT exempt.
+- **P3-G.** "Let the plan reach `status: complete`" qualified as normal Phase 6 completion, not marking
+  a plan complete to unblock an unfinished edit.
+
+### State
+Plan is 696 lines, all python blocks parse, ruff clean. Task 2's design (root-from-file) is materially
+NEW and unreviewed by either gate — neither reviewed this mechanism. Codex offered round 3.
+
+### Tooling note from rx-codex, worth acting on
+`mcp__codesight__query` REJECTS any path outside `/Users/cevin/src/`, so it cannot serve this repo at
+all. Dispatch templates that mandate a codesight search are unsatisfiable here. Related: an earlier
+agent reported the codesight index as stale (returned two hook files that do not exist).
+
+---
+
+## Round 9 — Codex round 2 on the reachability plan (rx-codex-2): REVISE, 3 P1 + 2 P2
+
+Proof: `codex exec - < ...codex-prompt-r2.txt | tee /tmp/second-opinion-review-rxcodex2.txt`, **222878**
+bytes. It verified all 42 file:line refs in the plan resolve and say what the plan claims, and ran a
+green baseline (974/0/9) before dispatch. This round caught a REGRESSION, not just gaps — running it
+was the right call.
+
+### P1-1 — my root-from-file design REGRESSED worktrees. Verified.
+`_lib/active_plan.py:25-28` is an explicit contract: *"Worktrees and the primary checkout resolve to
+the same root, so the same plan directory is consulted from any worktree."* A linked worktree has no
+`docs/plans/` of its own (gitignored, exists only in the main checkout), so a walk up to the nearest
+`docs/plans/` ancestor finds NOTHING → dormant → edits allowed while the main checkout is armed.
+Strictly worse than today.
+
+### P1-2 — a deeper `docs/plans/` shadows an armed parent
+`/repo` armed; empty `/repo/component/docs/plans/` exists; editing `/repo/component/hooks/x.py`
+selects `/repo/component`, scans empty, allows. The shadowing dir need not be a repo. "Nearest" is
+only meaningful for genuine nested REPOSITORY ownership — a directory name cannot express that.
+
+### P1-3 — Tasks 1 and 2 mandated OPPOSITE resolution policies for the same input
+Task 1 Fix B req 5: `is_orchestrator_file()` runs LEXICALLY, never resolves. Task 2 req 1: resolve the
+target first. Exploit: `/tmp/alias` → armed `/repo`; edit `/tmp/alias/hooks/write-guard.py`; Task 2
+resolves into `/repo` and finds the plan, Task 1 sees a lexical `/tmp/...` path and exempts it as
+external scratch. Gate off. A worktree physically under `/tmp` fails identically.
+
+### The fix — one redesign closes all three
+Task 2 now uses **target-scoped git identity**, not a directory-name walk: `git -C <nearest EXISTING
+parent of target>` with `GIT_DIR`/`GIT_WORK_TREE` scrubbed, keeping BOTH answers separate —
+`--show-toplevel` (worktree root, for containment) and `--git-common-dir` (shared plan root, which is
+what preserves the worktree contract). Plus an explicit resolution-policy table: LEXICAL path answers
+"how was it spelled" (`is_orchestrator_file`), resolved/git identity answers "who owns it"
+(root + containment). `is_orchestrator_file()` must NOT recompute resolution internally.
+
+New tests: `test_worktree_consults_the_main_checkouts_plans` (real `git worktree add` — the regression
+lock), `test_empty_nested_docs_plans_does_not_shadow_an_armed_parent`,
+`test_symlinked_repo_alias_under_tmp_is_not_exempted`.
+
+### P2-4 — the migrated seam would have made two flagship tests vacuous. Verified.
+`_run(cwd=...)` does `run_env.setdefault("CODING_TEAM_MAIN_ROOT", str(cwd))`
+(`test_write_guard.py:94-110`). Once `_run()` also sets the sentinel, the root is FORCED to cwd and
+the production resolver never runs. Plan now requires a `_run(..., use_root_seam=False)` mode used by
+every root-resolution test, added as an explicit FIRST step.
+
+### P2-5 — Task 3 spec was complete, tests were not; residual note self-contradicted
+Only producer-side was tested. Added hand-written-cache tests for requirements 2-4 (null `plan_path` →
+miss, version-less legacy entry → miss, future `ts` → miss). Also deleted a residual note claiming a
+pre-change null entry "can still be served for up to the 5s TTL" — that contradicted requirement 3,
+which invalidates version-less entries. Confirmed requirement 2 is NOT dead code: a falsey
+`plan_path` stays reachable via a hand-written cache or redirected `ACTIVE_PLAN_CACHE_FILE`.
+
+### Cost — measured, no caching needed
+Codex prototyped on this tree: resolve+ancestor-walk ≈ 0.03 ms; uncached scan of 38 plans ≈ 0.96 ms.
+Negligible vs hook subprocess launch. Explicitly do NOT cache negative root results — that would
+reintroduce the Task 3 invalidation problem.
+
+### Pre-flight items also applied
+- `is_orchestrator_file()`'s `plan_root` is now declared keyword-only, OPTIONAL, default `None` (the
+  plan's own unit tests call it with one arg; optionality was never stated).
+- Corrected the deploy note: `~/.claude/hooks/_lib` IS a symlink
+  (`-> ../skills/coding-team/hooks/_lib`), so the path exists. Prior phrasing invited a reader to add
+  a deploy step or `cp` over the symlink.
+
+### Learning captured
+New `skills/second-opinion/codex-learnings.d/` entry **C28 — dual resolution policy for one input**
+(id verified unique; live set now 32). Pattern: a plan changes how a value is derived in one component
+while a sibling consumer or a documented contract still assumes the old derivation. Check before
+dispatch: grep all other readers of that value, AND grep docstrings/contracts asserting the old
+behavior — a documented invariant the change falsifies is a REGRESSION that no existing test will
+catch. That single check would have caught both P1-1 and P1-3.
+
+### State
+Plan is 798 lines, python blocks parse, ruff clean. No stale directory-walk residue (the only
+remaining mention is the deliberate "why not" rationale).
+
+---
+
+# ==== RESUME HERE (post-compaction, 2026-07-25) ====
+
+**Decision: IMPLEMENT the reachability plan.** Plan review is done — 3 rounds, all findings applied.
+Medium tier's post-execution Codex review will catch what plan review missed, against real code.
+
+## Read first
+`docs/plans/2026-07-25-write-guard-reachability.md` — 798 lines, 4 tasks, `status: planned`.
+**GITIGNORED**: it exists only in this working tree. It is the spec; this handoff is the rationale.
+
+## Do this
+Implement Tasks 1 → 2 → 3 in order (Task 4 is independent, any time). Per task: failing tests FIRST,
+then implementation, then FULL suite green, then lint, then commit with EXPLICIT paths (never
+`git add -A`).
+
+Branch is `fix/write-guard-plan-allowlist` (named for the sibling workstream; that is fine, do not
+rename mid-flight). Baseline to beat: **974 passed, 0 failed, 9 skipped**; `ruff check .` clean.
+
+## Non-negotiables — each cost a review round to find
+1. **Do NOT flip this plan to `status: in-progress`.** It edits `hooks/` and `phases/`, which the gate
+   covers, and the allowlist that would authorize them does not exist yet. The gate is dormant only
+   while no plan is in-progress — keep it that way for the whole implementation.
+2. **Do NOT collapse the orchestrator-exemption list into one uniform rule.** It is HETEROGENEOUS.
+   A blanket conjunction blocks 204 obsidian-vault notes and kills the PAUL workflow, and the suite
+   stays GREEN through both.
+3. **Do NOT use a `docs/plans/` ancestor walk for root derivation.** It regresses worktrees against
+   the documented contract at `_lib/active_plan.py:25-28`. Use target-scoped git identity, keeping
+   `--show-toplevel` and `--git-common-dir` as SEPARATE answers.
+4. **Do NOT let one resolution policy leak across the Task 1 / Task 2 boundary.** Lexical path answers
+   "how was it spelled"; git identity answers "who owns it". See learning C28.
+5. **Task 4 is documentation cleanup and must NOT be described as closing the bypass.** Task 2 closes
+   it in code.
+6. **Do NOT cache the root result.** Measured: 0.03 ms resolve, 0.96 ms scan — caching reintroduces
+   the Task 3 invalidation bug.
+7. Every block assertion must exclude `HOOK CRASH` — `write-guard.py:828-846` turns any exception into
+   a block, so `assert decision == "block"` passes against a crashed hook.
+8. Root-resolution tests need `_run(..., use_root_seam=False)` (add it first) or they are vacuous:
+   `_run(cwd=)` setdefaults `CODING_TEAM_MAIN_ROOT` (`test_write_guard.py:94-110`).
+
+## Session env
+This session carries `WRITE_GUARD_ALLOW_INSTRUCTION_EDIT=1` live from launch (removed from
+settings.json in `f6c70b9`, but the env block is read at session start). Harmless for this work — the
+gate is dormant anyway — but any manual verification of gate behavior must run in a RELAUNCHED session
+where `echo "[${WRITE_GUARD_ALLOW_INSTRUCTION_EDIT}]"` prints `[]`.
+
+## Routing
+Implementation goes through the Agent tool (`ct-implementer`), not orchestrator edits — `hooks/` and
+`phases/` are instruction files and ALWAYS delegate regardless of size.
+
+## After this plan lands
+Task #2 (allowlist, `docs/plans/2026-07-24-write-guard-plan-allowlist.md`, 1507 lines) unblocks. It
+carries deferred items P1-3 (duplicate frontmatter keys), P2-7 (`RuntimeError`/ELOOP + non-branch-
+specific `_assert_blocked`), P1-2 (worktree declaration matching), and the stale-POSITIVE cache
+misidentification. Tasks #3 and #4 are queued and independent.

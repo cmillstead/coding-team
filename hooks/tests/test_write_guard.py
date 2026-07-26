@@ -15,9 +15,13 @@ import base64
 import importlib.util
 import json
 import os
+import shutil
 import stat
 import subprocess
 import sys
+import tempfile
+import time
+import uuid
 from pathlib import Path
 
 import pytest
@@ -31,6 +35,7 @@ HOOK_PATH = HOOKS_DIR / "write-guard.py"
 if str(HOOKS_DIR) not in sys.path:
     sys.path.insert(0, str(HOOKS_DIR))
 
+from _lib.active_plan import _CACHE_ENTRY_VERSION, _compute_signature  # noqa: E402
 from _lib.graduated_checks import check_c1_path_trust  # noqa: E402
 
 
@@ -92,20 +97,34 @@ def _write_plan(repo_root: Path, name: str, body: str | None = None) -> Path:
 
 
 def _run(
-    event: dict, cwd: Path | None = None, env: dict | None = None
+    event: dict,
+    cwd: Path | None = None,
+    env: dict | None = None,
+    use_root_seam: bool = True,
 ) -> tuple[dict | None, str, str, int]:
     """Run write-guard.py with the given event; return (parsed_json, stdout, stderr, returncode).
 
-    When `cwd` is given, CODING_TEAM_MAIN_ROOT is set to it so active-plan
-    detection uses the test repo directly instead of depending on `git
-    rev-parse` succeeding in an ephemeral tmp repo (see _lib/active_plan.py).
-    An explicit `env` entry for the same key is not overridden.
+    When `cwd` is given and `use_root_seam` is True (the default), BOTH
+    CODING_TEAM_MAIN_ROOT and CODING_TEAM_TEST_SEAM are set (explicit
+    assignment, not setdefault) so active-plan detection uses the test repo
+    directly instead of depending on real git discovery succeeding for an
+    ephemeral tmp repo (see _lib/active_plan.py — the seam requires BOTH
+    vars paired, per P1-5). An explicit `env` entry for either key wins:
+    `run_env.update(env)` runs last, layering the caller's values on top of
+    whatever the seam set.
+
+    Set `use_root_seam=False` to exercise REAL target-scoped git discovery
+    (write-guard.py's `_resolve_target_git_roots()`) instead of the seam.
+    Required for any test asserting on actual git-identity resolution — with
+    the seam active, the root is FORCED to `cwd` regardless of which file is
+    being edited, which would make such a test vacuous.
     """
     run_env = None
     if cwd is not None or env is not None:
         run_env = dict(os.environ)
-        if cwd is not None:
-            run_env.setdefault("CODING_TEAM_MAIN_ROOT", str(cwd))
+        if cwd is not None and use_root_seam:
+            run_env["CODING_TEAM_MAIN_ROOT"] = str(cwd)
+            run_env["CODING_TEAM_TEST_SEAM"] = "1"
         if env is not None:
             run_env.update(env)
     result = subprocess.run(
@@ -314,10 +333,7 @@ class TestPhase5NoPipeline:
             },
         }
         parsed, stdout, _stderr, _rc = _run(event, cwd=repo)
-        assert parsed is not None and parsed.get("decision") == "block", (
-            f"expected block — in-progress plan should activate gate regardless of "
-            f"complete sibling, got {stdout!r}"
-        )
+        _assert_blocked_by_phase5(parsed, stdout)
 
 
 class TestPhase5AmbiguousState:
@@ -465,9 +481,7 @@ class TestPhase5ReferenceDataFilesAllowed:
             "tool_input": {"file_path": str(skill_md), "new_string": "altered"},
         }
         parsed, stdout, _stderr, _rc = _run(event, cwd=repo)
-        assert parsed is not None and parsed.get("decision") == "block", (
-            f"SKILL.md must remain gated, got {stdout!r}"
-        )
+        _assert_blocked_by_phase5(parsed, stdout)
 
     def test_still_blocks_agent_md_in_pipeline(self, repo: Path):
         """Regression guard: agents/*.md must STILL be gated."""
@@ -481,9 +495,7 @@ class TestPhase5ReferenceDataFilesAllowed:
             "tool_input": {"file_path": str(agent), "new_string": "altered"},
         }
         parsed, stdout, _stderr, _rc = _run(event, cwd=repo)
-        assert parsed is not None and parsed.get("decision") == "block", (
-            f"agents/*.md must remain gated, got {stdout!r}"
-        )
+        _assert_blocked_by_phase5(parsed, stdout)
 
     def test_still_blocks_hook_py_in_pipeline(self, repo: Path):
         """Regression guard: hooks/*.py must STILL be gated."""
@@ -497,9 +509,7 @@ class TestPhase5ReferenceDataFilesAllowed:
             "tool_input": {"file_path": str(hook), "new_string": "altered"},
         }
         parsed, stdout, _stderr, _rc = _run(event, cwd=repo)
-        assert parsed is not None and parsed.get("decision") == "block", (
-            f"hooks/*.py must remain gated, got {stdout!r}"
-        )
+        _assert_blocked_by_phase5(parsed, stdout)
 
     def test_allows_md_note_co_located_in_hooks_dir(self, repo: Path):
         """A .md note under a hooks dir is data, not an executable hook -> allow."""
@@ -515,6 +525,240 @@ class TestPhase5ReferenceDataFilesAllowed:
         parsed, _stdout, _stderr, _rc = _run(event, cwd=repo)
         if parsed is not None:
             assert parsed.get("decision") != "block"
+
+
+class TestOrchestratorExemptionDoesNotLaunderInstructionFiles:
+    """P1-1: the orchestrator exemption at check_phase5 must not launder
+    behavioral instruction files through memory/, and must not silently kill
+    the downstream PAUL gate by conditioning .paul/. The four exempt roots
+    are heterogeneous — see _orchestrator_exemption_category()'s docstring
+    for why each one is (or isn't) conjoined with is_instruction_file()."""
+
+    def _armed_plan(self, repo: Path) -> Path:
+        return _write_plan(repo, "plan.md")
+
+    @pytest.mark.parametrize(
+        "relpath",
+        [
+            "memory/agents/a.md",  # instruction file laundered through memory/
+            "memory/SKILL.md",
+        ],
+    )
+    def test_instruction_file_under_memory_is_blocked(self, repo, relpath):
+        self._armed_plan(repo)
+        target = repo / relpath
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("# Agent\n")
+        event = {
+            "tool_name": "Edit",
+            "tool_input": {"file_path": str(target), "new_string": "x"},
+        }
+        parsed, stdout, _stderr, _rc = _run(event, cwd=repo)
+        assert parsed is not None and parsed.get("decision") == "block", (
+            f"{relpath} is an instruction file and must NOT be laundered by "
+            f"the memory/ exemption — got {stdout!r}"
+        )
+        reason = parsed.get("reason", "")
+        assert "HOOK CRASH" not in reason, (
+            f"block came from a hook crash, not the Phase 5 gate: {stdout!r}"
+        )
+        assert "behavioral instruction-file edit" in reason, (
+            f"block reason is not the Phase 5 instruction-file gate: {stdout!r}"
+        )
+
+    def test_non_instruction_file_under_memory_is_still_allowed(self, repo):
+        """Regression lock: the memory/ exemption's real purpose survives."""
+        self._armed_plan(repo)
+        target = repo / "memory" / "notes.md"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("# Notes\n")
+        event = {
+            "tool_name": "Edit",
+            "tool_input": {"file_path": str(target), "new_string": "x"},
+        }
+        parsed, stdout, _stderr, _rc = _run(event, cwd=repo)
+        if parsed is not None:
+            assert parsed.get("decision") != "block", (
+                f"a non-instruction file under memory/ must stay exempt, got {stdout!r}"
+            )
+
+    def test_paul_artifact_is_NOT_blocked_by_an_armed_plan(self, repo):
+        """`.paul/` is exempt UNCONDITIONALLY — it has its own gate downstream
+        in main() (check_paul_phase_gate).
+
+        `.paul/phases/<dir>/*.md` classifies as an instruction file, so any
+        conjunction applied to `.paul` makes check_paul_phase_gate unreachable
+        and kills the PAUL workflow. No existing test covers this end to end —
+        the PAUL tests call check_paul_phase_gate() directly
+        (test_write_guard.py:1319-1361), so a regression here is silent.
+
+        F2: the assertion is UNCONDITIONAL (not gated behind
+        `if ... decision == "block"`) — a conditional assertion block passes
+        silently on an ALLOW, which is exactly what deleting or skipping
+        check_paul_phase_gate() would produce. The expected outcome here is
+        known and asserted positively: check_paul_phase_gate blocks this
+        exact fixture (DISCOVERY.md with no ASSUMPTIONS.md) with its own
+        ASSUMPTIONS.md-missing reason.
+        """
+        self._armed_plan(repo)
+        target = repo / ".paul" / "phases" / "03-x" / "DISCOVERY.md"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("# Discovery\n")
+        event = {
+            "tool_name": "Write",
+            "tool_input": {"file_path": str(target), "content": "x"},
+        }
+        parsed, stdout, _stderr, _rc = _run(event, cwd=repo)
+        assert parsed is not None and parsed.get("decision") == "block", (
+            f"expected check_paul_phase_gate to block (no ASSUMPTIONS.md "
+            f"present) — an ALLOW here means the PAUL gate was skipped or "
+            f"deleted, got {stdout!r}"
+        )
+        reason = parsed.get("reason", "")
+        assert "HOOK CRASH" not in reason, (
+            f"block came from a hook crash, not either gate: {stdout!r}"
+        )
+        assert "behavioral instruction-file edit" not in reason, (
+            f"PAUL artifact was blocked by the Phase 5 instruction gate, "
+            f"not the PAUL staircase — check_paul_phase_gate is now "
+            f"unreachable: {stdout!r}"
+        )
+        assert "PAUL phase '03-x' isn't assumed" in reason, (
+            f"expected check_paul_phase_gate's own ASSUMPTIONS.md-missing "
+            f"reason, got {stdout!r}"
+        )
+
+    def test_paul_artifact_is_NOT_blocked_by_ambiguous_plan_state(self, repo):
+        """P2-A: `.paul/` must stay UNCONDITIONALLY exempt even when the
+        active-plan lookup itself is ambiguous (two plans claiming
+        `status: in-progress`). Before the fix, the ambiguity block ran
+        BEFORE the exemption category was ever computed, so a `.paul/`
+        artifact was blocked with "cannot determine active plan state"
+        instead of ever reaching check_paul_phase_gate — making the PAUL
+        gate unreachable exactly when two plans race to in-progress.
+
+        F2: same unconditional-assertion fix as
+        test_paul_artifact_is_NOT_blocked_by_an_armed_plan above — the
+        check_paul_phase_gate() logic doesn't consult plan state at all, so
+        this fixture produces the identical ASSUMPTIONS.md-missing reason
+        (verified empirically); asserted here rather than assumed.
+        """
+        _write_plan(repo, "plan-a.md")
+        _write_plan(repo, "plan-b.md")  # two in-progress -> ambiguous
+
+        target = repo / ".paul" / "phases" / "03-x" / "DISCOVERY.md"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("# Discovery\n")
+        event = {
+            "tool_name": "Write",
+            "tool_input": {"file_path": str(target), "content": "x"},
+        }
+        parsed, stdout, _stderr, _rc = _run(event, cwd=repo)
+        assert parsed is not None and parsed.get("decision") == "block", (
+            f"expected check_paul_phase_gate to block (no ASSUMPTIONS.md "
+            f"present) — an ALLOW here means the PAUL gate was skipped or "
+            f"deleted, got {stdout!r}"
+        )
+        reason = parsed.get("reason", "")
+        assert "HOOK CRASH" not in reason, (
+            f"block came from a hook crash, not either gate: {stdout!r}"
+        )
+        assert "cannot determine active plan state" not in reason.lower(), (
+            f"a .paul/ artifact must not be shadowed by an ambiguous plan "
+            f"state — check_paul_phase_gate is now unreachable whenever "
+            f"two plans race to in-progress: {stdout!r}"
+        )
+        assert "PAUL phase '03-x' isn't assumed" in reason, (
+            f"expected check_paul_phase_gate's own ASSUMPTIONS.md-missing "
+            f"reason, got {stdout!r}"
+        )
+
+    def test_vault_note_under_agents_dir_is_still_allowed(self, repo, tmp_path):
+        """204 real vault notes live under `agents/`/`phases/` components.
+
+        They are KB reference notes with no behavioral effect. The vault
+        exemption is unconditional; a conjunction here blocks daily writes.
+        """
+        self._armed_plan(repo)
+        vault_note = repo / "Documents" / "obsidian-vault" / "AI" / "agents" / "note.md"
+        vault_note.parent.mkdir(parents=True, exist_ok=True)
+        vault_note.write_text("# Note\n")
+        event = {
+            "tool_name": "Edit",
+            "tool_input": {"file_path": str(vault_note), "new_string": "x"},
+        }
+        parsed, stdout, _stderr, _rc = _run(event, cwd=repo)
+        if parsed is not None:
+            assert parsed.get("decision") != "block", (
+                f"a vault note under an agents/ component must stay exempt, got {stdout!r}"
+            )
+
+
+class TestOrchestratorExemptionCategory:
+    """Structural-matching unit tests for _orchestrator_exemption_category().
+
+    Exercises the function directly — these are pure path-matching
+    questions, not pipeline-state questions, so no subprocess is needed.
+
+    P2-C: is_orchestrator_file() (the bool wrapper this class used to
+    target) is REMOVED, not merely re-tested. It had zero production
+    callers (check_phase5 calls _orchestrator_exemption_category directly)
+    and this class's own test_repo_under_tmp_does_not_get_a_free_pass
+    (long retired) pinned a containment shape production never actually
+    exercised that way — which is why the P1-A worktree bypass shipped
+    green. This also removed the function's `target_worktree_root`
+    parameter entirely: P1-A's fix made the /tmp branch a plain
+    `plan_root is not None` check, so there was no second value left to
+    compare against.
+
+    F3: the /tmp branch itself is GONE, not merely fixed. Codex confirmed
+    by probe that it was unreachable dead code in production —
+    check_phase5 only calls this function once plan_root is confirmed
+    non-None (it returns early on `plan_root is None` before ever reaching
+    this call), so a /tmp branch keyed on `plan_root is not None` could
+    never return anything but None. The tests that used to assert "/tmp
+    stays exempt" (test_tmp_is_exempt_on_both_spellings_when_no_plan_root,
+    test_tmp_scratch_without_any_plan_root_stays_exempt) and the P1-A
+    regression lock that asserted the corrected plan_root-truthy override
+    (test_plan_root_truthy_voids_tmp_exemption_unconditionally) are all
+    retired: /tmp is not a distinct exemption root anymore, so there is
+    nothing /tmp-specific left to test beyond
+    test_tmp_paths_are_not_exempt_at_all below — genuinely unowned /tmp
+    scratch is handled upstream, by check_phase5's own `plan_root is None`
+    early return, before this function is ever called at all.
+    """
+
+    def test_tmpfoo_is_not_exempt(self):
+        assert _WRITE_GUARD._orchestrator_exemption_category("/tmpfoo/repo/hooks/x.py") is None
+
+    def test_tmp_paths_are_not_exempt_at_all(self):
+        """F3: /tmp is no longer a distinct exemption root, with or without
+        plan_root — it falls through this function like any other
+        non-matching path. Replaces the four retired /tmp-specific tests
+        this class used to carry (see class docstring)."""
+        assert _WRITE_GUARD._orchestrator_exemption_category("/tmp/scratch.txt") is None
+        assert _WRITE_GUARD._orchestrator_exemption_category("/private/tmp/scratch.txt") is None
+        assert (
+            _WRITE_GUARD._orchestrator_exemption_category(
+                "/tmp/some-harness-repo/hooks/write-guard.py",
+                plan_root=Path("/tmp/some-harness-repo"),
+            )
+            is None
+        )
+
+    def test_mymemory_component_is_not_exempt(self):
+        assert _WRITE_GUARD._orchestrator_exemption_category("/repo/mymemory/note.md") is None
+
+    def test_path_error_is_not_exempt(self):
+        """Any path exception yields None (= not exempt = gate applies).
+
+        Defensive depth: requirement 2 forbids resolving the input, so this
+        is not reachable via ELOOP on the input today. Assert the contract
+        directly rather than via a symlink fixture, which would pass
+        vacuously — `tmp_path` is rooted at `<repo>/.pytest-tmp`
+        (conftest.py:61-64) and is not under any exempt root.
+        """
+        assert _WRITE_GUARD._orchestrator_exemption_category(None) is None
 
 
 class TestPhase5BlockMessageDiagnosability:
@@ -618,6 +862,440 @@ class TestPhase5OverrideEscapeHatch:
         )
         if parsed is not None:
             assert parsed.get("decision") != "block"
+
+
+def _assert_allowed(parsed, stdout, stderr, rc, what: str) -> None:
+    """Assert the hook ALLOWED — silently, or with an advisory allow.
+
+    Closes the vacuous-positive trap (an import-time crash also yields
+    `parsed is None`) WITHOUT asserting a silence the hook never promised:
+    check_identity_framing emits an advisory allow on agents/*.md and
+    SKILL.md edits that lack identity framing.
+    """
+    assert rc == 0, f"{what}: hook exited {rc}, stderr={stderr!r}"
+    assert "Traceback" not in stderr, f"{what}: hook crashed — {stderr!r}"
+    if parsed is None:
+        assert stdout.strip() == "", (
+            f"{what}: no JSON decision but stdout was not empty — {stdout!r}"
+        )
+    else:
+        assert parsed.get("decision") == "allow", (
+            f"{what}: expected an allow decision, got {stdout!r}"
+        )
+
+
+class TestPhase5InstructionAllowlist:
+    """A plan-declared instruction file is editable; an undeclared one is not."""
+
+    def _armed_plan(self, repo: Path, declared: str | None) -> Path:
+        body = "---\nstatus: in-progress\n"
+        if declared is not None:
+            body += f"instruction_files: {declared}\n"
+        body += "---\n\n# Plan\n"
+        return _write_plan(repo, "plan.md", body=body)
+
+    def _agent_file(self, repo: Path, name: str = "ct-qa-reviewer.md") -> Path:
+        agent = repo / "agents" / name
+        agent.parent.mkdir(parents=True, exist_ok=True)
+        agent.write_text("# Agent\nYou are the reviewer.\n")
+        return agent
+
+    def test_declared_file_is_allowed(self, repo: Path):
+        # Arrange
+        self._armed_plan(repo, "agents/ct-qa-reviewer.md")
+        agent = self._agent_file(repo)
+        # Act
+        event = {
+            "tool_name": "Edit",
+            "tool_input": {"file_path": str(agent), "new_string": "altered"},
+        }
+        parsed, stdout, stderr, rc = _run(event, cwd=repo)
+        # Assert
+        _assert_allowed(parsed, stdout, stderr, rc,
+                        "declared instruction file must be allowed")
+
+    def test_undeclared_file_is_blocked(self, repo: Path):
+        # Arrange
+        self._armed_plan(repo, "agents/ct-qa-reviewer.md")
+        other = self._agent_file(repo, "ct-spec-reviewer.md")
+        # Act
+        event = {
+            "tool_name": "Edit",
+            "tool_input": {"file_path": str(other), "new_string": "altered"},
+        }
+        parsed, stdout, stderr, rc = _run(event, cwd=repo)
+        # Assert
+        assert parsed is not None and parsed.get("decision") == "block", (
+            f"undeclared instruction file must be blocked, got {stdout!r}"
+        )
+
+    def test_block_message_names_the_declared_list(self, repo: Path):
+        # Arrange
+        self._armed_plan(repo, "agents/ct-qa-reviewer.md")
+        other = self._agent_file(repo, "ct-spec-reviewer.md")
+        # Act
+        event = {
+            "tool_name": "Edit",
+            "tool_input": {"file_path": str(other), "new_string": "altered"},
+        }
+        parsed, stdout, stderr, rc = _run(event, cwd=repo)
+        # Assert
+        assert parsed is not None, (
+            f"expected a block decision, got no JSON (rc={rc}, "
+            f"stderr={stderr!r})"
+        )
+        reason = parsed.get("reason", "")
+        assert "agents/ct-qa-reviewer.md" in reason, (
+            f"block message must name the declared allowlist, got {reason!r}"
+        )
+        assert "instruction_files" in reason, (
+            f"block message must say how to declare a file, got {reason!r}"
+        )
+
+    def test_multiple_declared_files_all_allowed(self, repo: Path):
+        # Arrange
+        self._armed_plan(
+            repo, "agents/ct-spec-reviewer.md, agents/ct-qa-reviewer.md"
+        )
+        # Act + Assert
+        for name in ("ct-spec-reviewer.md", "ct-qa-reviewer.md"):
+            agent = self._agent_file(repo, name)
+            event = {
+                "tool_name": "Edit",
+                "tool_input": {"file_path": str(agent), "new_string": "x"},
+            }
+            parsed, stdout, stderr, rc = _run(event, cwd=repo)
+            _assert_allowed(parsed, stdout, stderr, rc,
+                            f"{name} was declared but blocked")
+
+    def test_no_key_blocks_every_instruction_edit(self, repo: Path):
+        """BACK-COMPAT: an armed plan with no `instruction_files` key blocks
+        everything, exactly as it did before the allowlist existed."""
+        # Arrange
+        self._armed_plan(repo, None)
+        agent = self._agent_file(repo)
+        # Act
+        event = {
+            "tool_name": "Edit",
+            "tool_input": {"file_path": str(agent), "new_string": "altered"},
+        }
+        parsed, stdout, stderr, rc = _run(event, cwd=repo)
+        # Assert
+        assert parsed is not None and parsed.get("decision") == "block", (
+            f"no-key plan must block all instruction edits, got {stdout!r}"
+        )
+
+    def test_declared_file_does_not_unblock_non_instruction_paths(self, repo: Path):
+        """Declaring a file must not change the non-instruction allow path."""
+        # Arrange
+        self._armed_plan(repo, "agents/ct-qa-reviewer.md")
+        src = repo / "src" / "main.py"
+        src.parent.mkdir(parents=True)
+        src.write_text("x = 1\n")
+        # Act
+        event = {
+            "tool_name": "Edit",
+            "tool_input": {"file_path": str(src), "new_string": "x = 2\n"},
+        }
+        parsed, stdout, stderr, rc = _run(event, cwd=repo)
+        # Assert
+        _assert_allowed(parsed, stdout, stderr, rc,
+                        "non-instruction file must be allowed")
+
+
+def _assert_blocked_by_phase5(parsed, stdout: str) -> None:
+    """Shared P2-D helper: a bare `decision == "block"` passes against a
+    crashed hook too (write-guard.py's top-level handler turns ANY
+    exception into a block) — every block assertion for the Phase 5
+    instruction-file gate must exclude HOOK CRASH and require the
+    gate-specific reason substring. Module-level (not class-bound) so
+    every test class in this file can share it.
+    """
+    assert parsed is not None and parsed.get("decision") == "block", (
+        f"expected block, got {stdout!r}"
+    )
+    reason = parsed.get("reason", "")
+    assert "HOOK CRASH" not in reason, f"block came from a hook crash: {stdout!r}"
+    assert "behavioral instruction-file edit" in reason, (
+        f"block reason is not the Phase 5 instruction-file gate: {stdout!r}"
+    )
+
+
+class TestTargetScopedRootResolution:
+    """P1-5: the protected root is derived from the EDITED FILE's own git
+    identity, not from the process's cwd. Every test here uses
+    `use_root_seam=False` so real target-scoped git discovery
+    (`_resolve_target_git_roots()`) actually runs — with the seam active
+    the root would be forced to `cwd` regardless of the file being edited,
+    making these tests vacuous. Every block assertion excludes HOOK CRASH
+    and requires the Phase-5-specific reason substring, per
+    TestOrchestratorExemptionDoesNotLaunderInstructionFiles's pattern —
+    write-guard.py's top-level handler turns ANY exception into a block,
+    so a bare `decision == "block"` would pass against a crashed hook.
+    """
+
+    def _armed_repo_with_instruction_file(self, root: Path) -> Path:
+        """Init a git repo at ROOT, arm a plan, and write an instruction file.
+
+        Returns the instruction file's path.
+        """
+        _init_repo(root)
+        _write_plan(root, "plan.md")
+        instr = root / "skills" / "demo" / "SKILL.md"
+        instr.parent.mkdir(parents=True)
+        instr.write_text("# Demo\nYou are demo.\n")
+        return instr
+
+    def _assert_blocked_by_phase5(self, parsed, stdout: str) -> None:
+        _assert_blocked_by_phase5(parsed, stdout)
+
+    def test_root_follows_the_edited_file_not_the_cwd(self, tmp_path: Path):
+        """The documented bypass (cd to a repo with no plans) asserted closed.
+
+        An armed plan lives only in repo-a. Running the hook with cwd set to
+        an unrelated repo-b (no plans at all) must NOT disarm the gate for
+        an edit to a file that physically belongs to repo-a.
+        """
+        repo_a = tmp_path / "repo-a"
+        repo_a.mkdir()
+        instr = self._armed_repo_with_instruction_file(repo_a)
+
+        repo_b = tmp_path / "repo-b"
+        repo_b.mkdir()
+        _init_repo(repo_b)  # unrelated repo, no plans
+
+        event = {
+            "tool_name": "Edit",
+            "tool_input": {"file_path": str(instr), "new_string": "altered"},
+        }
+        parsed, stdout, _stderr, _rc = _run(event, cwd=repo_b, use_root_seam=False)
+        self._assert_blocked_by_phase5(parsed, stdout)
+
+    @pytest.mark.parametrize(
+        "case_id,env_builder",
+        [
+            (
+                "GIT_DIR+GIT_WORK_TREE",
+                lambda repo_a, empty_repo: {
+                    "GIT_DIR": str(empty_repo / ".git"),
+                    "GIT_WORK_TREE": str(empty_repo),
+                },
+            ),
+            (
+                "GIT_COMMON_DIR",
+                lambda repo_a, empty_repo: {"GIT_COMMON_DIR": str(empty_repo / ".git")},
+            ),
+            (
+                "GIT_CEILING_DIRECTORIES",
+                lambda repo_a, empty_repo: {"GIT_CEILING_DIRECTORIES": str(repo_a)},
+            ),
+            (
+                "unknown_GIT_var_default_deny",
+                lambda repo_a, empty_repo: {"GIT_TOTALLY_MADE_UP": "anything"},
+            ),
+        ],
+    )
+    def test_git_env_vars_cannot_redirect_the_root(self, tmp_path: Path, case_id, env_builder):
+        """F1: no GIT_*-prefixed env var can redirect target-scoped discovery
+        away from the edited file's real owning repo — not just GIT_DIR and
+        GIT_WORK_TREE (the two that were ALREADY scrubbed before P1-B and so
+        prove nothing about the allowlist inversion). GIT_COMMON_DIR and
+        GIT_CEILING_DIRECTORIES are the two Codex reproduced as live
+        bypasses pre-fix; GIT_TOTALLY_MADE_UP locks the allowlist's
+        default-deny direction — an unrecognized GIT_* var must be
+        stripped, not kept, so a future git version's new env var is
+        stripped by default rather than silently trusted.
+        """
+        repo_a = tmp_path / "repo-a"
+        repo_a.mkdir()
+        instr = self._armed_repo_with_instruction_file(repo_a)
+
+        empty_repo = tmp_path / "empty-repo"
+        empty_repo.mkdir()
+        _init_repo(empty_repo)  # no docs/plans
+
+        event = {
+            "tool_name": "Edit",
+            "tool_input": {"file_path": str(instr), "new_string": "altered"},
+        }
+        parsed, stdout, _stderr, _rc = _run(
+            event,
+            use_root_seam=False,
+            env=env_builder(repo_a, empty_repo),
+        )
+        self._assert_blocked_by_phase5(parsed, stdout)
+
+    def test_worktree_consults_the_main_checkouts_plans(self, tmp_path: Path):
+        """Regression lock for the contract at _lib/active_plan.py's module
+        docstring: worktrees and the primary checkout resolve to the same
+        plan_root. A plan armed ONLY in the main checkout must still gate an
+        edit made inside a linked worktree. A directory-name walk up from
+        the worktree would fail this (docs/plans/ doesn't exist there,
+        gitignored and only present in the main checkout); target-scoped
+        `--git-common-dir` passes it.
+        """
+        main_repo = tmp_path / "main-repo"
+        main_repo.mkdir()
+        self._armed_repo_with_instruction_file(main_repo)  # armed in main only
+
+        worktree_dir = tmp_path / "wt-checkout"
+        subprocess.run(
+            [
+                "git", "-C", str(main_repo), "worktree", "add", "-q",
+                "-b", "wt-branch", str(worktree_dir),
+            ],
+            check=True,
+            capture_output=True,
+        )
+
+        instr = worktree_dir / "skills" / "demo" / "SKILL.md"
+        instr.parent.mkdir(parents=True)
+        instr.write_text("# Demo\nYou are demo.\n")
+
+        event = {
+            "tool_name": "Edit",
+            "tool_input": {"file_path": str(instr), "new_string": "altered"},
+        }
+        parsed, stdout, _stderr, _rc = _run(event, use_root_seam=False)
+        self._assert_blocked_by_phase5(parsed, stdout)
+
+    def test_empty_nested_docs_plans_does_not_shadow_an_armed_parent(self, tmp_path: Path):
+        """An empty docs/plans/ nested under a subdirectory of the armed
+        repo must not shadow the armed parent — target-scoped resolution
+        only ever consults <owning-repo-root>/docs/plans/, never a
+        directory-name walk that could stop at the nested empty one."""
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        self._armed_repo_with_instruction_file(repo)
+
+        nested_empty = repo / "component" / "docs" / "plans"
+        nested_empty.mkdir(parents=True)
+
+        instr = repo / "component" / "hooks" / "x.py"
+        instr.parent.mkdir(parents=True)
+        instr.write_text("print('hi')\n")
+
+        event = {
+            "tool_name": "Edit",
+            "tool_input": {"file_path": str(instr), "new_string": "altered"},
+        }
+        parsed, stdout, _stderr, _rc = _run(event, use_root_seam=False)
+        self._assert_blocked_by_phase5(parsed, stdout)
+
+    def test_symlinked_repo_alias_under_tmp_is_not_exempted(self, tmp_path: Path):
+        """P1-1 x P1-5 interaction: is_instruction_file() classification is
+        LEXICAL (spelling says /tmp), but repo OWNERSHIP is resolved (the
+        alias resolves to the armed repo) — ownership must win for the /tmp
+        exemption decision, or a /tmp symlink alias would launder any
+        instruction-file edit around the gate."""
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        self._armed_repo_with_instruction_file(repo)
+        (repo / "hooks").mkdir()
+        hook_file = repo / "hooks" / "write-guard.py"
+        hook_file.write_text("print('hi')\n")
+
+        alias = Path("/tmp") / f"wg-alias-{uuid.uuid4().hex[:8]}"
+        alias.symlink_to(repo)
+        try:
+            aliased_path = alias / "hooks" / "write-guard.py"
+            event = {
+                "tool_name": "Edit",
+                "tool_input": {"file_path": str(aliased_path), "new_string": "altered"},
+            }
+            parsed, stdout, _stderr, _rc = _run(event, use_root_seam=False)
+            self._assert_blocked_by_phase5(parsed, stdout)
+        finally:
+            alias.unlink()
+
+    def test_linked_worktree_under_real_tmp_is_not_exempted(self, tmp_path: Path):
+        """P1-A: a linked worktree living under a GENUINE /tmp path (not
+        `.pytest-tmp`) must still be gated. The main checkout can live
+        anywhere; only the worktree itself needs to be under literal /tmp,
+        since that's what reaches the /tmp branch in
+        _orchestrator_exemption_category().
+
+        This is NOT covered by test_worktree_consults_the_main_checkouts_plans
+        above — that test's worktree lives under the repo-rooted `tmp_path`
+        fixture (`.pytest-tmp`), never under literal /tmp, so it cannot
+        exercise the /tmp branch at all. Reproduced against the pre-fix
+        code: this exact scenario returned `decision: allow`.
+        """
+        main_repo = tmp_path / "main-repo"
+        main_repo.mkdir()
+        self._armed_repo_with_instruction_file(main_repo)  # armed in main only
+
+        worktree_dir = Path("/tmp") / f"wg-worktree-{uuid.uuid4().hex[:8]}"
+        subprocess.run(
+            [
+                "git", "-C", str(main_repo), "worktree", "add", "-q",
+                "-b", f"wt-branch-{uuid.uuid4().hex[:8]}", str(worktree_dir),
+            ],
+            check=True,
+            capture_output=True,
+        )
+        try:
+            instr = worktree_dir / "skills" / "demo" / "SKILL.md"
+            instr.parent.mkdir(parents=True)
+            instr.write_text("# Demo\nYou are demo.\n")
+
+            event = {
+                "tool_name": "Edit",
+                "tool_input": {"file_path": str(instr), "new_string": "altered"},
+            }
+            parsed, stdout, _stderr, _rc = _run(event, use_root_seam=False)
+            self._assert_blocked_by_phase5(parsed, stdout)
+        finally:
+            subprocess.run(
+                ["git", "-C", str(main_repo), "worktree", "remove", "--force", str(worktree_dir)],
+                capture_output=True,
+            )
+            shutil.rmtree(worktree_dir, ignore_errors=True)
+
+    def test_file_outside_any_git_repo_is_dormant(self):
+        """A file with no owning git repo at all is never pipeline-gated —
+        target-scoped discovery must NOT fall back to cwd (that would
+        reintroduce the defect this resolution scheme exists to close)."""
+        outside = Path(tempfile.mkdtemp(prefix="wg-no-repo-"))
+        try:
+            instr = outside / "skills" / "demo" / "SKILL.md"
+            instr.parent.mkdir(parents=True)
+            instr.write_text("# Demo\nYou are demo.\n")
+            event = {
+                "tool_name": "Edit",
+                "tool_input": {"file_path": str(instr), "new_string": "altered"},
+            }
+            parsed, stdout, _stderr, _rc = _run(event, use_root_seam=False)
+            if parsed is not None:
+                assert parsed.get("decision") != "block", (
+                    f"a file outside any git repo must not be pipeline-gated, got {stdout!r}"
+                )
+        finally:
+            shutil.rmtree(outside, ignore_errors=True)
+
+    def test_ambient_main_root_override_is_ignored_end_to_end(self, repo: Path):
+        """P1-5 end-to-end: an ambient CODING_TEAM_MAIN_ROOT pointed at an
+        empty dir must not disarm the gate — without the paired sentinel,
+        real target-scoped git discovery takes over regardless. Passes
+        CODING_TEAM_TEST_SEAM="" explicitly: once _run() sets the sentinel
+        for every cwd invocation (use_root_seam defaults to True here), the
+        env-supplied root would otherwise be honored and this assertion
+        would invert.
+        """
+        instr = self._armed_repo_with_instruction_file(repo)  # note: repo IS init'd by fixture already
+        empty_dir = repo.parent / "unrelated-empty"
+        empty_dir.mkdir()
+
+        event = {
+            "tool_name": "Edit",
+            "tool_input": {"file_path": str(instr), "new_string": "altered"},
+        }
+        parsed, stdout, _stderr, _rc = _run(
+            event,
+            cwd=repo,
+            env={"CODING_TEAM_MAIN_ROOT": str(empty_dir), "CODING_TEAM_TEST_SEAM": ""},
+        )
+        self._assert_blocked_by_phase5(parsed, stdout)
 
 
 # ---------------------------------------------------------------------------
@@ -1096,10 +1774,9 @@ class TestGraduatedC1Advisory:
         parsed, stdout, _stderr, _rc = _run(event, cwd=repo, env=env)
         lines = [line for line in stdout.strip().splitlines() if line.strip()]
         assert len(lines) == 1, (
-            f"Expected exactly 1 JSON line, got {len(lines)}: {stdout!r}"
+            f"Expected exactly 1 JSON line (single-emission), got {len(lines)}: {stdout!r}"
         )
-        assert parsed is not None
-        assert parsed["decision"] == "block"
+        _assert_blocked_by_phase5(parsed, stdout)
 
 
 # ---------------------------------------------------------------------------
@@ -1188,9 +1865,7 @@ class TestConftestEnvScrub:
         assert parsed is not None, (
             f"hook produced no parseable JSON — expected a block decision: {stdout!r}"
         )
-        assert parsed["decision"] == "block", (
-            f"expected block (scrub removed override flags from ambient env), got {parsed!r}"
-        )
+        _assert_blocked_by_phase5(parsed, stdout)
 
 
 # ---------------------------------------------------------------------------
@@ -1598,3 +2273,396 @@ class TestPaulPhaseGateFailOpen:
             # (the path is gone, but the function should handle it)
         except Exception as exc:  # noqa: BLE001  # testing fail-open
             pytest.fail(f"check_paul_phase_gate raised when stat fails: {exc}")
+
+
+class TestPhase5AllowlistAdversarial:
+    """Near-miss, traversal, and malformed inputs must never authorize an edit."""
+
+    def _armed_plan(self, repo: Path, declared: str) -> Path:
+        return _write_plan(
+            repo,
+            "plan.md",
+            body=(
+                f"---\nstatus: in-progress\n"
+                f"instruction_files: {declared}\n---\n\n# Plan\n"
+            ),
+        )
+
+    def _assert_blocked(
+        self, repo: Path, target: Path, why: str, reason_substring: str
+    ):
+        """Assert BLOCK for the SPECIFIC reason under test (D4 / P2-7b).
+
+        A bare `decision == "block"` passes against a hook that blocked for
+        the WRONG reason — e.g. a crash, or the ambiguity branch firing
+        instead of the allowlist branch — which is the exact vacuity a
+        regression could hide behind. `reason_substring` pins the check to
+        the gate actually under test; the `HOOK CRASH` exclusion additionally
+        guards against a crash message that happens to contain
+        `reason_substring` by coincidence.
+        """
+        event = {
+            "tool_name": "Edit",
+            "tool_input": {"file_path": str(target), "new_string": "altered"},
+        }
+        parsed, stdout, stderr, rc = _run(event, cwd=repo)
+        assert parsed is not None and parsed.get("decision") == "block", (
+            f"{why} — expected BLOCK, got {stdout!r}"
+        )
+        reason = parsed.get("reason", "")
+        assert "HOOK CRASH" not in reason, (
+            f"{why} — blocked via a hook crash, not the gate under test: "
+            f"{reason!r}"
+        )
+        assert reason_substring in reason, (
+            f"{why} — expected {reason_substring!r} in the block reason, "
+            f"got {reason!r}"
+        )
+
+    def test_suffix_near_miss_not_authorized(self, repo: Path):
+        """`agents/a.md.backup.md` must NOT be authorized by `agents/a.md`.
+
+        Deliberately NOT `a.md.bak`: `is_instruction_file()` gates on the
+        `.md` suffix, so a `.bak` file is never gated and would be allowed
+        for an unrelated reason — a green test proving nothing. The near-miss
+        must stay gated to exercise the matcher.
+        """
+        self._armed_plan(repo, "agents/a.md")
+        near_md = repo / "agents" / "a.md.backup.md"
+        near_md.parent.mkdir(parents=True)
+        near_md.write_text("x")
+        self._assert_blocked(
+            repo, near_md, "suffix near-miss must not match the declared path",
+            "behavioral instruction-file edit",
+        )
+
+    def test_nested_prefix_collision_not_authorized(self, repo: Path):
+        """`evil/agents/a.md` must NOT be authorized by `agents/a.md`."""
+        self._armed_plan(repo, "agents/a.md")
+        evil = repo / "evil" / "agents" / "a.md"
+        evil.parent.mkdir(parents=True)
+        evil.write_text("x")
+        self._assert_blocked(
+            repo, evil, "nested path collision must not match",
+            "behavioral instruction-file edit",
+        )
+
+    def test_traversal_entry_blocks_everything(self, repo: Path):
+        """A `../../../etc/passwd` entry is malformed -> fail closed."""
+        self._armed_plan(repo, "../../../etc/passwd")
+        agent = repo / "agents" / "a.md"
+        agent.parent.mkdir(parents=True)
+        agent.write_text("x")
+        self._assert_blocked(
+            repo, agent, "traversal entry must make the allowlist malformed",
+            "declaration is unusable",
+        )
+
+    def test_traversal_entry_does_not_authorize_its_target(self, repo: Path):
+        """The traversal target itself must not become editable."""
+        self._armed_plan(repo, "../outside/SKILL.md")
+        outside = repo.parent / "outside" / "SKILL.md"
+        outside.parent.mkdir(parents=True, exist_ok=True)
+        outside.write_text("x")
+        self._assert_blocked(
+            repo, outside, "a traversal entry must authorize nothing",
+            "declaration is unusable",
+        )
+
+    def test_absolute_entry_blocks_everything(self, repo: Path):
+        self._armed_plan(repo, "/etc/passwd")
+        agent = repo / "agents" / "a.md"
+        agent.parent.mkdir(parents=True)
+        agent.write_text("x")
+        self._assert_blocked(
+            repo, agent, "absolute entry must make the allowlist malformed",
+            "declaration is unusable",
+        )
+
+    def test_empty_value_blocks_everything(self, repo: Path):
+        _write_plan(
+            repo,
+            "plan.md",
+            body="---\nstatus: in-progress\ninstruction_files:\n---\n\n# Plan\n",
+        )
+        agent = repo / "agents" / "a.md"
+        agent.parent.mkdir(parents=True)
+        agent.write_text("x")
+        self._assert_blocked(
+            repo, agent, "empty instruction_files must fail closed",
+            "declaration is unusable",
+        )
+
+    def test_uppercase_basename_declaration_round_trips(self, repo: Path):
+        """`SKILL.md` must survive frontmatter parsing without lowercasing."""
+        self._armed_plan(repo, "skills/demo/SKILL.md")
+        skill = repo / "skills" / "demo" / "SKILL.md"
+        skill.parent.mkdir(parents=True)
+        skill.write_text("# Demo\nYou are demo.\n")
+        event = {
+            "tool_name": "Edit",
+            "tool_input": {"file_path": str(skill), "new_string": "altered"},
+        }
+        parsed, stdout, stderr, rc = _run(event, cwd=repo)
+        _assert_allowed(parsed, stdout, stderr, rc,
+                        "SKILL.md declaration must round-trip "
+                        "case-sensitively")
+
+    def test_override_env_still_works_with_allowlist_present(self, repo: Path):
+        """Constraint: WRITE_GUARD_ALLOW_INSTRUCTION_EDIT remains functional."""
+        self._armed_plan(repo, "agents/a.md")
+        other = repo / "agents" / "undeclared.md"
+        other.parent.mkdir(parents=True)
+        other.write_text("x")
+        event = {
+            "tool_name": "Edit",
+            "tool_input": {"file_path": str(other), "new_string": "altered"},
+        }
+        parsed, stdout, stderr, rc = _run(
+            event, cwd=repo, env={"WRITE_GUARD_ALLOW_INSTRUCTION_EDIT": "1"}
+        )
+        _assert_allowed(parsed, stdout, stderr, rc,
+                        "env override must still allow an undeclared "
+                        "edit")
+
+    def test_no_active_plan_gate_stays_dormant(self, repo: Path):
+        """No in-progress plan -> allowlist is irrelevant -> allow."""
+        _write_plan(
+            repo,
+            "done.md",
+            body=(
+                "---\nstatus: complete\n"
+                "instruction_files: agents/a.md\n---\n\n# Done\n"
+            ),
+        )
+        other = repo / "agents" / "undeclared.md"
+        other.parent.mkdir(parents=True)
+        other.write_text("x")
+        event = {
+            "tool_name": "Edit",
+            "tool_input": {"file_path": str(other), "new_string": "altered"},
+        }
+        parsed, stdout, stderr, rc = _run(event, cwd=repo)
+        _assert_allowed(parsed, stdout, stderr, rc,
+                        "a `status: complete` plan must not arm the "
+                        "gate")
+
+    def test_ambiguous_state_still_blocks_despite_allowlist(self, repo: Path):
+        """Two in-progress plans -> ambiguity block wins over the allowlist."""
+        for name in ("plan-a.md", "plan-b.md"):
+            _write_plan(
+                repo,
+                name,
+                body=(
+                    "---\nstatus: in-progress\n"
+                    "instruction_files: agents/a.md\n---\n\n# Plan\n"
+                ),
+            )
+        agent = repo / "agents" / "a.md"
+        agent.parent.mkdir(parents=True)
+        agent.write_text("x")
+        event = {
+            "tool_name": "Edit",
+            "tool_input": {"file_path": str(agent), "new_string": "altered"},
+        }
+        parsed, stdout, stderr, rc = _run(event, cwd=repo)
+        assert parsed is not None and parsed.get("decision") == "block", (
+            f"ambiguity must block even a declared file, got {stdout!r}"
+        )
+        assert "cannot determine active plan state" in parsed.get(
+            "reason", ""
+        ).lower()
+
+    def test_declared_but_unreadable_plan_blocks(self, repo: Path):
+        """chmod 000 on the arming plan -> fail closed.
+
+        NOTE the path this actually exercises: `find_active_plan()` raises
+        `AmbiguousActivePlanError` on an unreadable plan
+        (`_lib/active_plan.py:133-137`) BEFORE `check_phase5()` reaches the
+        allowlist reader, so this blocks via the ambiguity branch
+        (`write-guard.py:175-184`), NOT via the reader's own unreadable
+        branch. It is still a genuine fail-closed assertion and must stay —
+        it just is not evidence that the READER handles an unreadable plan.
+        That branch is covered only by T1's `test_unreadable_plan_raises`,
+        which calls the reader directly.
+        """
+        plan = self._armed_plan(repo, "agents/a.md")
+        agent = repo / "agents" / "a.md"
+        agent.parent.mkdir(parents=True)
+        agent.write_text("x")
+        plan.chmod(0)
+        try:
+            event = {
+                "tool_name": "Edit",
+                "tool_input": {"file_path": str(agent), "new_string": "x"},
+            }
+            parsed, stdout, stderr, rc = _run(event, cwd=repo)
+        finally:
+            plan.chmod(stat.S_IRUSR | stat.S_IWUSR)
+        assert parsed is not None and parsed.get("decision") == "block", (
+            f"unreadable arming plan must fail closed, got {stdout!r}"
+        )
+
+    def test_block_emits_exactly_one_json_object(self, repo: Path):
+        """Single-emission contract holds for the new block message."""
+        self._armed_plan(repo, "agents/a.md")
+        other = repo / "agents" / "undeclared.md"
+        other.parent.mkdir(parents=True)
+        other.write_text("x")
+        event = {
+            "tool_name": "Edit",
+            "tool_input": {
+                "file_path": str(other),
+                "new_string": "repoPath = '/tmp'\n",
+            },
+        }
+        parsed, stdout, stderr, rc = _run(event, cwd=repo)
+        lines = [ln for ln in stdout.strip().splitlines() if ln.strip()]
+        assert len(lines) == 1, (
+            f"expected exactly 1 JSON line, got {len(lines)}: {stdout!r}"
+        )
+        assert parsed["decision"] == "block"
+        reason = parsed.get("reason", "")
+        assert "HOOK CRASH" not in reason, f"blocked via a crash: {reason!r}"
+        assert "behavioral instruction-file edit" in reason, (
+            f"expected the undeclared-file block reason, got {reason!r}"
+        )
+
+    def test_declared_file_allowed_from_linked_worktree(self, tmp_path: Path):
+        """D2 regression lock, modeled on
+        TestTargetScopedRootResolution.test_worktree_consults_the_main_checkouts_plans
+        (same file). Pre-D2 this failed CLOSED (falsely BLOCKED): declared
+        entries resolved against `plan_root` (the main checkout, via
+        `--git-common-dir`) while `file_path` resolved to the worktree's own
+        top-level directory — the two paths could never structurally match.
+        Uses `use_root_seam=False` so REAL target-scoped git discovery runs;
+        with the seam on, the root is FORCED to `cwd` regardless of which
+        file is edited, which would make this test pass vacuously whether or
+        not D2 is implemented.
+        """
+        # Arrange
+        main_repo = tmp_path / "main-repo"
+        main_repo.mkdir()
+        _init_repo(main_repo)
+        _write_plan(
+            main_repo,
+            "plan.md",
+            body=(
+                "---\nstatus: in-progress\n"
+                "instruction_files: agents/declared.md\n---\n\n# Plan\n"
+            ),
+        )
+
+        worktree_dir = tmp_path / "wt-checkout"
+        subprocess.run(
+            [
+                "git", "-C", str(main_repo), "worktree", "add", "-q",
+                "-b", "wt-branch", str(worktree_dir),
+            ],
+            check=True,
+            capture_output=True,
+        )
+
+        declared = worktree_dir / "agents" / "declared.md"
+        declared.parent.mkdir(parents=True)
+        declared.write_text("# Agent\n")
+
+        # Act
+        event = {
+            "tool_name": "Edit",
+            "tool_input": {"file_path": str(declared), "new_string": "altered"},
+        }
+        parsed, stdout, stderr, rc = _run(event, use_root_seam=False)
+
+        # Assert
+        _assert_allowed(
+            parsed, stdout, stderr, rc,
+            "a file declared repo-relative to its own worktree must be "
+            "allowed, not falsely blocked by a main-checkout-rooted "
+            "resolution",
+        )
+
+    def test_stale_cache_hit_does_not_launder_a_misidentified_plan(
+        self, repo: Path
+    ):
+        """D1 regression lock.
+
+        CANNOT be constructed by two ordinary writes: `_compute_signature()`
+        (`hooks/_lib/active_plan.py:556`) hashes `st_mtime_ns` for every
+        `*.md` in the plans dir (candidates gathered at `:661-664`), so an
+        ordinary flip of plan B to `in-progress` changes B's mtime (or, if B
+        is newly created, changes the candidate list itself) and busts the
+        cached signature, forcing a rescan — the stale-positive hit this
+        test targets never occurs through ordinary status edits. It
+        requires a status change to B that does NOT move B's mtime (a
+        restore, a `touch -r` after an out-of-band edit, or — as here — a
+        directly hand-written cache entry via the `ACTIVE_PLAN_CACHE_FILE`
+        seam), which is why this test builds the cache entry by hand rather
+        than by performing two ordinary writes.
+
+        Without D1, this test would ALLOW the edit — honoring plan A's
+        `instruction_files` declaration while plan B is equally
+        `in-progress` and the authoritative uncached call would raise
+        `AmbiguousActivePlanError`. That silent allow is exactly the
+        authorization consequence D1 closes; the general caching hole
+        itself (why a signature-matching hand-written entry can exist at
+        all) remains open and is NOT what this test is proving closed.
+        """
+        # Arrange — two plans, both genuinely in-progress
+        plan_a = _write_plan(
+            repo, "plan-a.md",
+            body=(
+                "---\nstatus: in-progress\n"
+                "instruction_files: agents/a.md\n---\n\n# Plan A\n"
+            ),
+        )
+        _write_plan(
+            repo, "plan-b.md",
+            body="---\nstatus: in-progress\n---\n\n# Plan B\n",
+        )
+        agent = repo / "agents" / "a.md"
+        agent.parent.mkdir(parents=True)
+        agent.write_text("# Agent\n")
+
+        # Hand-write a cache entry whose signature matches the CURRENT
+        # candidate set (both plan-a.md and plan-b.md, as they exist right
+        # now) but whose plan_path claims A alone is the answer — the exact
+        # shape find_active_plan_cached() accepts as a hit, and the exact
+        # shape an honest uncached scan would instead reject as ambiguous.
+        session_id = f"test-d1-cache-{uuid.uuid4().hex[:12]}"
+        cache_file = repo / "d1-cache.json"
+        candidates = sorted((repo / "docs" / "plans").glob("*.md"))
+        signature = _compute_signature(candidates)
+        cache_file.write_text(json.dumps({
+            "version": _CACHE_ENTRY_VERSION,
+            "repo_root": str(repo),
+            "session_id": session_id,
+            "signature": signature,
+            "plan_path": str(plan_a),
+            "ts": time.time(),
+        }))
+
+        # Act
+        event = {
+            "tool_name": "Edit",
+            "tool_input": {"file_path": str(agent), "new_string": "altered"},
+        }
+        parsed, stdout, stderr, rc = _run(
+            event,
+            cwd=repo,
+            env={
+                "CLAUDE_CODE_SESSION_ID": session_id,
+                "ACTIVE_PLAN_CACHE_FILE": str(cache_file),
+            },
+        )
+
+        # Assert
+        assert parsed is not None and parsed.get("decision") == "block", (
+            f"a stale-POSITIVE cache hit must not authorize the edit via "
+            f"A's declaration, got {stdout!r}"
+        )
+        reason = parsed.get("reason", "").lower()
+        assert "cannot determine active plan state" in reason, (
+            f"expected the D1 uncached re-check's ambiguity block, got "
+            f"{reason!r}"
+        )

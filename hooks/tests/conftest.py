@@ -33,22 +33,34 @@ def pytest_addoption(parser):
 def pytest_configure(config):
     """Register custom markers and root pytest's tmp dirs outside /tmp.
 
-    Root cause (task #12): write-guard.py's is_orchestrator_file() treats
-    ANY path starting with the literal prefix "/tmp" as an always-allowed
-    orchestrator scratch file (by design, for real /tmp scratch work). On
-    Linux (incl. GitHub Actions ubuntu-latest), /tmp is a real, non-symlinked
-    directory, so pytest's default tmp_path base resolves to a literal
-    /tmp/pytest-of-<user>/... path — a Phase5 test repo built under tmp_path
-    then silently satisfies is_orchestrator_file() and the guard under test
-    never fires, regardless of active-plan detection. On macOS this never
-    reproduces because /tmp is a symlink to /private/tmp and pytest resolves
-    tmp_path through it, so local runs looked green while CI was red.
-    Rooting tmp dirs at the repo root (NOT under hooks/ — write-guard.py's
-    is_instruction_file() treats any .py under a path containing a "hooks"
-    segment as behavioral, which a hooks/.pytest-tmp/ placement would have
-    made every test .py file falsely match) means no test path can start
-    with "/tmp" or contain "hooks" on any platform. Only applies when
-    --basetemp wasn't explicitly passed on the command line.
+    Root cause (task #12, now HISTORICAL — see F3 below): write-guard.py's
+    _orchestrator_exemption_category() used to treat ANY path starting with
+    the literal prefix "/tmp" as an always-allowed orchestrator scratch
+    file when no plan_root was known (by design, for real /tmp scratch
+    work). On Linux (incl. GitHub Actions ubuntu-latest), /tmp is a real,
+    non-symlinked directory, so pytest's default tmp_path base resolves to
+    a literal /tmp/pytest-of-<user>/... path — a Phase5 test repo built
+    under tmp_path then silently satisfied the /tmp exemption and the
+    guard under test never fired, regardless of active-plan detection. On
+    macOS this never reproduced because /tmp is a symlink to /private/tmp
+    and pytest resolves tmp_path through it, so local runs looked green
+    while CI was red.
+
+    F3 removed the /tmp exemption from write-guard.py entirely — it was
+    unreachable dead code in production (check_phase5 only ever calls
+    _orchestrator_exemption_category once plan_root is confirmed non-None,
+    so a /tmp-keyed branch could never return anything but None there).
+    /tmp is therefore no longer special-cased by the gate at all: a test
+    repo built directly under /tmp is now gated exactly like one anywhere
+    else, so THIS specific root cause can no longer reproduce via this
+    pathway. The rerooting below is kept anyway — it still serves a second,
+    independent purpose: rooting tmp dirs at the repo root, NOT under
+    hooks/ (write-guard.py's is_instruction_file() treats any .py under a
+    path containing a "hooks" segment as behavioral, which a
+    hooks/.pytest-tmp/ placement would have made every test .py file
+    falsely match), means no test path can start with "/tmp" or contain
+    "hooks" on any platform. Only applies when --basetemp wasn't
+    explicitly passed on the command line.
     """
     config.addinivalue_line(
         "markers",
@@ -121,6 +133,12 @@ _WRITE_GUARD_AMBIENT_FLAGS = (
     "WRITE_GUARD_ALLOW_INSTRUCTION_EDIT",
     "WRITE_GUARD_ALLOW_MIGRATION_EDIT",
     "GIT_SAFETY_ALLOW_COMPOUND",
+    # P1-5: CODING_TEAM_MAIN_ROOT is honored only when paired with a truthy
+    # CODING_TEAM_TEST_SEAM (see _lib/active_plan.py's _test_seam_root()).
+    # Both are scrubbed here so an ambient leftover of either cannot leak
+    # into a "should use real git discovery" test and silently redirect it.
+    "CODING_TEAM_MAIN_ROOT",
+    "CODING_TEAM_TEST_SEAM",
 )
 
 
