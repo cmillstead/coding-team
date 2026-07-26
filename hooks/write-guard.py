@@ -253,10 +253,12 @@ def check_phase5(file_path: str) -> str | None:
     ambiguous/stale-state block so a wedged gate is recoverable).
     """
     overridden = _instruction_edit_overridden()
-    # worktree_root (the first element) is unused here (P1-A) — the /tmp
-    # exemption no longer compares it against plan_root; see
-    # _orchestrator_exemption_category()'s docstring. Still requested from
-    # _resolve_target_git_roots() as part of its normal two-value contract.
+    # worktree_root (the first element) is unused here — F3 removed the
+    # /tmp exemption category entirely (see
+    # _orchestrator_exemption_category()'s docstring), so there is no
+    # longer any comparison against plan_root that needs it. Still
+    # requested from _resolve_target_git_roots() as part of its normal
+    # two-value contract.
     _worktree_root, plan_root = _resolve_target_git_roots(file_path)
     if plan_root is None:
         # file_path is not inside any git repository -> not pipeline-gated.
@@ -271,11 +273,12 @@ def check_phase5(file_path: str) -> str | None:
     # downstream gate) must stay reachable regardless of plan state —
     # conjoining .paul with the ambiguity block below made it unreachable
     # exactly when two plans race to in-progress, silently killing the
-    # PAUL workflow at the worst possible moment. memory/ and /tmp are NOT
+    # PAUL workflow at the worst possible moment. memory/ is NOT
     # unconditional (see _orchestrator_exemption_category()'s docstring)
-    # and are re-evaluated below, once an active plan is confirmed — this
-    # does not weaken the ambiguity block for them or for any non-exempt
-    # path, which still fails closed exactly as before.
+    # and is re-evaluated below, once an active plan is confirmed — this
+    # does not weaken the ambiguity block for it or for any non-exempt
+    # path (/tmp included, since F3 it isn't a distinct category at all),
+    # which still fails closed exactly as before.
     category = _orchestrator_exemption_category(file_path, plan_root=plan_root)
     if category in ("paul", "vault"):
         return None
@@ -297,11 +300,12 @@ def check_phase5(file_path: str) -> str | None:
         return None
     if category is not None:
         # memory/ is the one exempt root that is NOT unconditional — an
-        # instruction file must not be laundered through it. /tmp is
-        # already fully resolved by _orchestrator_exemption_category()
-        # itself (P1-A: void whenever plan_root is set), so only "memory"
-        # needs this extra conjunction here. ("paul" and "vault" already
-        # returned above — they can't reach this point.)
+        # instruction file must not be laundered through it. "paul" and
+        # "vault" already returned above, so only "memory" can still be
+        # non-None here — it's the only remaining category this extra
+        # conjunction needs to apply to. (/tmp isn't a category
+        # _orchestrator_exemption_category() can return at all since F3,
+        # so it can't reach this point either.)
         if category != "memory" or not is_instruction_file(file_path):
             return None
 

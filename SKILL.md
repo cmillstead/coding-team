@@ -178,7 +178,7 @@ During execution, the orchestrator routes edits by **impact surface**, not line 
 |---|---|
 | `agents/*.md`, `phases/*.md`, `skills/**/*.md`, `CLAUDE.md` | Agent tool — PROMPT_CRAFT_ADVISORY |
 | `hooks/*`, `docs/plans/*.md` | Agent tool — dispatch to implementer |
-| `memory/*.md`, `~/Documents/obsidian-vault/**`, `/tmp/*` | Orchestrator edits directly |
+| `memory/*.md` (unless it's a behavioral instruction file — still gated), `~/Documents/obsidian-vault/**`, `/tmp/*` files outside any armed repo (not a special exemption — the gate is dormant outside any git repo; a `/tmp` path inside an armed repo is gated normally) | Orchestrator edits directly |
 | Source code, ≤20 lines, 1 file | Orchestrator may edit directly |
 | Source code, >20 lines or multi-file | Agent tool — dispatch to implementer |
 
