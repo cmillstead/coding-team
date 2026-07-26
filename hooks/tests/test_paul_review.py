@@ -1,6 +1,6 @@
 """Tests for _lib/paul_review.py — shared PAUL plan-review detection primitive.
 
-Real temp files, no mocks (rules/test-files.md).
+Real temp files, no mocks (reference/test-files.md).
 """
 import importlib.util
 import json

@@ -1,7 +1,7 @@
-<!-- This file has NO globs frontmatter on purpose — it is not an auto-load rule.
-     It is a dispatch-context include: agent prompts point here and instruct the
-     dispatched subagent to read it explicitly before starting, because a
-     subagent only reliably sees files it is told to read. -->
+<!-- Loading is determined by DIRECTORY, not frontmatter. Frontmatter is inert:
+     anything under ~/.claude/rules/ auto-loads into every session and every
+     subagent. This file lives in reference/ (deployed to ~/.claude/reference/),
+     so it loads only when a prompt names it with an explicit `Read` line. -->
 
 # Finding Integrity + BLOCKED Protocol
 

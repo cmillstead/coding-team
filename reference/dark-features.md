@@ -8,7 +8,7 @@ globs:
 ---
 
 # Dark Feature Detection
-<!-- Deploy source: scripts/deploy.sh copies this to ~/.claude/rules/ -->
+<!-- Deploy source: scripts/deploy.sh copies this to ~/.claude/reference/ — loaded only when a prompt names it with an explicit `Read` line, NOT auto-loaded. -->
 
 When reviewing or auditing code, check for implemented-but-unwired features:
 

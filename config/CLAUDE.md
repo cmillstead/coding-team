@@ -140,7 +140,7 @@ When dispatching agents through `/coding-team`, use the least powerful model tha
 
 ## Testing: Real Over Mocks (MANDATORY)
 
-Use real implementations in tests — see `rules/test-files.md` for the base rule. Do NOT use mocks, patches, fakes, or stubs.
+Use real implementations in tests — see `~/.claude/reference/test-files.md` for the base rule. Do NOT use mocks, patches, fakes, or stubs.
 
 **Allowed real dependencies** (set these up instead of mocking):
 - SQLite: use temp databases

@@ -365,7 +365,7 @@ coding-team reads `~/.claude/skills/skill-taxonomy.yml` to discover installed sk
 
 coding-team references some files and tools it does not itself provide. These must be populated or installed separately:
 
-- **`~/.claude/rules-on-demand/`** — houses rules that are broader than this repo's 5 repo-owned rules (`test-files.md`, `config-files.md`, `dark-features.md`, `hook-bypass.md`, `mcp-resilience.md`). Populated separately per decision D188. Expected members include precomputation guidance for orchestrators, chunk-taxonomy-work patterns for large analysis tasks, skill & CC instruction file rules, vault-path-resolution rules, and multi-pass-audit patterns.
+- **`~/.claude/rules-on-demand/`** — houses rules that are broader than this repo's 2 always-loaded rules (`config-files.md`, `hook-bypass.md`). Populated separately per decision D188. Expected members include precomputation guidance for orchestrators, chunk-taxonomy-work patterns for large analysis tasks, skill & CC instruction file rules, vault-path-resolution rules, and multi-pass-audit patterns.
 - **gstack plugin commands** — several skills reference gstack commands as prerequisites or complements: `/scan-security`, `/ship`, `/freeze`, `/unfreeze`, `/retro`, `/document-release`, `/design-review`, `/scan-product`. coding-team has its own equivalents for some of these (`/release` instead of `/ship`, `/retrospective` instead of `/retro`, `/doc-sync` instead of `/document-release` — see Red Flags in `SKILL.md`) but does not replace all of them.
 - **`engram` CLI** — used by `ct-harness-engineer` (and referenced in project CLAUDE.md workflows) for structured knowledge search, node/edge queries, and cross-session memory. Install and configure separately; coding-team does not vendor it.
 
@@ -490,14 +490,15 @@ config/                           # global instruction files (deployed to ~/.cla
   CLAUDE.md                       #   global CLAUDE.md — role, boundaries, workflow prefs
   golden-principles.md            #   16 tiebreaker principles for ambiguous decisions
   code-style.md                   #   language-specific style rules (Python, TS, JS, HTML, SCSS, Rust)
-rules/                            # repo-owned rules (deployed to ~/.claude/rules/)
-  test-files.md                   #   test file rules — real implementations, no mocks
+rules/                            # ALWAYS-LOADED rules (deployed to ~/.claude/rules/ — every session, every subagent)
   config-files.md                 #   config file rules — no secrets, validate syntax
-  dark-features.md                #   dark feature detection — verify reachability
   hook-bypass.md                  #   hook bypass prevention
+reference/                        # on-demand includes (deployed to ~/.claude/reference/ — loaded only when a prompt says `Read`)
+  finding-integrity.md            #   Finding Integrity + BLOCKED protocol
+  codesight-fallback.md           #   codesight MCP retry-once-then-degrade
   mcp-resilience.md               #   MCP retry limits and graceful degradation
-  codesight-fallback.md           #   codesight MCP retry-once-then-degrade (agent dispatch include, no globs)
-  finding-integrity.md            #   Finding Integrity + BLOCKED protocol (agent dispatch include, no globs)
+  test-files.md                   #   test file rules — real implementations, no mocks
+  dark-features.md                #   dark feature detection — verify reachability
 memory/                           # behavioral feedback, persists across sessions and grows over time
   MEMORY.md                       #   index — points to consolidated file
   consolidated-feedback.md        #   distilled rules from all feedback (loaded by default)

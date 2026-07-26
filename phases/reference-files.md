@@ -61,8 +61,11 @@ Loaded on demand by the skill router. Not needed during active phase work.
 | `phases/wiki-generation.md` | completion.md | Tier-gated vault wiki article generation |
 | `agents/reference/implementer-reference.md` | ct-implementer.md | Code exploration, CI fix context, escalation guidance |
 | `agents/reference/harness-engineer-reference.md` | ct-harness-engineer.md | Report template, Phase 5 auditor protocol, hook design protocol |
-| `rules/codesight-fallback.md` | ct-spec-reviewer.md, ct-harden-auditor.md, ct-simplify-auditor.md, ct-qa-reviewer.md, ct-harness-engineer.md | codesight MCP retry-once-then-degrade protocol |
-| `rules/finding-integrity.md` | ct-spec-reviewer.md, ct-harden-auditor.md, ct-simplify-auditor.md, ct-qa-reviewer.md, ct-prompt-craft-auditor.md, ct-harness-engineer.md | Finding Integrity + BLOCKED protocol |
+| `reference/codesight-fallback.md` | ct-spec-reviewer.md, ct-harden-auditor.md, ct-simplify-auditor.md, ct-qa-reviewer.md, ct-harness-engineer.md | codesight MCP retry-once-then-degrade protocol |
+| `reference/finding-integrity.md` | ct-spec-reviewer.md, ct-harden-auditor.md, ct-simplify-auditor.md, ct-qa-reviewer.md, ct-prompt-craft-auditor.md, ct-harness-engineer.md | Finding Integrity + BLOCKED protocol |
+| `reference/mcp-resilience.md` | ct-spec-reviewer.md, ct-harden-auditor.md, ct-simplify-auditor.md, ct-qa-reviewer.md, ct-harness-engineer.md | Repo-wide MCP retry-once-then-degrade rule that codesight-fallback instantiates |
+| `reference/test-files.md` | ct-qa-reviewer.md, ct-spec-reviewer.md, SKILL.md, skills/tdd/SKILL.md | Test file rules — real implementations, no mocks |
+| `reference/dark-features.md` | ct-implementer.md | Dark feature detection — verify every new feature is reachable from ≥1 entry point |
 | `skills/debug/reference.md` | debug/SKILL.md | Pattern-analysis signature table, after-3-failed-fixes detail |
 
 **Agent definitions** (used by the execution loop):

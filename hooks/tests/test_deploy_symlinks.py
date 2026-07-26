@@ -312,7 +312,6 @@ class TestDeploySymlinks:
         assert result1.returncode == 0, f"first deploy failed:\n{result1.stderr}"
 
         foreign_target = tmp_path / "foreign-source.md"
-        foreign_target.write_text("# not part of the coding-team repo\n")
 
         foreign = claude_dir / "agents" / "ct-FOREIGN.md"
         foreign.symlink_to(foreign_target)
@@ -327,6 +326,106 @@ class TestDeploySymlinks:
         )
         assert "ct-FOREIGN.md" not in result2.stdout, (
             f"deploy stdout must not mention pruning the foreign symlink, got:\n{result2.stdout}"
+        )
+
+    def test_reference_dir_deployed_as_relative_symlink(self, tmp_path: Path):
+        """Every *.md in REPO_ROOT/reference/ is deployed to
+        claude_dir/reference/<name> as a relative symlink."""
+        claude_dir = tmp_path / "claude_dir"
+        claude_dir.mkdir()
+
+        result = run_deploy(claude_dir)
+        assert result.returncode == 0, f"deploy.sh failed:\n{result.stderr}"
+
+        source_names = [p.name for p in (REPO_ROOT / "reference").glob("*.md")]
+        for name in source_names:
+            link = claude_dir / "reference" / name
+            assert link.exists(), f"deployed reference file not found: {link}"
+            assert link.is_symlink(), f"{link} must be a symlink, not a copy"
+
+            target = os.readlink(link)
+            assert not target.startswith("/"), (
+                f"symlink target must be relative, got: {target!r}"
+            )
+
+            expected_src = REPO_ROOT / "reference" / name
+            assert link.resolve() == expected_src.resolve(), (
+                f"symlink resolves to {link.resolve()}, expected {expected_src.resolve()}"
+            )
+
+    def test_prune_removes_orphaned_rule_symlink(self, tmp_path: Path):
+        """A rules/*.md symlink whose repo source was deleted or moved is
+        pruned on the next deploy. A foreign symlink pointing outside the
+        repo's rules/ dir is never touched."""
+        claude_dir = tmp_path / "claude_dir"
+        claude_dir.mkdir()
+
+        tmp_source = REPO_ROOT / "rules" / "tmp-prune-test-rule.md"
+        try:
+            tmp_source.write_text("# temporary rule for prune test\n")
+
+            result1 = run_deploy(claude_dir)
+            assert result1.returncode == 0, f"first deploy failed:\n{result1.stderr}"
+
+            deployed = claude_dir / "rules" / "tmp-prune-test-rule.md"
+            assert deployed.exists() and deployed.is_symlink(), (
+                f"expected {deployed} to be deployed as a symlink"
+            )
+
+            tmp_source.unlink()
+
+            result2 = run_deploy(claude_dir)
+            assert result2.returncode == 0, f"second deploy failed:\n{result2.stderr}"
+
+            assert not deployed.exists() and not deployed.is_symlink(), (
+                "orphaned rule symlink must be pruned after its source is deleted"
+            )
+            assert "pruned:" in result2.stdout, (
+                f"deploy stdout must report the prune, got:\n{result2.stdout}"
+            )
+
+            # Foreign symlink pointing outside the repo's rules/ dir must
+            # never be pruned, even though its "source" does not exist.
+            foreign_target = tmp_path / "foreign-rule-source.md"
+            foreign = claude_dir / "rules" / "foreign-rule.md"
+            foreign.symlink_to(foreign_target)
+
+            result3 = run_deploy(claude_dir)
+            assert result3.returncode == 0, f"third deploy failed:\n{result3.stderr}"
+
+            assert foreign.is_symlink() and foreign.resolve() == foreign_target.resolve(), (
+                "foreign rules/*.md symlink (pointing outside REPO_ROOT/rules) "
+                "must never be pruned"
+            )
+            assert "foreign-rule.md" not in result3.stdout, (
+                f"deploy stdout must not mention pruning the foreign symlink, got:\n{result3.stdout}"
+            )
+        finally:
+            if tmp_source.exists():
+                tmp_source.unlink()
+
+    def test_prune_leaves_real_rule_file_untouched(self, tmp_path: Path):
+        """A real (non-symlink) *.md file in CLAUDE_DIR/rules with no repo
+        source must never be pruned — the prune loop only ever acts on
+        symlinks, per its `[[ -L "$f" ]]` guard."""
+        claude_dir = tmp_path / "claude_dir"
+        claude_dir.mkdir()
+
+        result1 = run_deploy(claude_dir)
+        assert result1.returncode == 0, f"first deploy failed:\n{result1.stderr}"
+
+        real_file = claude_dir / "rules" / "hand-authored-rule.md"
+        original_content = "# hand-authored rule note, not a repo symlink\n"
+        real_file.write_text(original_content)
+
+        result2 = run_deploy(claude_dir)
+        assert result2.returncode == 0, f"second deploy failed:\n{result2.stderr}"
+
+        assert real_file.exists() and not os.path.islink(real_file), (
+            "hand-authored-rule.md must remain a real file, not be removed or replaced"
+        )
+        assert real_file.read_text() == original_content, (
+            "prune must not alter the content of a real file"
         )
 
     def test_dry_run_creates_no_files(self, tmp_path: Path):
