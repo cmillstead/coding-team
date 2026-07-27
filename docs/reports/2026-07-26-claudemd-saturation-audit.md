@@ -3,23 +3,91 @@
 **Auditor:** ct-harness-engineer
 **Repo:** `/Users/cevin/.claude/skills/coding-team`
 **Branch at audit time:** `fix/write-guard-plan-allowlist`
-**Scope:** the always-loaded instruction surface — `config/CLAUDE.md` + all 12 `~/.claude/rules/*.md`
-**Status:** COMPLETE
+**Scope:** the always-loaded instruction surface — `config/CLAUDE.md` + all `~/.claude/rules/*.md` (12 files at audit time; **7 today**, after Group A relocated 5)
+**Status:** COMPLETE — **arithmetic reconciled 2026-07-27, see §0.1**
 
 ---
 
 ## 0. Headline
 
-| | Lines |
+**Numbers below are AS OF THE AUDIT (2026-07-26, pre-Group-A). For current
+figures and the corrected roll-up, read §0.1 — it supersedes this table.**
+
+| | Lines (at audit time) |
 |---|---|
 | Current always-loaded surface | **464** |
 | `hook-health-check.py` saturation threshold | **200** |
 | Overage | **2.32x** |
-| Projected after all recommendations | **163** |
-| Net delta | **−301 (−65%)** |
-| Headroom under threshold after landing the Root Cause rule | **37 lines** |
+| Projected after all recommendations | ~~163~~ → **187** (see §0.1) |
+| Net delta | ~~−301 (−65%)~~ → **−277 (−60%)** (see §0.1) |
+| Headroom under threshold after landing the Root Cause rule | ~~37 lines~~ → **13 lines**, or **−51** counting `MEMORY.md` (see §0.1) |
 
 **The root cause of "you ignore all your standing rules" is not any individual rule. It is that the harness measures the wrong surface.** `hook-health-check.py:184-188` globs `agents/*.md`, `phases/*.md`, `skills/*/SKILL.md` — and nothing else. `config/CLAUDE.md` and `rules/*.md` are outside the glob. The one surface loaded into *every* session and *every* subagent is the only instruction surface with **no line cap, no warning, and no block**. It has grown to 2.32x the threshold the harness enforces everywhere else, unobserved. This is a Golden Principle #6 failure (Observation Is Second-Highest Leverage) at the exact point where observation matters most.
+
+*(Root-cause diagnosis above stands and was confirmed by implementation. The measurement gap it identifies is **CLOSED** as of F1 — `check_always_loaded_surface()`, merged 2026-07-27 in PR #125. Its `hook-health-check.py:184-188` citation has since drifted; the per-file check is now `check_instruction_file_lengths()` at `:192`. Cite by symbol.)*
+
+---
+
+## 0.1 Arithmetic reconciliation (added 2026-07-27)
+
+**This section supersedes §0's projections and §5's roll-up line.** Three defects,
+all in the roll-up rather than in any individual group subtotal:
+
+**1. The reduction column does not sum to the printed target.** Every group
+subtotal in §5 is internally correct, but the total is not:
+
+```
+Current always-loaded (at audit)                     464
+  Group A  relocations rules/ -> reference/         -110   -> 354   [LANDED]
+  Group B  deletions (enforced / dead)               -42   -> 312
+  Group C  extractions out of CLAUDE.md              -93   -> 219
+  Group D  compressions                              -44   -> 175
+  Group E  additions (incl. Root Cause rule)         +12   -> 187
+                                                    -----
+Projected always-loaded                              187   (printed: 163 — WRONG)
+Net delta                                           -277   (printed: -301 — WRONG)
+```
+
+The printed **163** is 24 lines below what the groups actually deliver, and the
+printed **−301** overstates the reduction by 24. Headroom under the 200 threshold
+is therefore **13 lines, not 37**.
+
+**The 24-line gap has a traceable cause: two incompatible estimation methods.**
+The **163** is a *bottom-up* end-state estimate (§5's Final-state note:
+`CLAUDE.md ≈100 + rules ≈63`). The column is *top-down* subtraction. From today's
+measured 354, bottom-up demands **−191** of remaining reduction (238→100 is −138,
+116→63 is −53) while groups B+C+D+E enumerate only **−167**. So **24 lines of
+reduction are missing from the group breakdown** — the enumeration is incomplete
+relative to its own target, not merely mis-added.
+
+**Do not execute Groups B/C/D until this is settled.** Either extend the groups to
+name the missing 24 lines, or restate the target as **187 / 13 lines of headroom**.
+The two readings imply materially different amounts of work.
+
+**2. Group A has LANDED, so 464 is no longer the starting point.** Group A's −110
+shipped 2026-07-26 (PR #123, reference extraction). The surface measured
+**354** today, which is exactly 464 − 110 — an independent confirmation that
+Group A's subtotal was correct. Remaining work is B + C + D + E = **−167**, taking
+354 → 187. Every bare `464` elsewhere in this document is an at-audit figure, not
+a current one.
+
+**3. `MEMORY.md` is unmeasured, and it inverts the conclusion.**
+`~/.claude/projects/<slug>/memory/MEMORY.md` also auto-loads into every session and
+every subagent — **65 lines today** (64 the day before; it grows with every feedback
+memory that lands). Neither this audit nor F1's `check_always_loaded_surface()`
+measures it.
+
+Counting it: the true always-loaded surface today is ~**419** (354 + 65), and after
+all reductions it would be ~**251** (187 + 65) — **still over the 200 threshold**.
+The reductions would complete, the plan would report success, and the warning would
+keep firing.
+
+**This is a scope decision for the operator, not a bug.** Folding `MEMORY.md` into
+the measurement makes the reported number project-dependent, which is a real design
+cost. The options are: (a) count it and extend the reductions to cover it, (b) leave
+it out and accept that the reported number is a floor, or (c) revisit the 200
+threshold. F1's docstring currently names it as a known-unmeasured contributor and
+calls the reported figure a floor, which is honest but does not resolve the target.
 
 ---
 
@@ -108,7 +176,7 @@ Buckets: **AE** = already-enforced (hook cited) · **M** = mechanizable · **NME
 | 40 | `:229-231` | Hook deployment order (deploy before settings) | **AE (structurally)** | `scripts/deploy.sh` deploys hooks at `:36` and touches `SETTINGS` at `:116` — order is enforced by construction. Residual risk is hand-editing `settings.json`. Compress to 1 line. |
 | 41 | `:233-238` | Obsidian vault layout | **S** | Relevant only to `/save`. → §5 R10 |
 
-### 2.2 `~/.claude/rules/*.md` (226 lines)
+### 2.2 `~/.claude/rules/*.md` (226 lines at audit — **116 across 7 files today**, after Group A)
 
 | File | Lines | Explicit readers (repo) | Bucket | Disposition |
 |---|---|---|---|---|
@@ -214,7 +282,9 @@ Every path below was checked by command.
 
 Every extraction names its loading mechanism and whether that mechanism is conditional.
 
-### Group A — relocations out of `rules/` (mechanism: existing literal `Read <path>` in agent prompts; conditional = YES, only the dispatched agent pays)
+### Group A — ✅ **LANDED 2026-07-26 (PR #123)** — relocations out of `rules/` (mechanism: existing literal `Read <path>` in agent prompts; conditional = YES, only the dispatched agent pays)
+
+*(Delivered its full −110. The surface measured 354 afterwards = 464 − 110, independently confirming this subtotal. Groups B/C/D remain PENDING and are blocked on the §0.1 target reconciliation.)*
 
 | ID | Change | Mechanism after move | Δ |
 |---|---|---|---|
@@ -270,19 +340,37 @@ Every extraction names its loading mechanism and whether that mechanism is condi
 ### Arithmetic
 
 ```
-Current always-loaded                                464
-  Group A  relocations rules/ -> reference/         -110
+Current always-loaded (at audit)                     464
+  Group A  relocations rules/ -> reference/         -110   [LANDED 2026-07-26, PR #123]
   Group B  deletions (enforced / dead)               -42
   Group C  extractions out of CLAUDE.md              -93
   Group D  compressions                              -44
   Group E  additions (incl. Root Cause rule)         +12
                                                     -----
-Projected always-loaded                              163
+Projected always-loaded                              187
 ```
 
-**Final state:** `config/CLAUDE.md` ≈ 100 lines · `~/.claude/rules/` ≈ 63 lines across 6 files (`hook-bypass` 14, `text-discipline` 14, `scan-finding-completeness` 12, `defensive-simplify-guard` 10, `no-known-broken` 8, `exemption-override` 5).
+***(Corrected 2026-07-27: this column previously printed 163 as the total. It sums
+to 187. See §0.1 — and read the Final-state note below, which is where the 163
+came from.)***
 
-**163 / 200 — 37 lines of headroom, with the Root Cause rule landed.** F1 and F2 then make that headroom observable and enforced, so the surface cannot silently drift back.
+**Final state (as estimated at audit):** `config/CLAUDE.md` ≈ 100 lines · `~/.claude/rules/` ≈ 63 lines across 6 files (`hook-bypass` 14, `text-discipline` 14, `scan-finding-completeness` 12, `defensive-simplify-guard` 10, `no-known-broken` 8, `exemption-override` 5).
+
+**⚠ The two methods disagree by 24 lines, and this is the crux.** `100 + 63 = 163`
+is a **bottom-up** estimate of the end state. The column above is **top-down**
+subtraction and lands at **187**. Reconciling from today's measured 354:
+
+- Bottom-up demands **−191** of remaining reduction (CLAUDE.md 238→100 is −138; rules 116→63 is −53).
+- Groups B + C + D + E enumerate only **−167**.
+- **24 lines of reduction are therefore missing from the group breakdown** — the enumeration is incomplete relative to its own target, not merely mis-added.
+
+**So the honest reading is: −167 is what this audit actually specifies, landing at
+187 / 200 — 13 lines of headroom, not 37.** Reaching 163 requires finding 24 more
+lines of reduction that no group currently names. Either extend the groups to cover
+them or restate the target as 187. **And counting the unmeasured `MEMORY.md` (65
+lines, §0.1 item 3), even 163 would leave the true surface at ~228 — still over
+threshold.** F1 has landed and makes the measured portion observable; F2 must land
+LAST, after the reductions.
 
 ---
 
@@ -315,10 +403,10 @@ Rule 2 (don't default to hooks; consolidate) is genuinely new, genuinely valuabl
 **Options considered:**
 1. **Merge as-is** — rejected. +22 lines to a 2.32x-saturated surface, with a duplicate rule, on a false premise about its own cost.
 2. **Merge with wiring** — rejected. There is nothing to wire; it is already wired by `deploy.sh:93`. "Wiring" would only add a *second* delivery path and double the cost.
-3. **Rework** — **recommended.** Close #95. Re-land rule 2 as ~4 compressed lines inside the surviving `config/CLAUDE.md` (it is a harness-design principle, adjacent to Hook Deployment at `:229`). Drop rule 1 entirely — `CLAUDE.md:71` already says it; the fix for its violation is the −301-line reduction, not a duplicate. Net: **+4 instead of +22**, and the numbered-options rule gets a real fix (a file where it can be seen) rather than a second copy.
+3. **Rework** — **recommended.** Close #95. Re-land rule 2 as ~4 compressed lines inside the surviving `config/CLAUDE.md` (it is a harness-design principle, adjacent to Hook Deployment at `:229`). Drop rule 1 entirely — `CLAUDE.md:71` already says it; the fix for its violation is the reduction (−277 as enumerated; see §0.1), not a duplicate. Net: **+4 instead of +22**, and the numbered-options rule gets a real fix (a file where it can be seen) rather than a second copy.
 4. **Close outright** — rejected; rule 2 is worth keeping.
 
-**Sequencing:** rework should land *after* Group A–D, so rule 2 arrives on a 157-line surface rather than a 464-line one.
+**Sequencing:** rework should land *after* Group A–D, so rule 2 arrives on a reduced surface rather than a 464-line one. *(The "157-line surface" this line originally named derived from the withdrawn 163 target; per §0.1 the enumerated groups land at 187, so the arrival surface is ~183 before rule 2's +4. Sequencing is unaffected.)*
 
 ### 6c — `config/CLAUDE.md:98-104` (PR #119, `6164e43`): **extract and compress**
 
@@ -351,7 +439,7 @@ Three second-order observations:
 
 2. **Nothing in this audit needs a new hook.** Every structural fix widens a hook that already runs: `hook-health-check.py` (F1 and F3's measurement), `deploy-drift-check.py` (F3's deployed-only observability, still open), `write-guard.py` (F2), `prompt-dispatcher.py` (R7). The reliability budget in `memory/feedback-hooks-reliability-budget.md` is untouched, and the hook count stays at 15. This is what PR #95's own rule 2 asks for, arrived at independently.
 
-3. **The strongest available evidence that always-loaded prose fails is already in the file.** `CLAUDE.md:71` is the most emphatic sentence in the harness — and the operator has had to repeat it enough times that a PR exists to state it a second time. If maximal emphasis at 464 lines does not bind, no amount of additional emphasis will. The only remaining lever is subtraction. That is what this audit recommends: **−301 lines**, then measurement (F1) and enforcement (F2) so it stays there.
+3. **The strongest available evidence that always-loaded prose fails is already in the file.** `CLAUDE.md:71` is the most emphatic sentence in the harness — and the operator has had to repeat it enough times that a PR exists to state it a second time. If maximal emphasis at 464 lines does not bind, no amount of additional emphasis will. The only remaining lever is subtraction. That is what this audit recommends: **−277 lines as enumerated** (§0.1 — the original −301 assumed 24 lines of reduction the groups never name), then measurement (F1, **landed 2026-07-27**) and enforcement (F2) so it stays there.
 
 ---
 
@@ -359,7 +447,7 @@ Three second-order observations:
 
 - **codesight:** `mcp__codesight__query` (`search-text`, `MAX_INSTRUCTION_LINES`) returned `result_count: 0` against repo `cmillstead/coding-team` with `files_searched: 42`. The symbol demonstrably exists at `hooks/hook-health-check.py:196` region (`if line_count > 200`). Index is mispointed/stale for this repo. Per `rules/codesight-fallback.md`: **one call, no retry**, degraded to Grep/Read. All underlying checks were performed with Grep/Read — none skipped.
 - **engram:** CLI reachable but running without `sqlite-vec` (vector search degraded); the MCP equivalent responded with vector search available but returned **no node relevant to context saturation or instruction-file length** (top score 0.42, all hits about codesight/axon). No applicable KB pattern retrieved. Audit proceeded from `agents/reference/harness-engineer-reference.md`, `~/.claude/golden-principles.md`, and the `memory/feedback-*.md` corpus.
-- **No other blind spots.** Every one of the 12 rules files was read at its real path. Every referenced path in §4 was existence-checked by command.
+- **No other blind spots.** Every one of the 12 rules files *present at audit time* was read at its real path (Group A has since relocated 5, leaving **7**). Every referenced path in §4 was existence-checked by command.
 
 ---
 
@@ -376,7 +464,7 @@ sidecar and a re-run of this audit's line arithmetic.
 | **F3** two-way `deploy-drift-check.py` | **SUPERSEDED — see F3 (b).** The original prediction assumed the 5 parent-owned files would be moved into this repo; that prescription was retracted, so `~/.claude/rules/` keeps 2 symlinks + 5 regular files and the predicted "0 regular files" end state is unreachable. Replacement prediction, split by half: **(measurement, LANDED 2026-07-26)** `check_always_loaded_surface()` reports 354 today and 0 warnings once the reductions land — it spans both owners, so no ownership decision is required. **(observability, STILL OPEN)** if `deploy-drift-check.py` gains a deployed-only direction, its first run reports exactly 5 *foreign* (parent-owned) files, labelled as foreign rather than as drift. |
 | **R2a-e** relocations to `reference/` | `wc -l ~/.claude/rules/*.md` drops from 226 to ~116 immediately after the move, and the 11 agent-prompt `Read` lines resolve to existing paths (`test -f` on each). No auditor reports BLOCKED for a missing protocol file in the following pipeline run. |
 | **R1 + R17** Engram-out / Root-Cause-in | `wc -l config/CLAUDE.md` goes 238 → 200 in a single change (−44 +6). The Root Cause text matches `docs/handoff/2026-07-24-...:19` verbatim. |
-| **R3-R16** full remediation | `wc -l config/CLAUDE.md` ≈ 100; `~/.claude/rules/*.md` total ≈ 63; combined **163**. F1's aggregate check reports zero warnings. |
+| **R3-R16** full remediation | ~~`wc -l config/CLAUDE.md` ≈ 100; `~/.claude/rules/*.md` total ≈ 63; combined **163**~~ **Prediction revised 2026-07-27 (§0.1):** the enumerated groups deliver −167 from today's 354, so the falsifiable prediction is **combined ≈ 187**, and F1's aggregate check reports **zero warnings only if the target is 187 or lower AND `MEMORY.md` stays out of the measurement**. At 187 measured the check goes quiet; counting `MEMORY.md`'s 65 lines the true surface is ~251 and a check that measured it would still warn. **Do not score this prediction against 163** — that figure was a bottom-up estimate no group breakdown supports. |
 | **6b** PR #95 reworked | PR #95 closed. Rule 2 lands as ≤4 lines; `grep -c "Number your options" config/CLAUDE.md` stays **1** (no duplicate). `rules/interaction-mandatory.md` does not exist. |
 | **6c** `:98-104` folded | `### Handoff triggers` heading gone; the restart trigger and the `"they can ask for one"` rationalization both still present (grep both); the 80% trigger appears **once** (currently twice, `:101` and `:109`). |
 | **Behavioral outcome** (the real test) | After the surface drops below 200, the operator does not need to restate the numbered-options rule (`CLAUDE.md:71`) again within the next 10 sessions. If they do, saturation was not the sole cause and the diagnosis needs revisiting. |
