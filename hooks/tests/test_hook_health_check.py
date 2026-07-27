@@ -816,6 +816,71 @@ class TestCheckAlwaysLoadedSurface:
 
         assert hhc.check_always_loaded_surface(claude_dir=claude_dir) == []
 
+    def test_broken_rules_symlink_warns_even_under_threshold(self, hhc, tmp_path):
+        """THE asymmetric go-dark regression the cross-model gate found.
+
+        The CLAUDE.md-side fix above gated the early return on
+        `claude_md_unreadable` alone, forgetting that a broken rules/*.md
+        entry is the SAME kind of measurement failure. Sized so the readable
+        rules total (150) plus a readable CLAUDE.md (40) sits comfortably
+        UNDER the 200 threshold: with the old (CLAUDE.md-only) condition,
+        `total <= ALWAYS_LOADED_THRESHOLD and not claude_md_unreadable` was
+        True — a broken rules/ symlink with everything else fine still went
+        completely silent. This test fails RED under that condition and
+        must pass GREEN only because measurement_incomplete also accounts
+        for `unreadable > 0`, not just an unreadable CLAUDE.md.
+        """
+        claude_dir = tmp_path / "claude"
+        rules_dir = claude_dir / "rules"
+        rules_dir.mkdir(parents=True)
+        self._write_lines(claude_dir / "CLAUDE.md", 40)
+        self._write_lines(rules_dir / "readable.md", 150)
+
+        # A real broken symlink under rules/ — same shape as
+        # scripts/deploy.sh's prune loop leaving a dangling entry.
+        broken = rules_dir / "broken.md"
+        broken.symlink_to(tmp_path / "does-not-exist-rule.md")
+        assert broken.is_symlink()
+        assert not broken.exists()
+
+        warnings = hhc.check_always_loaded_surface(claude_dir=claude_dir)
+
+        assert len(warnings) == 1
+        text = warnings[0]
+        assert "is 190 lines" in text
+        assert "(1 unreadable)" in text
+        # The rules-only unreadable case must ALSO state the total is
+        # incomplete — not just the CLAUDE.md-unreadable case above.
+        assert "incomplete" in text.lower()
+
+    def test_all_absent_nothing_unreadable_under_threshold_stays_silent(
+        self, hhc, tmp_path
+    ):
+        """Invariant 2, pinned: genuine absence of EITHER or BOTH inputs,
+        with nothing actually unreadable, must still return [] under
+        threshold. Guards against the asymmetry fix above over-correcting
+        into warning whenever any input is merely absent rather than
+        specifically unreadable.
+        """
+        claude_dir = tmp_path / "claude"
+        # Neither CLAUDE.md nor rules/ exists at all.
+        claude_dir.mkdir()
+        assert not (claude_dir / "CLAUDE.md").exists()
+        assert not (claude_dir / "CLAUDE.md").is_symlink()
+        assert not (claude_dir / "rules").exists()
+
+        assert hhc.check_always_loaded_surface(claude_dir=claude_dir) == []
+
+        # CLAUDE.md absent, rules/ present but under threshold and fully
+        # readable.
+        claude_dir2 = tmp_path / "claude2"
+        rules_dir2 = claude_dir2 / "rules"
+        rules_dir2.mkdir(parents=True)
+        self._write_lines(rules_dir2 / "small.md", 50)
+        assert not (claude_dir2 / "CLAUDE.md").exists()
+
+        assert hhc.check_always_loaded_surface(claude_dir=claude_dir2) == []
+
 
 class TestCheckMetrics:
     """Tests for the merged metrics analysis functionality."""

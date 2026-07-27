@@ -286,40 +286,48 @@ def check_always_loaded_surface(claude_dir: Path | None = None) -> list[str]:
        the reductions, because a blocking cap would block the very edits that
        reduce the surface. This warning carries no such ordering hazard.
 
-    4. A rules/*.md entry that exists in the directory listing but cannot be
-       read (most commonly a broken symlink — rules/ is symlink-populated by
-       scripts/deploy.sh's prune loop, so this happens) is excluded from both
-       the measured line count and the reported file count, and is instead
-       named as "unreadable" in the warning text. It is NOT silently counted
-       as 0 lines against a file count that includes it, because that would
-       report a file count that does not match what was actually measured.
+    4. ANY input this check measures — a rules/*.md entry OR ~/.claude/
+       CLAUDE.md itself — that exists but cannot be read (most commonly a
+       broken symlink: rules/ is symlink-populated by scripts/deploy.sh's
+       prune loop, and CLAUDE.md is deploy-symlinked the same way, so both
+       break by the identical mechanism) is UNREADABLE, and every unreadable
+       input sets the SAME shared flag: `measurement_incomplete`. That flag,
+       not any per-input special case, is what gates the early return
+       (`if total <= ALWAYS_LOADED_THRESHOLD and not measurement_incomplete`).
+       This is deliberate: an earlier version of this check special-cased
+       only an unreadable CLAUDE.md, and a broken rules/ entry with the
+       surviving total at or under threshold still returned [] — the exact
+       go-dark failure this check exists to catch, just entering through the
+       other input. Folding every input into ONE flag means a future third
+       measured input only has to be OR'd into measurement_incomplete; it
+       cannot reintroduce this asymmetry by being forgotten as a fourth
+       conjunct the way the CLAUDE.md-only special case did. A rules/*.md
+       entry specifically is ALSO excluded from the measured line count and
+       the reported file count (never silently counted as 0 lines against a
+       file count that includes it) and is named via the "(N unreadable)"
+       fragment in the warning text.
 
-    5. ~/.claude/CLAUDE.md is ALSO a deploy symlink (-> skills/coding-team/
-       config/CLAUDE.md) and can break exactly as easily as any rules/ entry
-       — and it carries 238 of the 354 currently-deployed lines, so its own
-       breakage is the single largest thing this check can miss. Genuine
-       ABSENCE (no file and no symlink at all) stays silent, same as before —
-       see below. But PRESENT-BUT-UNREADABLE (broken symlink, permission
-       error, decode failure) is a measurement failure, not silence: it is
-       reported EVEN WHEN the surviving total (rules/ only) sits at or under
-       ALWAYS_LOADED_THRESHOLD. Without this, a de-initialized coding-team
-       submodule breaks CLAUDE.md and both rules/ symlinks at once, the
-       surviving total falls under threshold by construction, and this check
-       goes completely silent at the exact moment the harness is most
-       degraded. Reads the deployed CLAUDE.md via _read_lines() directly and
-       keeps its None result distinct from a genuine 0-line file, so "absent"
-       and "unreadable" stay two separately reportable states instead of
-       collapsing into one.
+    5. ~/.claude/CLAUDE.md is a deploy symlink (-> skills/coding-team/
+       config/CLAUDE.md) exactly like a rules/ entry, and carries 238 of the
+       354 currently-deployed lines, so its unreadability is the single
+       largest thing measurement_incomplete (design choice 4) can catch.
+       Genuine ABSENCE (no file and no symlink at all) is NOT unreadable and
+       stays silent under threshold — see below. Reads the deployed
+       CLAUDE.md via _read_lines() directly and keeps its None result
+       distinct from a genuine 0-line file, so "absent" and "unreadable"
+       remain two separately reportable states instead of collapsing into
+       one, the same distinction design choice 4 relies on for rules/*.md.
 
     Degrades silently ONLY when ~/.claude/CLAUDE.md is genuinely ABSENT (no
     file, no symlink) or ~/.claude/rules/ is absent (a machine that deploys
     neither): missing inputs mean there is nothing to measure, not a problem
-    to report. Returns [] in that case. A present-but-UNREADABLE CLAUDE.md
-    (design choice 5 above) is a different state and always surfaces, even
-    when the surviving total is under threshold. The function itself does not
-    otherwise raise, though Path.home() can raise RuntimeError if HOME is
-    unset and there is no passwd entry for the current user — this function
-    does not guard against that.
+    to report. Returns [] in that case. Whenever measurement_incomplete is
+    True (design choice 4) — CLAUDE.md unreadable, any rules/*.md entry
+    unreadable, or both — the check always surfaces, even when the surviving
+    total is under threshold. The function itself does not otherwise raise,
+    though Path.home() can raise RuntimeError if HOME is unset and there is
+    no passwd entry for the current user — this function does not guard
+    against that.
 
     Args:
         claude_dir: Root to measure. Defaults to ~/.claude. Tests pass a real
@@ -354,7 +362,12 @@ def check_always_loaded_surface(claude_dir: Path | None = None) -> list[str]:
             rules_lines += lines
 
     total = claude_md_lines + rules_lines
-    if total <= ALWAYS_LOADED_THRESHOLD and not claude_md_unreadable:
+
+    # ONE flag for "some always-loaded input could not be measured", covering
+    # BOTH inputs. A future third measured input folds into this flag too —
+    # see design choice 4 above for why that matters.
+    measurement_incomplete = claude_md_unreadable or unreadable > 0
+    if total <= ALWAYS_LOADED_THRESHOLD and not measurement_incomplete:
         return []
 
     unreadable_fragment = f" ({unreadable} unreadable)" if unreadable else ""
@@ -368,12 +381,20 @@ def check_always_loaded_surface(claude_dir: Path | None = None) -> list[str]:
     else:
         claude_md_fragment = f"{claude_md}: {claude_md_lines} lines"
 
+    incomplete_note = (
+        " At least one always-loaded input above could not be measured, so "
+        "this total is INCOMPLETE — treat it as a floor, not the true total."
+        if measurement_incomplete
+        else ""
+    )
+
     return [
         f"Always-loaded surface is {total} lines "
         f"(threshold: {ALWAYS_LOADED_THRESHOLD}). "
         f"{claude_md_fragment}. "
         f"{rules_dir}/*.md: {rules_lines} lines across "
-        f"{len(rules_files)} file(s){unreadable_fragment}. "
+        f"{len(rules_files)} file(s){unreadable_fragment}."
+        f"{incomplete_note} "
         "Both load into every session and every subagent — reduce whichever "
         "side is larger."
     ]
