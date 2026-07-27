@@ -223,30 +223,19 @@ def _read_lines(path: Path) -> int | None:
     """Return the line count of path, or None if it cannot be read at all.
 
     "Cannot be read" covers absence, a broken symlink, a permission error, and
-    a decoding failure alike — all raise inside path.read_text(). None lets a
-    caller tell that apart from "read successfully and got zero lines", which
-    _count_lines below deliberately collapses.
+    a decoding failure alike — all raise inside path.read_text(). Returning
+    None (rather than 0) for every one of those cases matters because a
+    caller may need to tell "unreadable" apart from "read successfully and
+    got zero lines" — collapsing them into the same 0 would make a broken
+    symlink indistinguishable from an empty file. check_always_loaded_surface()
+    below is exactly such a caller: it needs "present but unreadable" (e.g. a
+    broken ~/.claude/CLAUDE.md or ~/.claude/rules/*.md symlink) to be a
+    distinct, reportable state rather than silently folded into 0.
     """
     try:
         return len(path.read_text().splitlines())
     except (OSError, UnicodeDecodeError):
         return None
-
-
-def _count_lines(path: Path) -> int:
-    """Return the line count of path, or 0 if it is absent OR unreadable.
-
-    This collapses "absent" and "present but unreadable" (permission error,
-    broken symlink, bad encoding) into the same 0. check_always_loaded_surface()
-    does NOT use this wrapper for ~/.claude/CLAUDE.md: that path is itself a
-    deploy symlink and can go from "present" to "present but unreadable" as
-    easily as any entry under ~/.claude/rules/, so it calls _read_lines()
-    directly to keep the two states apart (see check_always_loaded_surface's
-    docstring, design choice 5). Any future caller that genuinely does not
-    need to distinguish "absent" from "unreadable" can still use this wrapper.
-    """
-    lines = _read_lines(path)
-    return 0 if lines is None else lines
 
 
 def check_always_loaded_surface(claude_dir: Path | None = None) -> list[str]:
@@ -317,9 +306,10 @@ def check_always_loaded_surface(claude_dir: Path | None = None) -> list[str]:
        submodule breaks CLAUDE.md and both rules/ symlinks at once, the
        surviving total falls under threshold by construction, and this check
        goes completely silent at the exact moment the harness is most
-       degraded. Reads the deployed CLAUDE.md via _read_lines() directly
-       (never _count_lines(), which collapses this exact distinction away)
-       so "absent" and "unreadable" stay distinguishable.
+       degraded. Reads the deployed CLAUDE.md via _read_lines() directly and
+       keeps its None result distinct from a genuine 0-line file, so "absent"
+       and "unreadable" stay two separately reportable states instead of
+       collapsing into one.
 
     Degrades silently ONLY when ~/.claude/CLAUDE.md is genuinely ABSENT (no
     file, no symlink) or ~/.claude/rules/ is absent (a machine that deploys

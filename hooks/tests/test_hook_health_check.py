@@ -737,9 +737,9 @@ class TestCheckAlwaysLoadedSurface:
     def test_broken_claude_md_symlink_warns_even_under_threshold(self, hhc, tmp_path):
         """THE go-dark regression this test guards against.
 
-        Before this fix, ~/.claude/CLAUDE.md was measured via _count_lines(),
-        which collapses "absent" and "present but unreadable" into the same
-        0. A broken CLAUDE.md symlink (the real failure mode when the
+        Before this fix, ~/.claude/CLAUDE.md was measured by a wrapper that
+        collapsed "absent" and "present but unreadable" into the same 0. A
+        broken CLAUDE.md symlink (the real failure mode when the
         coding-team submodule is de-initialized) would then silently drop
         out of the total, leaving only rules_lines. Sized so rules_lines
         alone (170) sits comfortably UNDER the 200 threshold: with the old
