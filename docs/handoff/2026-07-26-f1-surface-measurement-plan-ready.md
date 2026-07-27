@@ -1,4 +1,8 @@
-# Handoff — F1 surface-measurement: plan GATED & APPROVED, Phase 5 next (2026-07-26)
+# Handoff — F1 surface-measurement: IMPLEMENTED & LIVE, one gate left (2026-07-26, updated 2026-07-27)
+
+> **Filename is now slightly misleading** — it says `plan-ready`, but the plan is
+> executed. Kept as-is so existing references keep resolving; the content below is
+> authoritative over the filename.
 
 Supersedes nothing. Companion to `2026-07-26-saturation-remediation-phase1-complete.md`,
 which is still accurate for everything outside this plan. Every state claim below
@@ -6,41 +10,52 @@ was verified by command at write time.
 
 ---
 
-## ► RESUME HERE — Phase 5 execution
+## ► RESUME HERE — one gate left, then Phase 6
 
-**The Codex plan gate is DONE. Verdict APPROVED after 5 rounds. Do NOT re-run it.**
-Phase 4 and the gate are both closed. The next action is Phase 5:
+**Phases 1-5 are DONE. The feature is IMPLEMENTED, TESTED, DEPLOYED, and LIVE.**
+The Codex *plan* gate closed APPROVED after 5 rounds — **do NOT re-run it**, and do
+NOT re-plan or re-dispatch Tasks 1-4. All four landed and were verified by command.
 
-1. ~~Flip the plan to `status: in-progress`~~ — **DONE. The plan is ARMED.** Verified
-   it is the only `in-progress` plan. Declared paths: `hooks/hook-health-check.py`
-   and `hooks/tests/test_hook_health_check.py`. Both reviewers confirmed that
-   declaration is complete AND minimal; `docs/*` and `rules/*` are not gated
-   (`hooks/write-guard.py:143-150` — verified). See the ARMED warning under
-   "Repo state" before touching any other instruction file.
-   **BASE_SHA for Task 1: `6668993`.**
-2. Dispatch Tasks 1 → 2 → 3 → 4 **in that order, via `/coding-team`**. Do not reorder.
-   Task 1 deliberately leaves an unwired function — a dark feature until Task 2 lands.
-   **Do not report the feature complete after Task 1.**
-3. Then the 4 blocking Phase 5 exit gates: full-suite test+lint, `ct-qa-reviewer`,
-   doc-drift scan, post-exec Codex `review` (mode `review`, not `plan`). All RUN at Medium.
+**The single remaining action is Phase 5 exit gate 4: the post-execution Codex
+`review` (mode `review`, NOT `plan`), over `git diff main..HEAD`.** Gates 1-3 are
+closed (see "Phase 5 exit gates" below).
 
-**State at handoff:** no code has changed; nothing is half-applied. This handoff is
-**committed** — the working tree holds NOTHING of ours. The only two entries in
-`git status` are `.claude/settings.local.json` (modified) and the untracked
-`skills/second-opinion/codex-learnings.d/20260723-...` entry; both are pre-existing
-and **must never be staged**.
+After that gate passes:
+1. Set the plan's frontmatter to `status: complete` — **this is what disarms
+   `hooks/write-guard.py`**, which is currently ARMED. See the ARMED warning under
+   "Repo state" before touching any instruction file outside the two declared paths.
+2. Phase 6: choose merge / PR / keep-branch / discard.
 
-**Baseline re-verified this session:** `python3 -m pytest hooks/tests -q` →
-**1055 passed, 9 skipped**, exit 0. `ruff check .` → clean. Task 1 Step 0 still
-re-measures `BASELINE` itself; later totals are `BASELINE + 10` / `BASELINE + 11`.
-**Do not substitute absolute numbers** — the whole point of the `BASELINE + N` form
-is that it survives a different tree.
+**State at handoff:** 5 code+docs commits landed on top of the 4 pre-existing docs
+commits; nothing is half-applied; no mutation survives anywhere (verified by
+`git diff` after every mutation round). The working tree holds **three** entries,
+and **none may ever be staged**: `.claude/settings.local.json` (modified,
+pre-existing), `docs/handoff/2026-07-26-f1-surface-measurement-plan-ready.md`
+(modified — THIS file, in flight), and the untracked
+`skills/second-opinion/codex-learnings.d/20260723-...` entry (pre-existing).
+
+**Verified after the final commit `92a0c78`:** `python3 -m pytest hooks/tests -q` →
+**1067 passed, 9 skipped**, exit 0. `ruff check .` → clean. Live probe
+`echo '{}' | python3 ~/.claude/hooks/hook-health-check.py` → `exit=0`,
+`"decision": "allow"`, reason contains
+`Always-loaded surface is 354 lines (threshold: 200)`.
+
+*(Suite arithmetic, for anyone re-deriving it: BASELINE 1055 → +10 Task 1 → +1
+Task 2 → +1 the broken-symlink test in `92a0c78` = 1067.)*
 
 ---
 
 ## Repo state
 
-- **Branch:** `feat/always-loaded-surface-measurement`, cut from synced `main` @ `0998201`. **Three commits, all docs, ZERO code commits:** `60f4e40` (this handoff, created), `6668993` (gate APPROVED + pre-flight corrections), `7aaf725` (write-guard ARMED warning). Task 1's BASE_SHA is `6668993` — recorded before `7aaf725` landed; both are docs-only so the code diff from either is identical.
+- **Branch:** `feat/always-loaded-surface-measurement`, cut from synced `main` @ `0998201`. **Nine commits.** Four docs-only, from before execution: `60f4e40` (this handoff, created), `6668993` (gate APPROVED + pre-flight corrections), `7aaf725` (write-guard ARMED warning), `4572c27` (reconciled 7 stale claims). Then the five from Phase 5:
+
+  | SHA | Task | Contents |
+  |---|---|---|
+  | `3869805` | 1 | `ALWAYS_LOADED_THRESHOLD`, `_count_lines()`, `check_always_loaded_surface()`, 10 tests. Function left deliberately unwired |
+  | `64cd331` | 2 | Wired into `main()` (call + early-return conjunct + output block), `main()`-level integration test, reason-allowlist entry, deployed |
+  | `6f4b38e` | 3 | Corrected F3's prescription + both falsified Appendix B rows in the audit report |
+  | `bcd381d` | 4 | Recorded F1 as landed in the Phase-1 handoff; corrected its stale symlink count |
+  | `92a0c78` | QA fixes | Four defects the QA gate found in the above — see "QA findings" below |
 - **`main`** @ `0998201`. Merged today: #118–#124.
 - **⚠ `write-guard.py` is now ARMED — deliberately.** As of Phase 5 pre-flight,
   `docs/plans/2026-07-26-always-loaded-surface-measurement.md` carries
@@ -56,14 +71,78 @@ is that it survives a different tree.
   (modified) and untracked `skills/second-opinion/codex-learnings.d/20260723-...-self-heal-migration-schema-shape.md`.
   **Never stage either.** The second is a live C27 learning entry AND the cause of
   the digest test failure (see "Known failures").
-- **Verified baseline:** `python3 -m pytest hooks/tests -q` → **1055 passed, 9 skipped**.
-  `ruff check .` → clean. I ran this myself; it is not carried from a brief.
+- **Verified current state:** `python3 -m pytest hooks/tests -q` → **1067 passed,
+  9 skipped** (was 1055 before execution). `ruff check .` → clean.
+
+## Phase 5 exit gates — 3 of 4 CLOSED
+
+| # | Gate | Status |
+|---|---|---|
+| 1 | Full-suite test + lint | ✅ 1067 passed / 9 skipped, ruff clean, run after the final commit |
+| 2 | `ct-qa-reviewer` | ✅ **PASS**, zero P1s. 7 findings — 4 fixed in `92a0c78`, 3 deferred (below) |
+| 3 | Doc-drift scan | ✅ One finding: THIS handoff was stale. Fixed by the edit you are reading. No other tracked doc drifted |
+| 4 | Post-exec Codex `review` | ❌ **NOT RUN — this is the resume point** |
+
+**Gate 2 confirmed the things most worth confirming:** the dark feature Task 1
+deliberately left IS closed (`check_always_loaded_surface` → called at `:731` →
+emitted at `:764-768` → survives the early return at `:739-741` → `allow_with_reason`
+→ dispatcher envelope-unwrap → user); no path in the diff can produce a block; the
+new test class did NOT copy the vacuous inline-glob pattern from
+`TestCheckInstructionFileLengths`; and every doc number (238 / 116 / 7 files / 354 /
+2 symlinks + 5 regular / 61 across 3) checks out independently.
+
+## QA findings — 4 fixed, 3 deferred to the reduction phase
+
+**Fixed in `92a0c78`** (all four were introduced by this session's own commits, so
+none was eligible for deferral):
+1. Two `file:line` citations in a committed docstring pointed at unrelated code
+   (`:667` is `parts = []`, not `allow_with_reason`, which is at `:779`; the
+   `HOOKS_DIR.is_dir()` guard is `:688-689`, not `:589-590`). Now cite the SYMBOL
+   name first, line second — this file has drifted twice.
+2. **The `mock-ok:` markers were leaving two lines permanently unguarded.**
+   `write-guard.py:628-631` exempts the marker's own line AND the following line, so
+   `:466`/`:677` were dead zones in this repo's flagship no-mocks test file. Root
+   cause was prose containing the literal word `monkeypatch` while explaining it is
+   NOT used. Rewriting it as `monkey-patching` defeats the `\bmonkeypatch\b` regex,
+   so both markers were deleted and the guard restored. **`grep -c "mock-ok"` → 0.**
+3. A broken symlink under `rules/` was counted in `len(rules_files)` while
+   contributing 0 lines ("116 lines across 8 file(s)"). Unreadable entries are now
+   excluded from the count and reported as `(N unreadable)`. New test + mutation proof.
+4. The docstring claimed the sum "is the cost a session actually pays" — false.
+
+**Deferred — these BLOCK Groups B/C/D, not this merge:**
+1. **`MEMORY.md` is unmeasured.** `~/.claude/projects/<slug>/memory/MEMORY.md`
+   (64 lines today, grows with every feedback memory) also auto-loads into every
+   session. True surface is ~418, not 354. Folding it in makes the number
+   project-dependent, which is a real design cost — **this is a scope decision for
+   the operator, not a bug.** The docstring now names it as a known-unmeasured
+   contributor and calls the reported number a floor.
+2. **The audit's reduction arithmetic does not reconcile.** Group subtotals
+   (−110/−42/−93/−44/+12) sum to **187**, not the **163** printed as the target at
+   `docs/reports/2026-07-26-claudemd-saturation-audit.md:280` and `:19`. Every
+   subtotal is internally correct; the 24-line gap is in the roll-up. Combined with
+   item 1, the claimed "37 lines of headroom" is actually negative. **The bad number
+   is already propagated into `2026-07-26-saturation-remediation-phase1-complete.md:113`
+   ("Target 354 → 163"), which is what the next phase will execute against.**
+3. **The audit report is half-corrected.** `6f4b38e` adopted correct-inline-with-a-
+   dated-note for F3 and Appendix B, but the same document still carries unmarked:
+   `:6` "all 12 rules" (now 7), `:15`/`:19`/`:22`/`:137-138` "464" (now 354), `:111`
+   "226 lines" (now 116), and **§5 Group A has no LANDED marker** while `:270-281`'s
+   arithmetic still assumes it is pending. Pick ONE convention for the document.
+
+**One resume trigger worth setting:** `main()`'s early-return conjunct
+(`hook-health-check.py:739-741`) is inert in BOTH environments today, because
+`check_instruction_file_lengths()` is never empty at either root. It becomes
+load-bearing at exactly the moment the reductions succeed and the surface warning is
+the only remaining signal. **When `check_instruction_file_lengths()` first returns
+`[]`, re-verify that conjunct by mutation** — until then it is inspection-only.
 
 ## The plan
 
 `docs/plans/2026-07-26-always-loaded-surface-measurement.md` — **1152 lines,
 `status: in-progress` (ARMED — see the warning under "Repo state"), gitignored**
-(`.gitignore:2`, so it will never be committed). It grew 1028 → 1152 during the
+(`.gitignore:2`, so it will never be committed). **Set it to `status: complete` once
+gate 4 passes; that is what disarms the write-guard.** It grew 1028 → 1152 during the
 5-round Codex gate; almost all of that is prose about its own test coverage, not
 about the change, which is still one function + one helper + one constant + ~7
 lines of wiring.
@@ -75,18 +154,16 @@ instruction_files: hooks/hook-health-check.py, hooks/tests/test_hook_health_chec
 Both reviewers independently confirmed this declaration is complete AND minimal.
 `docs/*` is not gated; `scripts/deploy.sh` is executed, not edited.
 
-**Task order — 4 tasks, do not reorder:**
+**All 4 tasks are EXECUTED and committed** — see the commit table under "Repo state"
+for what each one landed. Task 4 was dispatched at `sonnet` rather than the plan's
+`haiku`: its Step 3/4 required re-deriving literal `old_string`s from a hard-wrapped
+file rather than copying them from the brief, and its Step 6 had become the plan's
+final whole-plan verification gate. That is judgment, not mechanical replacement.
 
-| # | Task | Model |
-|---|---|---|
-| 1 | `check_always_loaded_surface()` + `_count_lines()` + **10** tests, **12**-row mutation table | sonnet |
-| 2 | Wire into `main()`, extend integration allowlist, live probe, `deploy.sh` | sonnet |
-| 3 | Correct F3's prescription + 2 Appendix B prediction rows in the audit report | sonnet |
-| 4 | Update the handoff's stale F1 entry and symlink counts | haiku |
-
-**Task 1 Step 0 captures `BASELINE` first.** Later totals are `BASELINE + 10` and
-`BASELINE + 11`. Do not reintroduce absolute numbers — the implementer may run
-against a different tree, which is the whole point of the `BASELINE + N` form.
+Every mutation table was performed in full — 12 rows in Task 1, 2 in Task 2, 1 for
+the QA fix — each restored and confirmed by `git diff`. **Mutation 7 (repo-rooting
+the default) did turn `test_default_target_is_the_deployed_home_dir` RED**, which is
+the one result that proves the deployed-path guard is real rather than prose.
 
 ## What the fix is, and why this shape
 
@@ -243,7 +320,9 @@ re-attempting the exhaustive mapping; that is the loop this took five rounds to 
    rules sit coding-team-owned) is deferred and optional.
 2. **PR #95** — audit says close it, re-land only its rule 2 as ~4 lines, AFTER
    Groups B-D.
-3. **Groups B/C/D** — target 354 → 163. **F2 lands LAST.**
+3. **Groups B/C/D** — **the 163 target does not reconcile; do NOT execute against it
+   until it is recomputed.** The group subtotals sum to 187, and the unmeasured
+   `MEMORY.md` adds ~64 more — see deferred findings 1 and 2 above. **F2 lands LAST.**
 4. `~/.claude` branch `harness/reconcile-reference-deploy` @ `cbb8ea2` — **local,
    unpushed**, on top of 5 unpushed harness-map commits. Branched from HEAD, not
    `origin/main`, because `origin/main` there still carries
