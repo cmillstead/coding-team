@@ -219,12 +219,32 @@ def check_instruction_file_lengths() -> list[str]:
     return warnings
 
 
-def _count_lines(path: Path) -> int:
-    """Return the line count of path, or 0 if it is absent or unreadable."""
+def _read_lines(path: Path) -> int | None:
+    """Return the line count of path, or None if it cannot be read at all.
+
+    "Cannot be read" covers absence, a broken symlink, a permission error, and
+    a decoding failure alike — all raise inside path.read_text(). None lets a
+    caller tell that apart from "read successfully and got zero lines", which
+    _count_lines below deliberately collapses.
+    """
     try:
         return len(path.read_text().splitlines())
     except (OSError, UnicodeDecodeError):
-        return 0
+        return None
+
+
+def _count_lines(path: Path) -> int:
+    """Return the line count of path, or 0 if it is absent OR unreadable.
+
+    This collapses "absent" and "present but unreadable" (permission error,
+    broken symlink, bad encoding) into the same 0 — the right behavior for a
+    single fixed path like CLAUDE.md, where there is no third state to report.
+    A caller that must distinguish the two (see check_always_loaded_surface's
+    handling of broken symlinks under ~/.claude/rules/) should call
+    _read_lines() directly instead of going through this wrapper.
+    """
+    lines = _read_lines(path)
+    return 0 if lines is None else lines
 
 
 def check_always_loaded_surface(claude_dir: Path | None = None) -> list[str]:
@@ -232,9 +252,14 @@ def check_always_loaded_surface(claude_dir: Path | None = None) -> list[str]:
 
     Sums ~/.claude/CLAUDE.md plus every ~/.claude/rules/*.md and compares the
     TOTAL against ALWAYS_LOADED_THRESHOLD. Both load unconditionally into every
-    session and every subagent, so the sum is the cost a session actually pays.
+    session and every subagent, so the sum is the largest fixed component of
+    what a session pays — NOT the total. This project also auto-loads a
+    per-project ~/.claude/projects/<slug>/memory/MEMORY.md into every session
+    (64 lines today, and it grows every time a feedback memory lands), and
+    this check does not measure it. Treat the number this check reports as a
+    floor, not a total.
 
-    Three design choices, each load-bearing:
+    Four design choices, each load-bearing:
 
     1. It reads the DEPLOYED directory (~/.claude), NOT this repository.
        ~/.claude is itself a git repo (cmillstead/claude-harness) that tracks
@@ -270,9 +295,20 @@ def check_always_loaded_surface(claude_dir: Path | None = None) -> list[str]:
        the reductions, because a blocking cap would block the very edits that
        reduce the surface. This warning carries no such ordering hazard.
 
+    4. A rules/*.md entry that exists in the directory listing but cannot be
+       read (most commonly a broken symlink — rules/ is symlink-populated by
+       scripts/deploy.sh's prune loop, so this happens) is excluded from both
+       the measured line count and the reported file count, and is instead
+       named as "unreadable" in the warning text. It is NOT silently counted
+       as 0 lines against a file count that includes it, because that would
+       report a file count that does not match what was actually measured.
+
     Degrades silently when ~/.claude/CLAUDE.md or ~/.claude/rules/ is absent
     (a machine that deploys neither): missing inputs mean there is nothing to
-    measure, not a problem to report. Returns [] and raises nothing.
+    measure, not a problem to report. Returns [] in that case. The function
+    itself does not otherwise raise, though Path.home() can raise RuntimeError
+    if HOME is unset and there is no passwd entry for the current user — this
+    function does not guard against that.
 
     Args:
         claude_dir: Root to measure. Defaults to ~/.claude. Tests pass a real
@@ -285,19 +321,31 @@ def check_always_loaded_surface(claude_dir: Path | None = None) -> list[str]:
     rules_dir = claude_dir / "rules"
 
     claude_md_lines = _count_lines(claude_md)
-    rules_files = sorted(rules_dir.glob("*.md")) if rules_dir.is_dir() else []
-    rules_lines = sum(_count_lines(f) for f in rules_files)
+
+    rules_entries = sorted(rules_dir.glob("*.md")) if rules_dir.is_dir() else []
+    rules_files = []
+    rules_lines = 0
+    unreadable = 0
+    for entry in rules_entries:
+        lines = _read_lines(entry)
+        if lines is None:
+            unreadable += 1
+        else:
+            rules_files.append(entry)
+            rules_lines += lines
 
     total = claude_md_lines + rules_lines
     if total <= ALWAYS_LOADED_THRESHOLD:
         return []
+
+    unreadable_fragment = f" ({unreadable} unreadable)" if unreadable else ""
 
     return [
         f"Always-loaded surface is {total} lines "
         f"(threshold: {ALWAYS_LOADED_THRESHOLD}). "
         f"{claude_md}: {claude_md_lines} lines. "
         f"{rules_dir}/*.md: {rules_lines} lines across "
-        f"{len(rules_files)} file(s). "
+        f"{len(rules_files)} file(s){unreadable_fragment}. "
         "Both load into every session and every subagent — reduce whichever "
         "side is larger."
     ]

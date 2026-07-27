@@ -462,7 +462,7 @@ class TestCheckAlwaysLoadedSurface:
     Every test builds a real ~/.claude-shaped tree under tmp_path with real
     files, then calls the real production function. The function reads a
     filesystem, so the tests give it one — no mocks, no patches, no
-    monkeypatch (GP#1 Real Over Mocks; mock-ok: naming the absent pattern is documentation, not usage). Exactly ONE test
+    monkey-patching (GP#1 Real Over Mocks). Exactly ONE test
     (test_aggregate_spans_symlinked_and_regular_rules) builds a real symlink,
     because it is the only one whose property depends on symlink traversal;
     do not describe the others as exercising symlinks.
@@ -516,6 +516,35 @@ class TestCheckAlwaysLoadedSurface:
         # Pin the total, not a loose substring — the message also embeds
         # tmp_path, which could coincidentally contain "220".
         assert "is 220 lines" in warnings[0]
+
+    def test_broken_symlink_excluded_from_file_count_and_named_unreadable(self, hhc, tmp_path):
+        """A broken symlink under rules/ is a real directory entry that glob()
+        returns but that cannot be read — it must NOT inflate the reported
+        file count while contributing 0 lines, and the warning must say so.
+
+        Sized so the total is over threshold from the readable file alone
+        (201), so the warning fires regardless of whether the broken symlink
+        is (wrongly) counted as a 0-line file or (correctly) excluded.
+        """
+        claude_dir = tmp_path / "claude"
+        rules_dir = claude_dir / "rules"
+        rules_dir.mkdir(parents=True)
+        self._write_lines(claude_dir / "CLAUDE.md", 150)
+        self._write_lines(rules_dir / "readable.md", 51)
+
+        # A real broken symlink: points at a path that does not exist.
+        broken = rules_dir / "broken.md"
+        broken.symlink_to(tmp_path / "does-not-exist.md")
+        assert broken.is_symlink()
+        assert not broken.exists()  # confirms the target is genuinely missing
+
+        warnings = hhc.check_always_loaded_surface(claude_dir=claude_dir)
+
+        assert len(warnings) == 1
+        text = warnings[0]
+        assert "is 201 lines" in text
+        # File count must exclude the broken symlink — 1, not 2.
+        assert f"{rules_dir}/*.md: 51 lines across 1 file(s) (1 unreadable)" in text
 
     def test_warning_names_both_contributors(self, hhc, tmp_path):
         """The text ATTRIBUTES each count to its own contributor, plus the total.
@@ -673,7 +702,7 @@ class TestCheckAlwaysLoadedSurface:
 
         Path.home() reads the HOME environment variable on POSIX, so pointing
         HOME at a real temp tree inside try/finally is real environment
-        manipulation against a real filesystem — not monkeypatch, not a mock (mock-ok: named only to rule it out).
+        manipulation against a real filesystem — not monkey-patching, not a mock.
         Same shape as TestPrThroughputCache::test_fresh_cache_skips_gh above,
         which swaps PATH the same way.
 
@@ -1028,13 +1057,13 @@ class TestIntegration:
         reason Step 7 sets out. It must fail if the
         `if surface_warnings:` block is deleted, so it asserts on the reason
         TEXT, not merely on decision == "allow" — main()'s sole output path is
-        allow_with_reason() (hook-health-check.py:667), so "allow" is true by
+        allow_with_reason() (hook-health-check.py:779), so "allow" is true by
         construction and asserting it guards nothing.
 
         HOME is pointed at a real temp tree so the SURFACE is a number this
         test controls rather than whatever this machine happens to deploy. The
         fake ~/.claude/hooks/ is created but left EMPTY, which satisfies
-        main()'s `HOOKS_DIR.is_dir()` guard (:589-590) while making the hook
+        main()'s HOOKS_DIR.is_dir() guard (:688-689) while making the hook
         fan-out a no-op — no subprocess probes, no gh call, no metrics I/O.
         Real filesystem, real env var, no mocks.
 
