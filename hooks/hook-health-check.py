@@ -723,6 +723,13 @@ def main():
     # Check instruction file lengths (case study #24: context saturation)
     length_warnings = check_instruction_file_lengths()
 
+    # Check the DEPLOYED always-loaded surface as an aggregate (F1). Separate
+    # from the per-file check above for two reasons: that one's glob list has
+    # no entry for CLAUDE.md or rules/*.md, and its __file__-relative root
+    # differs between the deployed hook and the test suite. This one is
+    # home-relative and aggregate.
+    surface_warnings = check_always_loaded_surface()
+
     # Check skill symlinks (merged from symlink-integrity-check.py)
     symlink_issues = check_skill_symlinks()
 
@@ -730,7 +737,8 @@ def main():
     metrics_parts = check_metrics()
 
     if (not unhealthy and not mcp_issues and not length_warnings
-            and not symlink_issues and not metrics_parts):
+            and not symlink_issues and not metrics_parts
+            and not surface_warnings):
         return  # All healthy, no metrics — silent success
 
     parts = []
@@ -752,6 +760,11 @@ def main():
             f"Instruction file length check: {len(length_warnings)} file(s) over 200 lines.\n"
             "Context saturation degrades compliance beyond ~200 lines:\n"
             + "\n".join(f"  - {w}" for w in length_warnings)
+        )
+    if surface_warnings:
+        parts.append(
+            "Always-loaded surface check:\n"
+            + "\n".join(f"  - {w}" for w in surface_warnings)
         )
     if symlink_issues:
         parts.append(

@@ -1013,8 +1013,68 @@ class TestIntegration:
                 "unhealthy" in reason_lower
                 or "mcp" in reason_lower
                 or "instruction file" in reason_lower
+                or "always-loaded" in reason_lower
                 or "session cost" in reason_lower
                 or "anomal" in reason_lower
             )
         else:
             assert result.stdout.strip() == ""
+
+    def test_main_emits_surface_warning_in_reason(self, tmp_path, capsys):
+        """main() folds the surface warning into its advisory reason.
+
+        This is the ONLY guard on Steps 2 and 4 of this task — NOT Step 3,
+        whose early-return conjunct is verified by inspection only, for the
+        reason Step 7 sets out. It must fail if the
+        `if surface_warnings:` block is deleted, so it asserts on the reason
+        TEXT, not merely on decision == "allow" — main()'s sole output path is
+        allow_with_reason() (hook-health-check.py:667), so "allow" is true by
+        construction and asserting it guards nothing.
+
+        HOME is pointed at a real temp tree so the SURFACE is a number this
+        test controls rather than whatever this machine happens to deploy. The
+        fake ~/.claude/hooks/ is created but left EMPTY, which satisfies
+        main()'s `HOOKS_DIR.is_dir()` guard (:589-590) while making the hook
+        fan-out a no-op — no subprocess probes, no gh call, no metrics I/O.
+        Real filesystem, real env var, no mocks.
+
+        The HOME swap does NOT isolate the whole run, and this test does not
+        need it to. Two checks stay bound to the real machine:
+        check_instruction_file_lengths() is rooted at Path(__file__).parent.
+        parent and walks the real repo, and check_mcp_health() does a real
+        shutil.which() under an unswapped PATH. Both only ADD to the reason
+        string, so neither can mask the assertions below — but do not read
+        this test as a hermetic main(). It is not one.
+        """
+        fake_home = tmp_path / "home"
+        claude_dir = fake_home / ".claude"
+        (claude_dir / "hooks").mkdir(parents=True)
+        rules_dir = claude_dir / "rules"
+        rules_dir.mkdir()
+        (claude_dir / "CLAUDE.md").write_text(
+            "\n".join(f"line {i}" for i in range(400))
+        )
+        (rules_dir / "a-rule.md").write_text(
+            "\n".join(f"line {i}" for i in range(300))
+        )
+
+        original_home = os.environ.get("HOME")
+        os.environ["HOME"] = str(fake_home)
+        try:
+            # Load AFTER swapping HOME: HOOKS_DIR / SETTINGS_PATH /
+            # METRICS_DIR are module constants resolved at import time.
+            hhc = load_module()
+            hhc.main()
+            captured = capsys.readouterr()
+        finally:
+            if original_home is None:
+                os.environ.pop("HOME", None)
+            else:
+                os.environ["HOME"] = original_home
+
+        assert captured.out.strip(), "main() produced no advisory output"
+        parsed = json.loads(captured.out)
+        assert parsed["decision"] == "allow"
+        reason = parsed["reason"].lower()
+        assert "always-loaded surface" in reason
+        assert "is 700 lines" in reason
