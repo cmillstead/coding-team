@@ -238,6 +238,65 @@ def _read_lines(path: Path) -> int | None:
         return None
 
 
+def _measure_file(path: Path) -> tuple[int, str]:
+    """Return (line_count, status) for a single always-loaded FILE input.
+
+    status is exactly one of:
+      - "measured": read successfully; line_count is meaningful.
+      - "absent": genuinely not there (no file, no symlink at all) —
+        line_count is 0, and this is NOT a measurement failure.
+      - "unreadable": something exists at this path (a file, or a symlink of
+        any kind) but it could not be read (broken symlink target,
+        permission error, decode failure) — line_count is 0, and this IS a
+        measurement failure.
+
+    Used for ~/.claude/CLAUDE.md and for each ~/.claude/rules/*.md entry.
+    See check_always_loaded_surface's docstring (design choice 4) for why
+    every input goes through a shared three-way discrimination like this one
+    instead of each caller reimplementing its own absent/unreadable check.
+    """
+    lines = _read_lines(path)
+    if lines is not None:
+        return lines, "measured"
+    if path.exists() or path.is_symlink():
+        return 0, "unreadable"
+    return 0, "absent"
+
+
+def _measure_rules_dir(rules_dir: Path) -> tuple[list[Path], str]:
+    """Return (entries, status) for the ~/.claude/rules/ DIRECTORY input itself.
+
+    status is exactly one of:
+      - "measured": rules_dir is a real, traversable directory. entries is
+        its sorted *.md children (possibly empty — an empty, readable
+        rules/ is legitimately "measured, found nothing").
+      - "absent": genuinely not there (no file, no symlink at all) —
+        entries is []. NOT a measurement failure.
+      - "unreadable": something exists at this path but cannot be
+        enumerated as a directory: a broken symlink, a regular file sitting
+        where a directory belongs, or a real directory whose contents
+        cannot be listed (permission denied). entries is []. THIS is a
+        measurement failure, unlike "absent".
+
+    is_dir() alone cannot detect the permission-denied case — it confirms
+    the path itself is a directory, not that its contents are readable —
+    and Path.glob() silently swallows PermissionError during traversal and
+    yields no entries, which is the same "unreadable read as measured-empty"
+    defect this function exists to close. Path.iterdir() raises instead of
+    swallowing, so traversal happens inside try/except OSError rather than
+    being inferred from is_dir() alone.
+    """
+    if not rules_dir.exists() and not rules_dir.is_symlink():
+        return [], "absent"
+    if not rules_dir.is_dir():
+        return [], "unreadable"
+    try:
+        entries = sorted(p for p in rules_dir.iterdir() if p.name.endswith(".md"))
+    except OSError:
+        return [], "unreadable"
+    return entries, "measured"
+
+
 def check_always_loaded_surface(claude_dir: Path | None = None) -> list[str]:
     """Warn when the DEPLOYED always-loaded surface exceeds the line threshold.
 
@@ -286,47 +345,65 @@ def check_always_loaded_surface(claude_dir: Path | None = None) -> list[str]:
        the reductions, because a blocking cap would block the very edits that
        reduce the surface. This warning carries no such ordering hazard.
 
-    4. ANY input this check measures — a rules/*.md entry OR ~/.claude/
-       CLAUDE.md itself — that exists but cannot be read (most commonly a
-       broken symlink: rules/ is symlink-populated by scripts/deploy.sh's
-       prune loop, and CLAUDE.md is deploy-symlinked the same way, so both
-       break by the identical mechanism) is UNREADABLE, and every unreadable
-       input sets the SAME shared flag: `measurement_incomplete`. That flag,
-       not any per-input special case, is what gates the early return
+    4. EVERY always-loaded input this check reads — ~/.claude/CLAUDE.md, the
+       ~/.claude/rules/ DIRECTORY itself, and each individual rules/*.md
+       entry — is routed through the same affirmative three-way
+       discrimination (_measure_file() for files, _measure_rules_dir() for
+       the directory): "measured" (read/listed successfully), "absent"
+       (genuinely not there at all — not a failure), or "unreadable"
+       (present but could not be measured — IS a failure). Every input's
+       status is collected into one `statuses` list, and
+       `measurement_incomplete = any(status == "unreadable" for status in
+       statuses)` is the ENTIRE derivation — no per-input special case, no
+       enumerated list of "known" failure modes to keep in sync by hand.
+       That flag, not any per-input branch, is what gates the early return
        (`if total <= ALWAYS_LOADED_THRESHOLD and not measurement_incomplete`).
-       This is deliberate: an earlier version of this check special-cased
-       only an unreadable CLAUDE.md, and a broken rules/ entry with the
-       surviving total at or under threshold still returned [] — the exact
-       go-dark failure this check exists to catch, just entering through the
-       other input. Folding every input into ONE flag means a future third
-       measured input only has to be OR'd into measurement_incomplete; it
-       cannot reintroduce this asymmetry by being forgotten as a fourth
-       conjunct the way the CLAUDE.md-only special case did. A rules/*.md
-       entry specifically is ALSO excluded from the measured line count and
-       the reported file count (never silently counted as 0 lines against a
-       file count that includes it) and is named via the "(N unreadable)"
-       fragment in the warning text.
+
+       This shape exists because the alternative — enumerating known failure
+       modes one at a time — kept missing one. Three separate review passes
+       found three separate instances of the identical class, each entering
+       through a different input this check reads: an unreadable CLAUDE.md
+       file, an unreadable rules/*.md entry, and an unmeasurable rules/
+       directory itself (broken symlink, a regular file where a directory
+       belongs, or a real directory whose contents raise OSError on
+       listing — is_dir() alone cannot see that last one, and glob()
+       silently swallows PermissionError rather than surfacing it). Each
+       time, the surviving total fell to or under ALWAYS_LOADED_THRESHOLD
+       and the check went dark, because "could not measure" had silently
+       become "measured, found nothing" for exactly the one input not yet
+       covered. Routing every input through an affirmative measured/
+       absent/unreadable discrimination — rather than patching each newly
+       discovered failure mode into the gate condition — means a future
+       fourth input is added to the `statuses` enumeration, with
+       measurement_incomplete following automatically; it cannot recreate
+       this class by being forgotten as a new conjunct. A rules/*.md entry
+       specifically is ALSO excluded from the measured line count and the
+       reported file count when unreadable (never silently counted as 0
+       lines against a file count that includes it) and is named via the
+       "(N unreadable)" fragment in the warning text.
 
     5. ~/.claude/CLAUDE.md is a deploy symlink (-> skills/coding-team/
        config/CLAUDE.md) exactly like a rules/ entry, and carries 238 of the
-       354 currently-deployed lines, so its unreadability is the single
-       largest thing measurement_incomplete (design choice 4) can catch.
-       Genuine ABSENCE (no file and no symlink at all) is NOT unreadable and
-       stays silent under threshold — see below. Reads the deployed
-       CLAUDE.md via _read_lines() directly and keeps its None result
-       distinct from a genuine 0-line file, so "absent" and "unreadable"
-       remain two separately reportable states instead of collapsing into
-       one, the same distinction design choice 4 relies on for rules/*.md.
+       354 currently-deployed lines, so its unreadability is one of the
+       largest things measurement_incomplete (design choice 4) can catch —
+       alongside the rules/ directory itself going unreadable, which can
+       silently drop the entire rules/ side to 0 the same way. Genuine
+       ABSENCE (no file and no symlink at all, for either CLAUDE.md or
+       rules/) is NOT unreadable and stays silent under threshold — see
+       below. _measure_file() and _measure_rules_dir() both keep "absent"
+       distinct from "unreadable" by checking exists()/is_symlink() rather
+       than inferring absence from a None line count alone, which is what
+       let a broken symlink masquerade as absence in the original defect.
 
     Degrades silently ONLY when ~/.claude/CLAUDE.md is genuinely ABSENT (no
     file, no symlink) or ~/.claude/rules/ is absent (a machine that deploys
     neither): missing inputs mean there is nothing to measure, not a problem
     to report. Returns [] in that case. Whenever measurement_incomplete is
-    True (design choice 4) — CLAUDE.md unreadable, any rules/*.md entry
-    unreadable, or both — the check always surfaces, even when the surviving
-    total is under threshold. The function itself does not otherwise raise,
-    though Path.home() can raise RuntimeError if HOME is unset and there is
-    no passwd entry for the current user — this function does not guard
+    True (design choice 4) — ANY measured input's status is "unreadable" —
+    the check always surfaces, even when the surviving total is under
+    threshold. The function itself does not otherwise raise, though
+    Path.home() can raise RuntimeError if HOME is unset and there is no
+    passwd entry for the current user — this function does not guard
     against that.
 
     Args:
@@ -339,40 +416,37 @@ def check_always_loaded_surface(claude_dir: Path | None = None) -> list[str]:
     claude_md = claude_dir / "CLAUDE.md"
     rules_dir = claude_dir / "rules"
 
-    claude_md_raw_lines = _read_lines(claude_md)
-    # "Present" covers a broken symlink (exists() is False, is_symlink() is
-    # True) as well as a regular file/permission error/decode failure
-    # (exists() is True). Only when NEITHER holds is CLAUDE.md genuinely
-    # absent — the one case that stays silent under threshold.
-    claude_md_unreadable = claude_md_raw_lines is None and (
-        claude_md.exists() or claude_md.is_symlink()
-    )
-    claude_md_lines = 0 if claude_md_raw_lines is None else claude_md_raw_lines
+    claude_md_lines, claude_md_status = _measure_file(claude_md)
+    rules_entries, rules_dir_status = _measure_rules_dir(rules_dir)
 
-    rules_entries = sorted(rules_dir.glob("*.md")) if rules_dir.is_dir() else []
+    # Every input's status lands in ONE list. measurement_incomplete is the
+    # entire derivation — see design choice 4 for why a fourth input only
+    # needs its status appended here, nothing more.
+    statuses = [claude_md_status, rules_dir_status]
+
     rules_files = []
     rules_lines = 0
     unreadable = 0
     for entry in rules_entries:
-        lines = _read_lines(entry)
-        if lines is None:
-            unreadable += 1
-        else:
+        lines, status = _measure_file(entry)
+        statuses.append(status)
+        if status == "measured":
             rules_files.append(entry)
             rules_lines += lines
+        else:
+            # Entries come from _measure_rules_dir()'s iterdir(), so each one
+            # is a real directory entry that exists — "absent" cannot occur
+            # here, only "unreadable" (e.g. a broken per-entry symlink).
+            unreadable += 1
 
     total = claude_md_lines + rules_lines
-
-    # ONE flag for "some always-loaded input could not be measured", covering
-    # BOTH inputs. A future third measured input folds into this flag too —
-    # see design choice 4 above for why that matters.
-    measurement_incomplete = claude_md_unreadable or unreadable > 0
+    measurement_incomplete = any(status == "unreadable" for status in statuses)
     if total <= ALWAYS_LOADED_THRESHOLD and not measurement_incomplete:
         return []
 
     unreadable_fragment = f" ({unreadable} unreadable)" if unreadable else ""
 
-    if claude_md_unreadable:
+    if claude_md_status == "unreadable":
         claude_md_fragment = (
             f"{claude_md}: UNREADABLE (broken symlink, permission error, or "
             "decode failure) — excluded from the total below, so the "
@@ -380,6 +454,18 @@ def check_always_loaded_surface(claude_dir: Path | None = None) -> list[str]:
         )
     else:
         claude_md_fragment = f"{claude_md}: {claude_md_lines} lines"
+
+    if rules_dir_status == "unreadable":
+        rules_fragment = (
+            f"{rules_dir}/*.md: UNREADABLE (broken symlink, not a directory, "
+            "or permission denied) — could not be listed, so the reported "
+            "total is INCOMPLETE, not a true total"
+        )
+    else:
+        rules_fragment = (
+            f"{rules_dir}/*.md: {rules_lines} lines across "
+            f"{len(rules_files)} file(s){unreadable_fragment}"
+        )
 
     incomplete_note = (
         " At least one always-loaded input above could not be measured, so "
@@ -392,8 +478,7 @@ def check_always_loaded_surface(claude_dir: Path | None = None) -> list[str]:
         f"Always-loaded surface is {total} lines "
         f"(threshold: {ALWAYS_LOADED_THRESHOLD}). "
         f"{claude_md_fragment}. "
-        f"{rules_dir}/*.md: {rules_lines} lines across "
-        f"{len(rules_files)} file(s){unreadable_fragment}."
+        f"{rules_fragment}."
         f"{incomplete_note} "
         "Both load into every session and every subagent — reduce whichever "
         "side is larger."

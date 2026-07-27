@@ -881,6 +881,101 @@ class TestCheckAlwaysLoadedSurface:
 
         assert hhc.check_always_loaded_surface(claude_dir=claude_dir2) == []
 
+    def test_broken_rules_directory_symlink_warns_even_under_threshold(
+        self, hhc, tmp_path
+    ):
+        """THE third instance of this class, found by gate round 2.
+
+        ~/.claude/rules ITSELF (not an entry inside it) as a broken symlink:
+        exists() is False, is_symlink() is True, is_dir() is False. The old
+        `rules_entries = sorted(rules_dir.glob("*.md")) if rules_dir.is_dir()
+        else []` read that as "no rules dir" and silently produced
+        rules_lines=0, rules_entries=[], unreadable=0 — identical to genuine
+        absence. Sized so a readable CLAUDE.md (40 lines) sits comfortably
+        UNDER the 200 threshold on its own: with the old code this returned
+        [] — completely silent with the entire rules/ side gone dark. This
+        test fails RED unless the rules/ DIRECTORY's own status (not just
+        its entries') is folded into measurement_incomplete.
+        """
+        claude_dir = tmp_path / "claude"
+        claude_dir.mkdir()
+        self._write_lines(claude_dir / "CLAUDE.md", 40)
+
+        rules_dir = claude_dir / "rules"
+        rules_dir.symlink_to(tmp_path / "does-not-exist-rules-dir")
+        assert rules_dir.is_symlink()
+        assert not rules_dir.exists()
+        assert not rules_dir.is_dir()
+
+        warnings = hhc.check_always_loaded_surface(claude_dir=claude_dir)
+
+        assert len(warnings) == 1
+        text = warnings[0]
+        assert str(rules_dir) in text
+        assert "unreadable" in text.lower()
+        assert "incomplete" in text.lower()
+
+    def test_rules_path_is_a_regular_file_warns_even_under_threshold(
+        self, hhc, tmp_path
+    ):
+        """A second shape of the same third-instance defect: something sits
+        at ~/.claude/rules, but it is a plain FILE, not a directory. is_dir()
+        correctly reports False here too, so this must be caught by the same
+        rules_dir status check as the broken-symlink case above, not by a
+        symlink-specific branch.
+        """
+        claude_dir = tmp_path / "claude"
+        claude_dir.mkdir()
+        self._write_lines(claude_dir / "CLAUDE.md", 40)
+
+        rules_dir = claude_dir / "rules"
+        rules_dir.write_text("this should have been a directory\n")
+        assert rules_dir.is_file()
+        assert not rules_dir.is_dir()
+
+        warnings = hhc.check_always_loaded_surface(claude_dir=claude_dir)
+
+        assert len(warnings) == 1
+        text = warnings[0]
+        assert str(rules_dir) in text
+        assert "unreadable" in text.lower()
+        assert "incomplete" in text.lower()
+
+    def test_rules_directory_unreadable_permissions_warns_even_under_threshold(
+        self, hhc, tmp_path
+    ):
+        """The permission-denied shape of the same defect: rules_dir IS a
+        real directory (is_dir() is True) but its contents cannot be listed.
+        is_dir() cannot see this — only an attempted traversal can, and
+        Path.glob() silently swallows the PermissionError rather than
+        raising it, which is why _measure_rules_dir() traverses via
+        iterdir() inside try/except OSError instead.
+
+        Verified hermetically on this filesystem (macOS, non-root: `id -u`
+        is 501): chmod 000 leaves is_dir() True but iterdir() raises
+        PermissionError. Restores permissions in finally so pytest's
+        tmp_path cleanup can still remove the tree afterward.
+        """
+        claude_dir = tmp_path / "claude"
+        claude_dir.mkdir()
+        self._write_lines(claude_dir / "CLAUDE.md", 40)
+
+        rules_dir = claude_dir / "rules"
+        rules_dir.mkdir()
+        self._write_lines(rules_dir / "small.md", 10)
+        os.chmod(rules_dir, 0o000)
+        try:
+            assert rules_dir.is_dir()
+            warnings = hhc.check_always_loaded_surface(claude_dir=claude_dir)
+        finally:
+            os.chmod(rules_dir, 0o755)
+
+        assert len(warnings) == 1
+        text = warnings[0]
+        assert str(rules_dir) in text
+        assert "unreadable" in text.lower()
+        assert "incomplete" in text.lower()
+
 
 class TestCheckMetrics:
     """Tests for the merged metrics analysis functionality."""
