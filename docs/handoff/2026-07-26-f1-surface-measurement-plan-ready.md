@@ -1,4 +1,4 @@
-# Handoff — F1 surface-measurement: IMPLEMENTED & LIVE, one gate left (2026-07-26, updated 2026-07-27)
+# Handoff — F1 surface-measurement: IMPLEMENTED & LIVE, all 4 gates CLOSED, Phase 6 pending (2026-07-26, updated 2026-07-27)
 
 > **Filename is now slightly misleading** — it says `plan-ready`, but the plan is
 > executed. Kept as-is so existing references keep resolving; the content below is
@@ -10,29 +10,31 @@ was verified by command at write time.
 
 ---
 
-## ► RESUME HERE — gate 4 ran, findings fixed, round 2 pending
+## ► RESUME HERE — all 4 gates CLOSED, Phase 6 is the only step left
 
 **Phases 1-5 are DONE. The feature is IMPLEMENTED, TESTED, DEPLOYED, and LIVE.**
 The Codex *plan* gate closed APPROVED after 5 rounds — **do NOT re-run it**, and do
 NOT re-plan or re-dispatch Tasks 1-4. All four landed and were verified by command.
 
-**Gate 4 (post-execution Codex `review`, mode `review` NOT `plan`) HAS now been
-run — 2026-07-27.** Round 1 returned **REVISE with two P2 findings**; both are
-FIXED and committed (see "Gate 4" below). **Round 2 is the remaining action** —
-re-run `codex review --base main` from the repo root and confirm it comes back
-clean. Gates 1-3 remain closed.
+**Gate 4 (post-execution Codex `review`, mode `review` NOT `plan`) is CLOSED —
+2026-07-27, after 3 rounds.** R1 returned REVISE (2 P2), R2 returned REVISE
+(1 P2), **R3 returned CLEAN**: *"No substantive regression introduced by the patch
+was identified."* All four findings across the pre-flight and both REVISE rounds
+are fixed and committed — see "Gate 4" below. **All 4 Phase 5 exit gates are now
+closed.** Do NOT re-run gate 4.
 
-After round 2 passes:
+The only remaining work is Phase 6:
 1. Set the plan's frontmatter to `status: complete` — **this is what disarms
    `hooks/write-guard.py`**, which is currently ARMED. See the ARMED warning under
    "Repo state" before touching any instruction file outside the two declared paths.
-2. Phase 6: choose merge / PR / keep-branch / discard.
+2. Phase 6: choose merge / PR / keep-branch / discard. **This needs the operator.**
 
-**State at handoff:** **14 commits** on the branch — the 9 described in the commit
-table below, plus **three gate-4 remediation commits** (`82edf67`, `c2571b9`,
-`adaaad8`), `e6f8328`, and this reconciliation itself. **Re-derive with
-`git log --oneline main..HEAD | wc -l` rather than trusting this number** — it
-goes stale on every commit, including the one that writes it. Nothing is half-applied; no mutation survives anywhere
+**State at handoff:** **16 commits** on the branch — the 9 described in the commit
+table below, `e6f8328`, **four gate-4 remediation commits** (`82edf67`, `c2571b9`,
+`adaaad8`, `2aaa202`), and two handoff reconciliations including this one.
+**Re-derive with `git log --oneline main..HEAD | wc -l` rather than trusting this
+number** — it goes stale on every commit, including the one that writes it.
+Nothing is half-applied; no mutation survives anywhere
 (verified by `git diff` after every mutation round). The working tree holds
 exactly **two** entries, and **neither may ever be staged**:
 `.claude/settings.local.json` (modified, pre-existing) and the untracked
@@ -41,21 +43,21 @@ THIS file is committed as of the gate-4 reconciliation, so it will appear as a
 third, stageable entry only while someone is actively editing it — that one IS
 ours and SHOULD be committed; the other two never are.
 
-**Verified after the current HEAD `adaaad8`:** `python3 -m pytest hooks/tests -q` →
-**1072 passed, 9 skipped**, exit 0. `ruff check .` → clean. Live probe
+**Verified after the final code commit `2aaa202`:** `python3 -m pytest hooks/tests -q` →
+**1075 passed, 9 skipped**, exit 0. `ruff check .` → clean. Live probe
 `echo '{}' | python3 ~/.claude/hooks/hook-health-check.py` → `exit=0`,
 `"decision": "allow"`, reason contains
 `Always-loaded surface is 354 lines (threshold: 200)`.
 
 *(Suite arithmetic, for anyone re-deriving it: BASELINE 1055 → +10 Task 1 → +1
 Task 2 → +1 the broken-symlink test in `92a0c78` = 1067 → +3 in `82edf67` → +2 in
-`adaaad8` = **1072**. `c2571b9` added no tests.)*
+`adaaad8` → +3 in `2aaa202` = **1075**. `c2571b9` added no tests.)*
 
 ---
 
 ## Repo state
 
-- **Branch:** `feat/always-loaded-surface-measurement`, cut from synced `main` @ `0998201`. **14 commits** (re-derive; see above). Four docs-only, from before execution: `60f4e40` (this handoff, created), `6668993` (gate APPROVED + pre-flight corrections), `7aaf725` (write-guard ARMED warning), `4572c27` (reconciled 7 stale claims). Then the five from Phase 5, `e6f8328` (recorded Phase 5 complete), and the three gate-4 remediation commits:
+- **Branch:** `feat/always-loaded-surface-measurement`, cut from synced `main` @ `0998201`. **16 commits** (re-derive; see above). Four docs-only, from before execution: `60f4e40` (this handoff, created), `6668993` (gate APPROVED + pre-flight corrections), `7aaf725` (write-guard ARMED warning), `4572c27` (reconciled 7 stale claims). Then the five from Phase 5, `e6f8328` (recorded Phase 5 complete), the four gate-4 remediation commits, and two handoff reconciliations:
 
   | SHA | Task | Contents |
   |---|---|---|
@@ -67,6 +69,7 @@ Task 2 → +1 the broken-symlink test in `92a0c78` = 1067 → +3 in `82edf67` �
   | `82edf67` | gate-4 pre-flight | Unreadable CLAUDE.md now surfaces even under threshold (+3 tests) |
   | `c2571b9` | gate-4 pre-flight | Deleted `_count_lines()`, orphaned by `82edf67`; repaired 4 prose references |
   | `adaaad8` | gate-4 R1 finding | Unified `measurement_incomplete` flag — closes the same go-dark hole on the `rules/` side (+2 tests) |
+  | `2aaa202` | gate-4 R2 finding | Replaced the flag's hand-maintained inputs with affirmative `measured`/`absent`/`unreadable` status per input (`_measure_file`, `_measure_rules_dir`); catches an unmeasurable rules DIRECTORY (+3 tests) |
 - **`main`** @ `0998201`. Merged today: #118–#124.
 - **⚠ `write-guard.py` is now ARMED — deliberately.** As of Phase 5 pre-flight,
   `docs/plans/2026-07-26-always-loaded-surface-measurement.md` carries
@@ -82,19 +85,19 @@ Task 2 → +1 the broken-symlink test in `92a0c78` = 1067 → +3 in `82edf67` �
   (modified) and untracked `skills/second-opinion/codex-learnings.d/20260723-...-self-heal-migration-schema-shape.md`.
   **Never stage either.** The second is a live C27 learning entry AND the cause of
   the digest test failure (see "Known failures").
-- **Verified current state:** `python3 -m pytest hooks/tests -q` → **1072 passed,
+- **Verified current state:** `python3 -m pytest hooks/tests -q` → **1075 passed,
   9 skipped** (was 1055 before execution). `ruff check .` → clean.
 
-## Phase 5 exit gates — 3 closed, gate 4 at round 2
+## Phase 5 exit gates — ALL 4 CLOSED
 
 | # | Gate | Status |
 |---|---|---|
-| 1 | Full-suite test + lint | ✅ 1072 passed / 9 skipped, ruff clean, re-run after `adaaad8` |
+| 1 | Full-suite test + lint | ✅ 1075 passed / 9 skipped, ruff clean, re-run after `2aaa202` |
 | 2 | `ct-qa-reviewer` | ✅ **PASS**, zero P1s. 7 findings — 4 fixed in `92a0c78`, 3 deferred (below) |
 | 3 | Doc-drift scan | ✅ One finding: THIS handoff was stale. Fixed by the edit you are reading. No other tracked doc drifted |
-| 4 | Post-exec Codex `review` | 🔄 **Round 1 REVISE (2 P2, both fixed). Round 2 pending — this is the resume point** |
+| 4 | Post-exec Codex `review` | ✅ **CLEAN at round 3.** R1 REVISE (2 P2) → R2 REVISE (1 P2) → R3 clean. All fixed |
 
-## Gate 4 — Codex `review`, round 1 (2026-07-27)
+## Gate 4 — Codex `review`, 3 rounds, CLOSED (2026-07-27)
 
 Mode `diff` (the closed plan gate was mode `plan`, so the pre-flight classification
 differs: 25 applicable / 7 dismissed of 32 live entries; P1–P4/P32/P34 are
@@ -108,27 +111,63 @@ the surviving total falls under threshold, and the check went **completely
 silent** exactly when the harness was most degraded. Fixed in `82edf67`;
 `c2571b9` removed the helper it orphaned.
 
-**Round 1 returned REVISE with two P2s, both now fixed:**
+**Round 1 — REVISE, two P2s, both fixed:**
 1. **The fix above was asymmetric** — the early return still ignored unreadable
    `rules/*.md` entries, so the identical go-dark hole remained open on the other
    input. Fixed in `adaaad8` with a single `measurement_incomplete` flag rather
-   than a second special case, so a future third input cannot reintroduce it.
+   than a second special case.
 2. **This handoff was stale** — cited `92a0c78` as final and "nine commits".
-   Fixed by the edit you are reading.
+   Fixed by reconciliation.
 
-**Lesson worth keeping:** finding 1 is case-study 23 (*unpropagated fix*)
-recurring **inside its own remediation** — the pre-flight propagated the guard
-`rules/` → CLAUDE.md and left CLAUDE.md → `rules/` open. This matches the
-`feedback-coverage-claims-recur-in-their-own-fix` memory. When fixing an
-asymmetry between two inputs, unify them behind one flag; do not add a conjunct.
+**Round 2 — REVISE, one P2, fixed:**
+3. **A present-but-unmeasurable `rules/` DIRECTORY** (broken dir symlink, a regular
+   file at that path, or permissions blocking traversal) collapsed to `[]` via the
+   `is_dir()`-gated glob without setting the flag — the same go-dark condition, a
+   third time. Reproduced by command before fixing. Fixed in `2aaa202`.
+
+**Round 3 — CLEAN.** *"No substantive regression introduced by the patch was
+identified."*
+
+### The lesson this gate actually taught
+
+**The same defect class was found three times, by three different passes:**
+
+| # | Input that could not be measured | Found by |
+|---|---|---|
+| 1 | `CLAUDE.md` file unreadable | pre-flight (P31, before dispatch) |
+| 2 | `rules/*.md` ENTRY unreadable | Codex R1 |
+| 3 | `rules/` DIRECTORY unmeasurable | Codex R2 |
+
+Each fix was locally correct and each left the next instance open. Finding 1 is
+case-study 23 (*unpropagated fix*) recurring **inside its own remediation**, and
+matches the `feedback-coverage-claims-recur-in-their-own-fix` memory.
+
+The R1 fix's own commentary said "a future third input just needs OR'ing into the
+one flag" — then the third input arrived and was not OR'd in. **The unified-flag
+SHAPE was right; the INPUT ENUMERATION was the unfixed half.** What finally closed
+it (`2aaa202`) was inverting the burden of proof: every input must affirmatively
+return `measured` / `absent` / `unreadable`, and `measurement_incomplete` is derived
+from that enumeration in one expression. "Measured zero" is no longer reachable by
+forgetting a failure mode — a new input has to declare a status to be counted.
+
+**If you add a fourth always-loaded input** (the obvious candidate is `MEMORY.md`,
+deferred finding 1 below), append its status to `statuses`. Do NOT add a conjunct
+to the early return — that is the mistake this section exists to prevent.
+
+**Also worth keeping:** a `~/.claude/rules/` glob is not a measurement of the rules
+surface until the directory itself is proven traversable. `Path.glob()` swallows
+`PermissionError` and `is_dir()` cannot see it, so readability must be established
+by attempting `iterdir()` inside `try/except OSError`.
 
 **Gate 2 confirmed the things most worth confirming:** the dark feature Task 1
 deliberately left IS closed — cited by SYMBOL, since these line numbers have now
-drifted twice: `check_always_loaded_surface()` is called in `main()` (`:828` as of
-`adaaad8`), its output is emitted in the `if surface_warnings:` block (`:861-864`),
-and it survives `main()`'s early return via the `and not surface_warnings` conjunct
-(`:838`) → `allow_with_reason` → dispatcher envelope-unwrap → user. Re-derive these
-by grepping the symbol, never by trusting the numbers. No path in the diff can
+drifted three times: `check_always_loaded_surface()` is called in `main()` (`:913`
+as of `2aaa202`), its output is emitted in the `if surface_warnings:` block
+(`:946-949`), and it survives `main()`'s early return via the
+`and not surface_warnings` conjunct (`:923`) → `allow_with_reason` → dispatcher
+envelope-unwrap → user. **Re-derive these by grepping the symbol, never by trusting
+the numbers** — they moved again between `adaaad8` and `2aaa202`, which is the third
+drift and the reason this trace is written symbol-first. No path in the diff can
 produce a block; the
 new test class did NOT copy the vacuous inline-glob pattern from
 `TestCheckInstructionFileLengths`; and every doc number (238 / 116 / 7 files / 354 /
@@ -141,7 +180,8 @@ none was eligible for deferral):
 1. Two `file:line` citations in a committed docstring pointed at unrelated code
    (`:667` is `parts = []`, not `allow_with_reason`, which is at `:779`; the
    `HOOKS_DIR.is_dir()` guard is `:688-689`, not `:589-590`). Now cite the SYMBOL
-   name first, line second — this file has drifted twice.
+   name first, line second — this file has now drifted three times (see the gate-2
+   trace above, re-derived again at `2aaa202`).
 2. **The `mock-ok:` markers were leaving two lines permanently unguarded.**
    `write-guard.py:628-631` exempts the marker's own line AND the following line, so
    `:466`/`:677` were dead zones in this repo's flagship no-mocks test file. Root
@@ -174,7 +214,7 @@ none was eligible for deferral):
    arithmetic still assumes it is pending. Pick ONE convention for the document.
 
 **One resume trigger worth setting:** `main()`'s early-return conjunct — grep
-`and not surface_warnings` in `hook-health-check.py` (`:838` as of `adaaad8`; the
+`and not surface_warnings` in `hook-health-check.py` (`:923` as of `2aaa202`; the
 number drifts, the symbol does not) — is inert in BOTH environments today, because
 `check_instruction_file_lengths()` is never empty at either root. It becomes
 load-bearing at exactly the moment the reductions succeed and the surface warning is
@@ -182,22 +222,25 @@ the only remaining signal. **When `check_instruction_file_lengths()` first retur
 `[]`, re-verify that conjunct by mutation** — until then it is inspection-only.
 
 **A second trigger, from gate 4:** `measurement_incomplete` (the unified
-unreadable-input flag added in `adaaad8`) is likewise only *partly* exercised in
+unreadable-input flag, `adaaad8` + `2aaa202`) is likewise only *partly* exercised in
 production today. Its threshold-override branch cannot fire while the deployed
 total is 354, because the check already warns on volume alone. It becomes the sole
 signal once the reductions bring the total to ≤200 — the same moment as the trigger
-above. Both new tests cover it against real temp dirs, so this is a
-production-reachability note, not a coverage gap.
+above. All five gate-4 tests (2 in `adaaad8`, 3 in `2aaa202`) cover it against real
+temp dirs and real broken symlinks, so this is a production-reachability note, not a
+coverage gap.
 
 ## The plan
 
 `docs/plans/2026-07-26-always-loaded-surface-measurement.md` — **1152 lines,
 `status: in-progress` (ARMED — see the warning under "Repo state"), gitignored**
-(`.gitignore:2`, so it will never be committed). **Set it to `status: complete` once
-gate 4 passes; that is what disarms the write-guard.** It grew 1028 → 1152 during the
-5-round Codex gate; almost all of that is prose about its own test coverage, not
-about the change, which is still one function + one helper + one constant + ~7
-lines of wiring.
+(`.gitignore:2`, so it will never be committed). **Gate 4 has now PASSED, so setting
+it to `status: complete` is the actionable next step; that is what disarms the
+write-guard.** It grew 1028 → 1152 during the 5-round Codex gate; almost all of that
+is prose about its own test coverage, not about the change. The change is now one
+check function + **three** helpers (`_read_lines`, `_measure_file`,
+`_measure_rules_dir`) + one constant + ~7 lines of wiring — the plan's original
+"one helper" description predates the gate-4 remediation.
 
 ```yaml
 instruction_files: hooks/hook-health-check.py, hooks/tests/test_hook_health_check.py
@@ -213,16 +256,22 @@ file rather than copying them from the brief, and its Step 6 had become the plan
 final whole-plan verification gate. That is judgment, not mechanical replacement.
 
 Every mutation table was performed in full — 12 rows in Task 1, 2 in Task 2, 1 for
-the QA fix — each restored and confirmed by `git diff`. **Mutation 7 (repo-rooting
-the default) did turn `test_default_target_is_the_deployed_home_dir` RED**, which is
-the one result that proves the deployed-path guard is real rather than prose.
+the QA fix, plus one per gate-4 remediation commit (`82edf67`, `adaaad8`, `2aaa202`)
+— each restored and confirmed by `git diff`. **Mutation 7 (repo-rooting the default)
+did turn `test_default_target_is_the_deployed_home_dir` RED**, which is the one
+result that proves the deployed-path guard is real rather than prose. The `2aaa202`
+mutation (reverting `_measure_rules_dir` to the old `is_dir()`-gated glob) turned all
+three new directory tests RED, which is what proves the third instance was real and
+not a theoretical objection.
 
 ## What the fix is, and why this shape
 
-`hooks/hook-health-check.py:186-190` globs `agents/*.md`, `phases/*.md`,
-`skills/*/SKILL.md` against `repo_root = Path(__file__).parent.parent` (`:184`),
-per-file threshold 200 at `:196`. All repo-rooted, so `config/CLAUDE.md` (238) and
-`rules/*.md` are never measured.
+`check_instruction_file_lengths()` in `hooks/hook-health-check.py` (`:192` as of
+`2aaa202`) globs `agents/*.md`, `phases/*.md`, `skills/*/SKILL.md` (the
+`instruction_globs` list, `:201`) against `repo_root = Path(__file__).parent.parent`
+(`:199`), per-file threshold 200 (`:211`). **Cite by symbol — every number in this
+paragraph shifted when the gate-4 helpers landed above it.** All repo-rooted, so
+`config/CLAUDE.md` (238) and `rules/*.md` are never measured.
 
 The fix adds an **aggregate** check of the **deployed** surface —
 `~/.claude/CLAUDE.md` + `~/.claude/rules/*.md`, summed. Reading the deployed
@@ -357,8 +406,10 @@ re-attempting the exhaustive mapping; that is the loop this took five rounds to 
 - **Round 1** (12: 2 P1, 2 P2, 8 P3). Headline: a Failure Modes row claiming
   `Tested? Yes` for a regression no test could observe — every aggregate test then
   written passed `claude_dir=` explicitly and was blind to the default. (The class
-  was 8 tests at that point and is 10 now; `test_default_target_is_the_deployed_home_dir`
-  is still the only one that observes the default.)
+  was 8 tests at that point and is **19** now — verified by
+  `pytest hooks/tests/test_hook_health_check.py -k TestCheckAlwaysLoadedSurface`;
+  `test_default_target_is_the_deployed_home_dir` is still the only one that observes
+  the default.)
 - **Round 2** (8: 1 P1, 7 P3), by a FRESH reviewer that traced every branch of
   `main()`. Headline P1: the mutation table added to fix round 1 contained a row
   that could not fire — **the same defect class recurring inside its own fix.**
@@ -398,8 +449,10 @@ re-attempting the exhaustive mapping; that is the loop this took five rounds to 
 1. **Dispatch agents WITHOUT `name` when you need the report inline.** Passing
    `name` silently forces background mode and overrides `run_in_background: false`.
 2. **`SendMessage` resumes a completed agent from its transcript** and works well
-   for revision rounds — used twice here. Latency ~75-90s; useless for steering a
-   short task.
+   for revision rounds — used five times here (two plan-phase, three across gate 4).
+   Carrying one implementer across all three gate-4 remediation rounds kept the file
+   context warm and was clearly cheaper than three cold dispatches. Latency ~75-90s;
+   useless for steering a short task.
 3. **Verify every agent state claim by command.** This session the planner
    corrected *me* on a fact I had asserted twice and already written into two
    documents. Agent file-CONTENT analysis is consistently excellent; agent claims
@@ -419,3 +472,24 @@ re-attempting the exhaustive mapping; that is the loop this took five rounds to 
 7. **Codex reviews stream ~330KB per round.** Pipe through `tail -c 8000` — the verdict and
    findings are at the end. Piping to `tee` a temp file overflowed the tool-result cap on
    round 1.
+8. **When the SAME defect class appears a third time, stop fixing instances and invert
+   the burden of proof.** Gate 4 found "an unmeasurable input is silently counted as
+   measured-zero" three times on three different inputs. Fixes 1 and 2 were each
+   locally correct and each left the next instance open — and fix 2's own commentary
+   predicted the third input, then failed to include it. What closed it was making
+   every input affirmatively declare `measured`/`absent`/`unreadable` so that
+   "measured zero" is unreachable by omission. Generalizing: when a guard enumerates
+   failure modes, the enumeration is the defect; make success the thing that must be
+   proven. This is the diff-review sibling of rule 6 — rule 6 weakens an unverifiable
+   CLAIM, rule 8 restructures an unverifiable ENUMERATION.
+9. **A doc-staleness finding cannot be fixed by writing today's numbers into the doc.**
+   The first reconciliation commit said "13 commits" and was wrong the instant it
+   landed, because it was itself the 14th. Numbers that describe the branch belong
+   with a re-derivation command (`git log --oneline main..HEAD | wc -l`), and
+   `file:line` citations belong written symbol-first — the gate-2 trace in this file
+   has now drifted three separate times, once per remediation commit.
+10. **Reproduce a reviewer's claim by command before dispatching a fix.** Round 2's
+    finding was a three-line probe (`exists()`/`is_symlink()`/`is_dir()` on a broken
+    directory symlink) that turned an assertion into a demonstrated fact and told the
+    implementer exactly which sub-cases to cover. Cheap, and it also protects against
+    fixing a false positive.
