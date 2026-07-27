@@ -734,6 +734,88 @@ class TestCheckAlwaysLoadedSurface:
         assert "is 700 lines" in warnings[0]
         assert str(claude_dir / "CLAUDE.md") in warnings[0]
 
+    def test_broken_claude_md_symlink_warns_even_under_threshold(self, hhc, tmp_path):
+        """THE go-dark regression this test guards against.
+
+        Before this fix, ~/.claude/CLAUDE.md was measured via _count_lines(),
+        which collapses "absent" and "present but unreadable" into the same
+        0. A broken CLAUDE.md symlink (the real failure mode when the
+        coding-team submodule is de-initialized) would then silently drop
+        out of the total, leaving only rules_lines. Sized so rules_lines
+        alone (170) sits comfortably UNDER the 200 threshold: with the old
+        code, `total <= ALWAYS_LOADED_THRESHOLD` was True and the function
+        returned [] — completely silent at the exact moment CLAUDE.md (238
+        of 354 lines in production) had gone dark. This test fails RED under
+        that old code and must pass GREEN only because the fix surfaces the
+        unreadable state regardless of where the surviving total lands.
+        """
+        claude_dir = tmp_path / "claude"
+        rules_dir = claude_dir / "rules"
+        rules_dir.mkdir(parents=True)
+
+        # A real broken symlink — the same shape as the deployed
+        # ~/.claude/CLAUDE.md -> skills/coding-team/config/CLAUDE.md symlink
+        # breaking when its target directory disappears.
+        claude_md = claude_dir / "CLAUDE.md"
+        claude_md.symlink_to(tmp_path / "does-not-exist-CLAUDE.md")
+        assert claude_md.is_symlink()
+        assert not claude_md.exists()
+
+        self._write_lines(rules_dir / "small.md", 170)
+
+        warnings = hhc.check_always_loaded_surface(claude_dir=claude_dir)
+
+        assert len(warnings) == 1
+        text = warnings[0]
+        assert str(claude_md) in text
+        assert "unreadable" in text.lower()
+        # The reported total must be flagged as incomplete — a reader must
+        # not mistake the 170-line total for a clean, trustworthy number.
+        assert "incomplete" in text.lower()
+
+    def test_broken_claude_md_symlink_over_threshold_still_names_it_unreadable(
+        self, hhc, tmp_path
+    ):
+        """Extra coverage only — NOT the primary go-dark guard above.
+
+        Same broken-symlink shape, but rules_lines alone (250) already
+        exceeds the threshold, so the warning would fire even under the OLD
+        code. This only pins that the unreadable-CLAUDE.md text still
+        appears when the warning was already going to fire regardless.
+        """
+        claude_dir = tmp_path / "claude"
+        rules_dir = claude_dir / "rules"
+        rules_dir.mkdir(parents=True)
+        claude_md = claude_dir / "CLAUDE.md"
+        claude_md.symlink_to(tmp_path / "does-not-exist-CLAUDE.md")
+        self._write_lines(rules_dir / "big.md", 250)
+
+        warnings = hhc.check_always_loaded_surface(claude_dir=claude_dir)
+
+        assert len(warnings) == 1
+        text = warnings[0]
+        assert str(claude_md) in text
+        assert "unreadable" in text.lower()
+        assert "incomplete" in text.lower()
+
+    def test_claude_md_absent_entirely_with_rules_under_threshold_stays_silent(
+        self, hhc, tmp_path
+    ):
+        """Invariant 1, pinned: genuine absence (no file AND no symlink) is
+        NOT the same as present-but-unreadable, and must stay silent under
+        threshold. Guards against over-correcting the go-dark fix above into
+        warning on absence too.
+        """
+        claude_dir = tmp_path / "claude"
+        rules_dir = claude_dir / "rules"
+        rules_dir.mkdir(parents=True)
+        self._write_lines(rules_dir / "small.md", 50)
+        claude_md = claude_dir / "CLAUDE.md"
+        assert not claude_md.exists()
+        assert not claude_md.is_symlink()
+
+        assert hhc.check_always_loaded_surface(claude_dir=claude_dir) == []
+
 
 class TestCheckMetrics:
     """Tests for the merged metrics analysis functionality."""

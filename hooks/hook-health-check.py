@@ -237,11 +237,13 @@ def _count_lines(path: Path) -> int:
     """Return the line count of path, or 0 if it is absent OR unreadable.
 
     This collapses "absent" and "present but unreadable" (permission error,
-    broken symlink, bad encoding) into the same 0 — the right behavior for a
-    single fixed path like CLAUDE.md, where there is no third state to report.
-    A caller that must distinguish the two (see check_always_loaded_surface's
-    handling of broken symlinks under ~/.claude/rules/) should call
-    _read_lines() directly instead of going through this wrapper.
+    broken symlink, bad encoding) into the same 0. check_always_loaded_surface()
+    does NOT use this wrapper for ~/.claude/CLAUDE.md: that path is itself a
+    deploy symlink and can go from "present" to "present but unreadable" as
+    easily as any entry under ~/.claude/rules/, so it calls _read_lines()
+    directly to keep the two states apart (see check_always_loaded_surface's
+    docstring, design choice 5). Any future caller that genuinely does not
+    need to distinguish "absent" from "unreadable" can still use this wrapper.
     """
     lines = _read_lines(path)
     return 0 if lines is None else lines
@@ -303,12 +305,31 @@ def check_always_loaded_surface(claude_dir: Path | None = None) -> list[str]:
        as 0 lines against a file count that includes it, because that would
        report a file count that does not match what was actually measured.
 
-    Degrades silently when ~/.claude/CLAUDE.md or ~/.claude/rules/ is absent
-    (a machine that deploys neither): missing inputs mean there is nothing to
-    measure, not a problem to report. Returns [] in that case. The function
-    itself does not otherwise raise, though Path.home() can raise RuntimeError
-    if HOME is unset and there is no passwd entry for the current user — this
-    function does not guard against that.
+    5. ~/.claude/CLAUDE.md is ALSO a deploy symlink (-> skills/coding-team/
+       config/CLAUDE.md) and can break exactly as easily as any rules/ entry
+       — and it carries 238 of the 354 currently-deployed lines, so its own
+       breakage is the single largest thing this check can miss. Genuine
+       ABSENCE (no file and no symlink at all) stays silent, same as before —
+       see below. But PRESENT-BUT-UNREADABLE (broken symlink, permission
+       error, decode failure) is a measurement failure, not silence: it is
+       reported EVEN WHEN the surviving total (rules/ only) sits at or under
+       ALWAYS_LOADED_THRESHOLD. Without this, a de-initialized coding-team
+       submodule breaks CLAUDE.md and both rules/ symlinks at once, the
+       surviving total falls under threshold by construction, and this check
+       goes completely silent at the exact moment the harness is most
+       degraded. Reads the deployed CLAUDE.md via _read_lines() directly
+       (never _count_lines(), which collapses this exact distinction away)
+       so "absent" and "unreadable" stay distinguishable.
+
+    Degrades silently ONLY when ~/.claude/CLAUDE.md is genuinely ABSENT (no
+    file, no symlink) or ~/.claude/rules/ is absent (a machine that deploys
+    neither): missing inputs mean there is nothing to measure, not a problem
+    to report. Returns [] in that case. A present-but-UNREADABLE CLAUDE.md
+    (design choice 5 above) is a different state and always surfaces, even
+    when the surviving total is under threshold. The function itself does not
+    otherwise raise, though Path.home() can raise RuntimeError if HOME is
+    unset and there is no passwd entry for the current user — this function
+    does not guard against that.
 
     Args:
         claude_dir: Root to measure. Defaults to ~/.claude. Tests pass a real
@@ -320,7 +341,15 @@ def check_always_loaded_surface(claude_dir: Path | None = None) -> list[str]:
     claude_md = claude_dir / "CLAUDE.md"
     rules_dir = claude_dir / "rules"
 
-    claude_md_lines = _count_lines(claude_md)
+    claude_md_raw_lines = _read_lines(claude_md)
+    # "Present" covers a broken symlink (exists() is False, is_symlink() is
+    # True) as well as a regular file/permission error/decode failure
+    # (exists() is True). Only when NEITHER holds is CLAUDE.md genuinely
+    # absent — the one case that stays silent under threshold.
+    claude_md_unreadable = claude_md_raw_lines is None and (
+        claude_md.exists() or claude_md.is_symlink()
+    )
+    claude_md_lines = 0 if claude_md_raw_lines is None else claude_md_raw_lines
 
     rules_entries = sorted(rules_dir.glob("*.md")) if rules_dir.is_dir() else []
     rules_files = []
@@ -335,15 +364,24 @@ def check_always_loaded_surface(claude_dir: Path | None = None) -> list[str]:
             rules_lines += lines
 
     total = claude_md_lines + rules_lines
-    if total <= ALWAYS_LOADED_THRESHOLD:
+    if total <= ALWAYS_LOADED_THRESHOLD and not claude_md_unreadable:
         return []
 
     unreadable_fragment = f" ({unreadable} unreadable)" if unreadable else ""
 
+    if claude_md_unreadable:
+        claude_md_fragment = (
+            f"{claude_md}: UNREADABLE (broken symlink, permission error, or "
+            "decode failure) — excluded from the total below, so the "
+            "reported total is INCOMPLETE, not a true total"
+        )
+    else:
+        claude_md_fragment = f"{claude_md}: {claude_md_lines} lines"
+
     return [
         f"Always-loaded surface is {total} lines "
         f"(threshold: {ALWAYS_LOADED_THRESHOLD}). "
-        f"{claude_md}: {claude_md_lines} lines. "
+        f"{claude_md_fragment}. "
         f"{rules_dir}/*.md: {rules_lines} lines across "
         f"{len(rules_files)} file(s){unreadable_fragment}. "
         "Both load into every session and every subagent — reduce whichever "
