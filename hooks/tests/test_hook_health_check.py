@@ -456,6 +456,256 @@ class TestCheckInstructionFileLengths:
             assert isinstance(item, str)
 
 
+class TestCheckAlwaysLoadedSurface:
+    """Aggregate check over the DEPLOYED always-loaded surface.
+
+    Every test builds a real ~/.claude-shaped tree under tmp_path with real
+    files, then calls the real production function. The function reads a
+    filesystem, so the tests give it one — no mocks, no patches, no
+    monkeypatch (GP#1 Real Over Mocks; mock-ok: naming the absent pattern is documentation, not usage). Exactly ONE test
+    (test_aggregate_spans_symlinked_and_regular_rules) builds a real symlink,
+    because it is the only one whose property depends on symlink traversal;
+    do not describe the others as exercising symlinks.
+
+    Do NOT reimplement the function's logic inside a test body. Two tests in
+    TestCheckInstructionFileLengths above do exactly that and would stay
+    green with the production function deleted; that pattern is a known
+    defect, not a template.
+    """
+
+    @staticmethod
+    def _write_lines(path, count):
+        """Write a file whose splitlines() length is exactly `count`.
+
+        Deliberately no trailing newline: str.splitlines() counts "a\nb" and
+        "a\nb\n" both as 2, so this is correct as written. Do NOT "fix" it by
+        appending a newline — that changes nothing and invites the reader to
+        believe there is an off-by-one here.
+        """
+        path.write_text("\n".join(f"line {i}" for i in range(count)))
+
+    def test_aggregate_spans_symlinked_and_regular_rules(self, hhc, tmp_path):
+        """The sum counts BOTH owners of ~/.claude/rules/ — symlinks and regular files.
+
+        Sized so the warning exists only if both owners are counted:
+        150 + 40 + 30 = 220 (over 200), but 150 + 40 = 190 and
+        150 + 30 = 180 are both under. Skipping either owner => no warning.
+        """
+        claude_dir = tmp_path / "claude"
+        rules_dir = claude_dir / "rules"
+        rules_dir.mkdir(parents=True)
+        upstream = tmp_path / "upstream"
+        upstream.mkdir()
+
+        self._write_lines(claude_dir / "CLAUDE.md", 150)
+
+        # Owner A: a real symlink, the way scripts/deploy.sh installs this
+        # repo's rules into ~/.claude/rules/.
+        symlink_target = upstream / "from-submodule.md"
+        self._write_lines(symlink_target, 40)
+        (rules_dir / "from-submodule.md").symlink_to(symlink_target)
+        assert (rules_dir / "from-submodule.md").is_symlink()
+
+        # Owner B: a regular file, the way the parent claude-harness repo
+        # tracks its own rules in place (mode 100644).
+        self._write_lines(rules_dir / "from-parent.md", 30)
+
+        warnings = hhc.check_always_loaded_surface(claude_dir=claude_dir)
+
+        assert len(warnings) == 1
+        # Pin the total, not a loose substring — the message also embeds
+        # tmp_path, which could coincidentally contain "220".
+        assert "is 220 lines" in warnings[0]
+
+    def test_warning_names_both_contributors(self, hhc, tmp_path):
+        """The text ATTRIBUTES each count to its own contributor, plus the total.
+
+        A reader must be able to see which side to reduce. Numbers mirror the
+        real deployed surface (238 + 116 = 354).
+
+        Each assertion pins a LABELLED fragment — "<path>: 238 lines", not a
+        bare "238". A bare-substring version of this test passes even if the
+        two counts are swapped in the format string (reporting CLAUDE.md as
+        116 and rules/ as 238), because every number still appears SOMEWHERE
+        in the message. Attribution is the property under test, so the label
+        and its number must be asserted together. Do NOT weaken these back to
+        bare-number checks.
+        """
+        claude_dir = tmp_path / "claude"
+        rules_dir = claude_dir / "rules"
+        rules_dir.mkdir(parents=True)
+        self._write_lines(claude_dir / "CLAUDE.md", 238)
+        self._write_lines(rules_dir / "some-rule.md", 116)
+
+        warnings = hhc.check_always_loaded_surface(claude_dir=claude_dir)
+
+        assert len(warnings) == 1
+        text = warnings[0]
+        assert "is 354 lines" in text
+        assert "threshold: 200" in text
+        assert f"{claude_dir / 'CLAUDE.md'}: 238 lines" in text
+        assert f"{rules_dir}/*.md: 116 lines across 1 file(s)" in text
+
+    def test_under_threshold_returns_empty(self, hhc, tmp_path):
+        """100 + 50 = 150 is under the 200 threshold — no warning.
+
+        The rules/ dir also holds a non-Markdown DECOY sized so that counting
+        it would flip this test's outcome: 100 + 50 + 100 = 250, over the
+        threshold. Every other fixture in this class contains only .md files,
+        so without this decoy a glob widened from "*.md" to "*" would pass the
+        entire suite while measuring a surface the spec does not define. Only
+        ~/.claude/rules/*.md auto-loads; a .txt sitting there does not.
+        """
+        claude_dir = tmp_path / "claude"
+        rules_dir = claude_dir / "rules"
+        rules_dir.mkdir(parents=True)
+        self._write_lines(claude_dir / "CLAUDE.md", 100)
+        self._write_lines(rules_dir / "small.md", 50)
+        self._write_lines(rules_dir / "notes.txt", 100)
+
+        assert hhc.check_always_loaded_surface(claude_dir=claude_dir) == []
+
+    def test_exactly_at_threshold_is_silent(self, hhc, tmp_path):
+        """A total of exactly 200 does NOT warn — the comparison is `<=`.
+
+        Pairs with test_one_over_threshold_warns below. Together they pin the
+        boundary from both sides: this one fails if `total <= THRESHOLD` is
+        tightened to `<`, and its sibling fails if the threshold constant is
+        moved in either direction.
+
+        The `<`-tightening mutation is visible to THIS TEST ALONE — no other
+        test has a total of exactly 200. Threshold MOVES are not so contained:
+        test_warning_names_both_contributors also asserts "threshold: 200", so
+        it goes red on a threshold change too, despite its 354 total sitting
+        nowhere near the boundary. Do not describe the boundary mutations as
+        invisible to every other test; that was true only before the
+        threshold-text assertion was added.
+        """
+        claude_dir = tmp_path / "claude"
+        rules_dir = claude_dir / "rules"
+        rules_dir.mkdir(parents=True)
+        self._write_lines(claude_dir / "CLAUDE.md", 150)
+        self._write_lines(rules_dir / "small.md", 50)
+
+        assert hhc.check_always_loaded_surface(claude_dir=claude_dir) == []
+
+    def test_one_over_threshold_warns(self, hhc, tmp_path):
+        """A total of 201 warns, and the message reports the threshold it used.
+
+        Asserting "threshold: 200" pins ALWAYS_LOADED_THRESHOLD itself, but be
+        precise about HOW it fails, because the two directions differ:
+        - Raising the constant to >= 201 silences the warning, so this test
+          aborts at `assert len(warnings) == 1` and NEVER REACHES the
+          threshold-text assertion (pytest stops at the first failing assert).
+        - Lowering it below 201 keeps the warning, so execution does reach the
+          text assertion and that is what turns it red.
+        Both directions fail the test; only the second one proves the text
+        assertion is live. Mutation rows 9 and 12 in Step 6 cover them
+        separately for exactly this reason. Do NOT claim this test "fails two
+        ways" under a single mutation.
+
+        Do NOT "fix" a future failure here by editing the expected number — if
+        this test goes red, the threshold moved, and moving it is exactly what
+        the plan prohibits.
+        """
+        claude_dir = tmp_path / "claude"
+        rules_dir = claude_dir / "rules"
+        rules_dir.mkdir(parents=True)
+        self._write_lines(claude_dir / "CLAUDE.md", 150)
+        self._write_lines(rules_dir / "small.md", 51)
+
+        warnings = hhc.check_always_loaded_surface(claude_dir=claude_dir)
+
+        assert len(warnings) == 1
+        assert "is 201 lines" in warnings[0]
+        assert "threshold: 200" in warnings[0]
+
+    def test_missing_claude_md_still_measures_rules(self, hhc, tmp_path):
+        """No ~/.claude/CLAUDE.md: measure what is there, raise nothing."""
+        claude_dir = tmp_path / "claude"
+        rules_dir = claude_dir / "rules"
+        rules_dir.mkdir(parents=True)
+        self._write_lines(rules_dir / "big.md", 250)
+        assert not (claude_dir / "CLAUDE.md").exists()
+
+        warnings = hhc.check_always_loaded_surface(claude_dir=claude_dir)
+
+        assert len(warnings) == 1
+        assert "is 250 lines" in warnings[0]
+        # The absent side must be REPORTED as 0, not silently omitted.
+        assert f"{claude_dir / 'CLAUDE.md'}: 0 lines" in warnings[0]
+
+    def test_missing_rules_dir_still_measures_claude_md(self, hhc, tmp_path):
+        """No ~/.claude/rules/: measure what is there, raise nothing."""
+        claude_dir = tmp_path / "claude"
+        claude_dir.mkdir()
+        self._write_lines(claude_dir / "CLAUDE.md", 250)
+        assert not (claude_dir / "rules").exists()
+
+        warnings = hhc.check_always_loaded_surface(claude_dir=claude_dir)
+
+        assert len(warnings) == 1
+        assert "is 250 lines" in warnings[0]
+        # The absent side must be REPORTED as 0 across 0 files.
+        assert f"{claude_dir / 'rules'}/*.md: 0 lines across 0 file(s)" in warnings[0]
+
+    def test_nothing_deployed_returns_empty(self, hhc, tmp_path):
+        """A machine that deploys neither: warn nothing, raise nothing."""
+        claude_dir = tmp_path / "claude"
+        claude_dir.mkdir()
+
+        assert hhc.check_always_loaded_surface(claude_dir=claude_dir) == []
+
+    def test_claude_dir_absent_entirely_returns_empty(self, hhc, tmp_path):
+        """~/.claude itself does not exist: warn nothing, raise nothing."""
+        assert hhc.check_always_loaded_surface(
+            claude_dir=tmp_path / "no-such-dir"
+        ) == []
+
+    def test_default_target_is_the_deployed_home_dir(self, tmp_path):
+        """Called with NO argument, the function measures $HOME/.claude.
+
+        This is the plan's single most important assertion. Every other test
+        passes claude_dir= explicitly, so none of them can observe the DEFAULT
+        — and the default is exactly what a "simplify this to a repo-relative
+        glob" edit would change. Without this test, that regression ships
+        green, which is the defect this whole plan exists to prevent.
+
+        Path.home() reads the HOME environment variable on POSIX, so pointing
+        HOME at a real temp tree inside try/finally is real environment
+        manipulation against a real filesystem — not monkeypatch, not a mock (mock-ok: named only to rule it out).
+        Same shape as TestPrThroughputCache::test_fresh_cache_skips_gh above,
+        which swaps PATH the same way.
+
+        The tree is sized so the number is unmistakably NOT the repository's:
+        400 + 300 = 700, a total no repo-relative root could produce.
+        """
+        fake_home = tmp_path / "home"
+        claude_dir = fake_home / ".claude"
+        rules_dir = claude_dir / "rules"
+        rules_dir.mkdir(parents=True)
+        self._write_lines(claude_dir / "CLAUDE.md", 400)
+        self._write_lines(rules_dir / "a-rule.md", 300)
+
+        original_home = os.environ.get("HOME")
+        os.environ["HOME"] = str(fake_home)
+        try:
+            # Load the module AFTER HOME is swapped. The function resolves
+            # Path.home() at call time, but reloading also proves no
+            # import-time constant captured the real home.
+            hhc = load_module()
+            warnings = hhc.check_always_loaded_surface()
+        finally:
+            if original_home is None:
+                os.environ.pop("HOME", None)
+            else:
+                os.environ["HOME"] = original_home
+
+        assert len(warnings) == 1
+        assert "is 700 lines" in warnings[0]
+        assert str(claude_dir / "CLAUDE.md") in warnings[0]
+
+
 class TestCheckMetrics:
     """Tests for the merged metrics analysis functionality."""
 

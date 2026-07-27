@@ -34,6 +34,21 @@ TIMEOUT_SECONDS = 5
 MAX_METRICS_FILES = 3
 METRICS_STALENESS_DAYS = 7
 
+# Threshold for the AGGREGATE deployed always-loaded surface. Same 200 as the
+# per-file instruction check in check_instruction_file_lengths() — beyond
+# ~200 lines, MANDATORY labels stop working (case study #24) — but what a
+# session actually pays is the TOTAL, and the saturation audit's reduction
+# target (163) is sized against 200.
+#
+# The literal 200 at the per-file check is deliberately NOT replaced with this
+# name. That check is a different measurement (per-file, and rooted at
+# __file__ rather than at home, so its root moves between the deployed hook
+# and the test suite) that
+# this work leaves untouched; binding the two to one constant would couple
+# them, so a future change to the aggregate threshold would silently move the
+# per-file cap too. Two independent 200s is the correct shape here.
+ALWAYS_LOADED_THRESHOLD = 200
+
 
 def check_hook(hook_path: Path) -> str | None:
     """Run a hook with empty JSON input and check for crashes.
@@ -202,6 +217,90 @@ def check_instruction_file_lengths() -> list[str]:
                 continue
 
     return warnings
+
+
+def _count_lines(path: Path) -> int:
+    """Return the line count of path, or 0 if it is absent or unreadable."""
+    try:
+        return len(path.read_text().splitlines())
+    except (OSError, UnicodeDecodeError):
+        return 0
+
+
+def check_always_loaded_surface(claude_dir: Path | None = None) -> list[str]:
+    """Warn when the DEPLOYED always-loaded surface exceeds the line threshold.
+
+    Sums ~/.claude/CLAUDE.md plus every ~/.claude/rules/*.md and compares the
+    TOTAL against ALWAYS_LOADED_THRESHOLD. Both load unconditionally into every
+    session and every subagent, so the sum is the cost a session actually pays.
+
+    Three design choices, each load-bearing:
+
+    1. It reads the DEPLOYED directory (~/.claude), NOT this repository.
+       ~/.claude is itself a git repo (cmillstead/claude-harness) that tracks
+       rules/ in place, and skills/coding-team is a SUBMODULE of it. So
+       ~/.claude/rules/ has TWO owners: symlinks deployed from this repo and
+       regular files owned by the parent. Reading the deployed directory spans
+       both owners by construction, which is precisely why the ownership
+       question does not need resolving for the measurement to be correct.
+       Path.home() is used deliberately instead of the __file__-relative root
+       that check_instruction_file_lengths() above uses. That one derives
+       `repo_root = Path(__file__).parent.parent`, and __file__ is NOT
+       symlink-resolved — the deployed hook is invoked as
+       ~/.claude/hooks/hook-health-check.py, so that root is ~/.claude in
+       production but this repo under pytest. Path.home() is the same in both.
+       Do NOT "simplify" this to a repo_root.glob(): under the test suite that
+       root matches this repo's rules/*.md — 3 files, 61 lines, one of which
+       (README.md) is not deployed and not always-loaded at all. So the
+       regression would ship green while measuring a partly different FILE SET
+       from the one production reads, at a number that depends on how the
+       module was loaded.
+
+    2. It is an AGGREGATE, not a per-file cap. Individual rules files run 5-29
+       lines, so no per-file threshold would ever fire on them. The SUM is the
+       defect. Do NOT convert this to a per-file check.
+
+    3. It is ADVISORY ONLY and never blocks. It returns warning strings that
+       main() folds into the SessionStart advisory emitted via
+       allow_with_reason(). It is expected to fire on every session until the
+       surface-reduction phases land — that visibility is the entire point. Do
+       NOT raise the threshold, suppress the warning, or add an exemption to
+       stop it firing. A separate, later change (audit finding F2) adds a
+       BLOCKING per-file cap in write-guard.py; that one must land only after
+       the reductions, because a blocking cap would block the very edits that
+       reduce the surface. This warning carries no such ordering hazard.
+
+    Degrades silently when ~/.claude/CLAUDE.md or ~/.claude/rules/ is absent
+    (a machine that deploys neither): missing inputs mean there is nothing to
+    measure, not a problem to report. Returns [] and raises nothing.
+
+    Args:
+        claude_dir: Root to measure. Defaults to ~/.claude. Tests pass a real
+            temporary directory; production passes nothing.
+    """
+    if claude_dir is None:
+        claude_dir = Path.home() / ".claude"
+
+    claude_md = claude_dir / "CLAUDE.md"
+    rules_dir = claude_dir / "rules"
+
+    claude_md_lines = _count_lines(claude_md)
+    rules_files = sorted(rules_dir.glob("*.md")) if rules_dir.is_dir() else []
+    rules_lines = sum(_count_lines(f) for f in rules_files)
+
+    total = claude_md_lines + rules_lines
+    if total <= ALWAYS_LOADED_THRESHOLD:
+        return []
+
+    return [
+        f"Always-loaded surface is {total} lines "
+        f"(threshold: {ALWAYS_LOADED_THRESHOLD}). "
+        f"{claude_md}: {claude_md_lines} lines. "
+        f"{rules_dir}/*.md: {rules_lines} lines across "
+        f"{len(rules_files)} file(s). "
+        "Both load into every session and every subagent — reduce whichever "
+        "side is larger."
+    ]
 
 
 def check_mcp_health() -> list[str]:
