@@ -11,12 +11,13 @@ was verified by command at write time.
 **The Codex plan gate is DONE. Verdict APPROVED after 5 rounds. Do NOT re-run it.**
 Phase 4 and the gate are both closed. The next action is Phase 5:
 
-1. Flip `docs/plans/2026-07-26-always-loaded-surface-measurement.md` frontmatter to
-   `status: in-progress`. **This arms `write-guard.py` against the two paths declared
-   in `instruction_files:`** — `hooks/hook-health-check.py` and
-   `hooks/tests/test_hook_health_check.py`. Both reviewers confirmed that declaration
-   is complete AND minimal; `docs/*` and `rules/*` are not gated
-   (`hooks/write-guard.py:143-150` — verified).
+1. ~~Flip the plan to `status: in-progress`~~ — **DONE. The plan is ARMED.** Verified
+   it is the only `in-progress` plan. Declared paths: `hooks/hook-health-check.py`
+   and `hooks/tests/test_hook_health_check.py`. Both reviewers confirmed that
+   declaration is complete AND minimal; `docs/*` and `rules/*` are not gated
+   (`hooks/write-guard.py:143-150` — verified). See the ARMED warning under
+   "Repo state" before touching any other instruction file.
+   **BASE_SHA for Task 1: `6668993`.**
 2. Dispatch Tasks 1 → 2 → 3 → 4 **in that order, via `/coding-team`**. Do not reorder.
    Task 1 deliberately leaves an unwired function — a dark feature until Task 2 lands.
    **Do not report the feature complete after Task 1.**
@@ -40,9 +41,16 @@ is that it survives a different tree.
 
 - **Branch:** `feat/always-loaded-surface-measurement`, cut from synced `main` @ `0998201`. **One commit on it** — `60f4e40`, this handoff. (The previous version of this line said "zero"; it was written before the handoff was itself committed.) No code commits.
 - **`main`** @ `0998201`. Merged today: #118–#124.
-- **No plan is `status: in-progress`** — `write-guard.py` is DORMANT. If a future
-  session finds instruction edits blocked, hunt for a stale `in-progress` plan
-  before reaching for `WRITE_GUARD_ALLOW_INSTRUCTION_EDIT`. Never set it.
+- **⚠ `write-guard.py` is now ARMED — deliberately.** As of Phase 5 pre-flight,
+  `docs/plans/2026-07-26-always-loaded-surface-measurement.md` carries
+  `status: in-progress` (verified: it is the ONLY plan that does). This is the
+  intended state for the duration of Phase 5, **not** stale frontmatter.
+  **Do NOT "clean it up" to unblock an edit.** Instruction/hook edits to the two
+  paths declared in its `instruction_files:` are permitted; edits to any OTHER
+  instruction file will be blocked, and that is correct — declare the path in the
+  plan's `instruction_files:` rather than working around the guard. **Never set
+  `WRITE_GUARD_ALLOW_INSTRUCTION_EDIT`** — it disarms the whole session.
+  The plan returns to `status: complete` at the end of Phase 5, which disarms it.
 - **Working tree carries two pre-existing not-ours files** — `.claude/settings.local.json`
   (modified) and untracked `skills/second-opinion/codex-learnings.d/20260723-...-self-heal-migration-schema-shape.md`.
   **Never stage either.** The second is a live C27 learning entry AND the cause of
