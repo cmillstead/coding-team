@@ -10,52 +10,63 @@ was verified by command at write time.
 
 ---
 
-## ► RESUME HERE — one gate left, then Phase 6
+## ► RESUME HERE — gate 4 ran, findings fixed, round 2 pending
 
 **Phases 1-5 are DONE. The feature is IMPLEMENTED, TESTED, DEPLOYED, and LIVE.**
 The Codex *plan* gate closed APPROVED after 5 rounds — **do NOT re-run it**, and do
 NOT re-plan or re-dispatch Tasks 1-4. All four landed and were verified by command.
 
-**The single remaining action is Phase 5 exit gate 4: the post-execution Codex
-`review` (mode `review`, NOT `plan`), over `git diff main..HEAD`.** Gates 1-3 are
-closed (see "Phase 5 exit gates" below).
+**Gate 4 (post-execution Codex `review`, mode `review` NOT `plan`) HAS now been
+run — 2026-07-27.** Round 1 returned **REVISE with two P2 findings**; both are
+FIXED and committed (see "Gate 4" below). **Round 2 is the remaining action** —
+re-run `codex review --base main` from the repo root and confirm it comes back
+clean. Gates 1-3 remain closed.
 
-After that gate passes:
+After round 2 passes:
 1. Set the plan's frontmatter to `status: complete` — **this is what disarms
    `hooks/write-guard.py`**, which is currently ARMED. See the ARMED warning under
    "Repo state" before touching any instruction file outside the two declared paths.
 2. Phase 6: choose merge / PR / keep-branch / discard.
 
-**State at handoff:** 5 code+docs commits landed on top of the 4 pre-existing docs
-commits; nothing is half-applied; no mutation survives anywhere (verified by
-`git diff` after every mutation round). The working tree holds **three** entries,
-and **none may ever be staged**: `.claude/settings.local.json` (modified,
-pre-existing), `docs/handoff/2026-07-26-f1-surface-measurement-plan-ready.md`
-(modified — THIS file, in flight), and the untracked
+**State at handoff:** **14 commits** on the branch — the 9 described in the commit
+table below, plus **three gate-4 remediation commits** (`82edf67`, `c2571b9`,
+`adaaad8`), `e6f8328`, and this reconciliation itself. **Re-derive with
+`git log --oneline main..HEAD | wc -l` rather than trusting this number** — it
+goes stale on every commit, including the one that writes it. Nothing is half-applied; no mutation survives anywhere
+(verified by `git diff` after every mutation round). The working tree holds
+exactly **two** entries, and **neither may ever be staged**:
+`.claude/settings.local.json` (modified, pre-existing) and the untracked
 `skills/second-opinion/codex-learnings.d/20260723-...` entry (pre-existing).
+THIS file is committed as of the gate-4 reconciliation, so it will appear as a
+third, stageable entry only while someone is actively editing it — that one IS
+ours and SHOULD be committed; the other two never are.
 
-**Verified after the final commit `92a0c78`:** `python3 -m pytest hooks/tests -q` →
-**1067 passed, 9 skipped**, exit 0. `ruff check .` → clean. Live probe
+**Verified after the current HEAD `adaaad8`:** `python3 -m pytest hooks/tests -q` →
+**1072 passed, 9 skipped**, exit 0. `ruff check .` → clean. Live probe
 `echo '{}' | python3 ~/.claude/hooks/hook-health-check.py` → `exit=0`,
 `"decision": "allow"`, reason contains
 `Always-loaded surface is 354 lines (threshold: 200)`.
 
 *(Suite arithmetic, for anyone re-deriving it: BASELINE 1055 → +10 Task 1 → +1
-Task 2 → +1 the broken-symlink test in `92a0c78` = 1067.)*
+Task 2 → +1 the broken-symlink test in `92a0c78` = 1067 → +3 in `82edf67` → +2 in
+`adaaad8` = **1072**. `c2571b9` added no tests.)*
 
 ---
 
 ## Repo state
 
-- **Branch:** `feat/always-loaded-surface-measurement`, cut from synced `main` @ `0998201`. **Nine commits.** Four docs-only, from before execution: `60f4e40` (this handoff, created), `6668993` (gate APPROVED + pre-flight corrections), `7aaf725` (write-guard ARMED warning), `4572c27` (reconciled 7 stale claims). Then the five from Phase 5:
+- **Branch:** `feat/always-loaded-surface-measurement`, cut from synced `main` @ `0998201`. **14 commits** (re-derive; see above). Four docs-only, from before execution: `60f4e40` (this handoff, created), `6668993` (gate APPROVED + pre-flight corrections), `7aaf725` (write-guard ARMED warning), `4572c27` (reconciled 7 stale claims). Then the five from Phase 5, `e6f8328` (recorded Phase 5 complete), and the three gate-4 remediation commits:
 
   | SHA | Task | Contents |
   |---|---|---|
-  | `3869805` | 1 | `ALWAYS_LOADED_THRESHOLD`, `_count_lines()`, `check_always_loaded_surface()`, 10 tests. Function left deliberately unwired |
+  | `3869805` | 1 | `ALWAYS_LOADED_THRESHOLD`, `_count_lines()`, `check_always_loaded_surface()`, 10 tests. Function left deliberately unwired. (`_count_lines()` was later deleted in `c2571b9` — see below) |
   | `64cd331` | 2 | Wired into `main()` (call + early-return conjunct + output block), `main()`-level integration test, reason-allowlist entry, deployed |
   | `6f4b38e` | 3 | Corrected F3's prescription + both falsified Appendix B rows in the audit report |
   | `bcd381d` | 4 | Recorded F1 as landed in the Phase-1 handoff; corrected its stale symlink count |
   | `92a0c78` | QA fixes | Four defects the QA gate found in the above — see "QA findings" below |
+  | `82edf67` | gate-4 pre-flight | Unreadable CLAUDE.md now surfaces even under threshold (+3 tests) |
+  | `c2571b9` | gate-4 pre-flight | Deleted `_count_lines()`, orphaned by `82edf67`; repaired 4 prose references |
+  | `adaaad8` | gate-4 R1 finding | Unified `measurement_incomplete` flag — closes the same go-dark hole on the `rules/` side (+2 tests) |
 - **`main`** @ `0998201`. Merged today: #118–#124.
 - **⚠ `write-guard.py` is now ARMED — deliberately.** As of Phase 5 pre-flight,
   `docs/plans/2026-07-26-always-loaded-surface-measurement.md` carries
@@ -71,22 +82,54 @@ Task 2 → +1 the broken-symlink test in `92a0c78` = 1067.)*
   (modified) and untracked `skills/second-opinion/codex-learnings.d/20260723-...-self-heal-migration-schema-shape.md`.
   **Never stage either.** The second is a live C27 learning entry AND the cause of
   the digest test failure (see "Known failures").
-- **Verified current state:** `python3 -m pytest hooks/tests -q` → **1067 passed,
+- **Verified current state:** `python3 -m pytest hooks/tests -q` → **1072 passed,
   9 skipped** (was 1055 before execution). `ruff check .` → clean.
 
-## Phase 5 exit gates — 3 of 4 CLOSED
+## Phase 5 exit gates — 3 closed, gate 4 at round 2
 
 | # | Gate | Status |
 |---|---|---|
-| 1 | Full-suite test + lint | ✅ 1067 passed / 9 skipped, ruff clean, run after the final commit |
+| 1 | Full-suite test + lint | ✅ 1072 passed / 9 skipped, ruff clean, re-run after `adaaad8` |
 | 2 | `ct-qa-reviewer` | ✅ **PASS**, zero P1s. 7 findings — 4 fixed in `92a0c78`, 3 deferred (below) |
 | 3 | Doc-drift scan | ✅ One finding: THIS handoff was stale. Fixed by the edit you are reading. No other tracked doc drifted |
-| 4 | Post-exec Codex `review` | ❌ **NOT RUN — this is the resume point** |
+| 4 | Post-exec Codex `review` | 🔄 **Round 1 REVISE (2 P2, both fixed). Round 2 pending — this is the resume point** |
+
+## Gate 4 — Codex `review`, round 1 (2026-07-27)
+
+Mode `diff` (the closed plan gate was mode `plan`, so the pre-flight classification
+differs: 25 applicable / 7 dismissed of 32 live entries; P1–P4/P32/P34 are
+scope-dismissed in a diff review, C3 dismissed no-signal).
+
+**Pre-flight caught one FIXED item before dispatch (P31-class).** `CLAUDE.md` was
+read via `_count_lines()`, which collapses "absent" and "present-but-unreadable"
+into `0`. Since `~/.claude/CLAUDE.md` is itself a deploy symlink carrying 238 of
+354 lines, a de-initialized submodule breaks it *and* both rules symlinks at once,
+the surviving total falls under threshold, and the check went **completely
+silent** exactly when the harness was most degraded. Fixed in `82edf67`;
+`c2571b9` removed the helper it orphaned.
+
+**Round 1 returned REVISE with two P2s, both now fixed:**
+1. **The fix above was asymmetric** — the early return still ignored unreadable
+   `rules/*.md` entries, so the identical go-dark hole remained open on the other
+   input. Fixed in `adaaad8` with a single `measurement_incomplete` flag rather
+   than a second special case, so a future third input cannot reintroduce it.
+2. **This handoff was stale** — cited `92a0c78` as final and "nine commits".
+   Fixed by the edit you are reading.
+
+**Lesson worth keeping:** finding 1 is case-study 23 (*unpropagated fix*)
+recurring **inside its own remediation** — the pre-flight propagated the guard
+`rules/` → CLAUDE.md and left CLAUDE.md → `rules/` open. This matches the
+`feedback-coverage-claims-recur-in-their-own-fix` memory. When fixing an
+asymmetry between two inputs, unify them behind one flag; do not add a conjunct.
 
 **Gate 2 confirmed the things most worth confirming:** the dark feature Task 1
-deliberately left IS closed (`check_always_loaded_surface` → called at `:731` →
-emitted at `:764-768` → survives the early return at `:739-741` → `allow_with_reason`
-→ dispatcher envelope-unwrap → user); no path in the diff can produce a block; the
+deliberately left IS closed — cited by SYMBOL, since these line numbers have now
+drifted twice: `check_always_loaded_surface()` is called in `main()` (`:828` as of
+`adaaad8`), its output is emitted in the `if surface_warnings:` block (`:861-864`),
+and it survives `main()`'s early return via the `and not surface_warnings` conjunct
+(`:838`) → `allow_with_reason` → dispatcher envelope-unwrap → user. Re-derive these
+by grepping the symbol, never by trusting the numbers. No path in the diff can
+produce a block; the
 new test class did NOT copy the vacuous inline-glob pattern from
 `TestCheckInstructionFileLengths`; and every doc number (238 / 116 / 7 files / 354 /
 2 symlinks + 5 regular / 61 across 3) checks out independently.
@@ -130,12 +173,21 @@ none was eligible for deferral):
    "226 lines" (now 116), and **§5 Group A has no LANDED marker** while `:270-281`'s
    arithmetic still assumes it is pending. Pick ONE convention for the document.
 
-**One resume trigger worth setting:** `main()`'s early-return conjunct
-(`hook-health-check.py:739-741`) is inert in BOTH environments today, because
+**One resume trigger worth setting:** `main()`'s early-return conjunct — grep
+`and not surface_warnings` in `hook-health-check.py` (`:838` as of `adaaad8`; the
+number drifts, the symbol does not) — is inert in BOTH environments today, because
 `check_instruction_file_lengths()` is never empty at either root. It becomes
 load-bearing at exactly the moment the reductions succeed and the surface warning is
 the only remaining signal. **When `check_instruction_file_lengths()` first returns
 `[]`, re-verify that conjunct by mutation** — until then it is inspection-only.
+
+**A second trigger, from gate 4:** `measurement_incomplete` (the unified
+unreadable-input flag added in `adaaad8`) is likewise only *partly* exercised in
+production today. Its threshold-override branch cannot fire while the deployed
+total is 354, because the check already warns on volume alone. It becomes the sole
+signal once the reductions bring the total to ≤200 — the same moment as the trigger
+above. Both new tests cover it against real temp dirs, so this is a
+production-reachability note, not a coverage gap.
 
 ## The plan
 
