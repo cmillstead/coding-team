@@ -24,10 +24,11 @@ Phase 4 and the gate are both closed. The next action is Phase 5:
 3. Then the 4 blocking Phase 5 exit gates: full-suite test+lint, `ct-qa-reviewer`,
    doc-drift scan, post-exec Codex `review` (mode `review`, not `plan`). All RUN at Medium.
 
-**State at handoff:** no code has changed; nothing is half-applied. The only working-tree
-delta that is OURS is this handoff file (modified, uncommitted). `.claude/settings.local.json`
-and the untracked `skills/second-opinion/codex-learnings.d/20260723-...` entry are
-pre-existing and **must never be staged**.
+**State at handoff:** no code has changed; nothing is half-applied. This handoff is
+**committed** — the working tree holds NOTHING of ours. The only two entries in
+`git status` are `.claude/settings.local.json` (modified) and the untracked
+`skills/second-opinion/codex-learnings.d/20260723-...` entry; both are pre-existing
+and **must never be staged**.
 
 **Baseline re-verified this session:** `python3 -m pytest hooks/tests -q` →
 **1055 passed, 9 skipped**, exit 0. `ruff check .` → clean. Task 1 Step 0 still
@@ -39,7 +40,7 @@ is that it survives a different tree.
 
 ## Repo state
 
-- **Branch:** `feat/always-loaded-surface-measurement`, cut from synced `main` @ `0998201`. **One commit on it** — `60f4e40`, this handoff. (The previous version of this line said "zero"; it was written before the handoff was itself committed.) No code commits.
+- **Branch:** `feat/always-loaded-surface-measurement`, cut from synced `main` @ `0998201`. **Three commits, all docs, ZERO code commits:** `60f4e40` (this handoff, created), `6668993` (gate APPROVED + pre-flight corrections), `7aaf725` (write-guard ARMED warning). Task 1's BASE_SHA is `6668993` — recorded before `7aaf725` landed; both are docs-only so the code diff from either is identical.
 - **`main`** @ `0998201`. Merged today: #118–#124.
 - **⚠ `write-guard.py` is now ARMED — deliberately.** As of Phase 5 pre-flight,
   `docs/plans/2026-07-26-always-loaded-surface-measurement.md` carries
@@ -60,8 +61,12 @@ is that it survives a different tree.
 
 ## The plan
 
-`docs/plans/2026-07-26-always-loaded-surface-measurement.md` — **1028 lines,
-`status: planned`, gitignored** (`.gitignore:2`, so it will never be committed).
+`docs/plans/2026-07-26-always-loaded-surface-measurement.md` — **1152 lines,
+`status: in-progress` (ARMED — see the warning under "Repo state"), gitignored**
+(`.gitignore:2`, so it will never be committed). It grew 1028 → 1152 during the
+5-round Codex gate; almost all of that is prose about its own test coverage, not
+about the change, which is still one function + one helper + one constant + ~7
+lines of wiring.
 
 ```yaml
 instruction_files: hooks/hook-health-check.py, hooks/tests/test_hook_health_check.py
@@ -97,9 +102,17 @@ directory is the whole point: `~/.claude/rules/` is written by two repos
 the deployed tree spans both owners by construction and the ownership question
 does not need resolving for the measurement to be right.
 
-**The audit's own F1 prescription was rejected in the plan** — adding `config/*.md`
-+ `rules/*.md` to the existing glob list would measure 61 lines instead of 354, a
-falsely reassuring number, and a per-file threshold never fires on 5-29-line rules.
+**The audit's own F1 prescription was rejected in the plan**, on two independent
+grounds — reproduce BOTH; the gate spent two rounds getting the first one right:
+1. `repo_root = Path(__file__).parent.parent` is NOT symlink-resolved, so it is
+   `~/.claude` for the deployed hook but this repo under pytest. A `rules/*.md` glob
+   added there measures the deployed 7 files (116 lines) in production but this
+   repo's 3 (**61** lines, including a `README.md` that is never deployed) under
+   pytest — two different file sets, and no test could pin the production one.
+   **Do not write "37" in this argument**: 37 is the deployed share this repo OWNS
+   (its 2 symlinked rules), a different quantity. That conflation was a finding twice.
+2. It is a PER-FILE check, so a 200-line threshold never fires on 5-29-line rules
+   at any root. This reason alone is sufficient.
 
 Current surface: **354** = `~/.claude/CLAUDE.md` 238 + `~/.claude/rules/` 116.
 
@@ -108,10 +121,14 @@ intended. A blocking cap is audit finding **F2, which must land LAST**, after th
 reductions — at 238 lines a cap that blocks >200 would block the very edits that
 reduce it. The plan carries a dedicated "this is NOT F2" comparison table.
 
-## Resume from here
+## Codex plan gate — corrected pre-flight (record only; the gate is CLOSED)
 
-1. ~~Finish the Codex plan gate~~ — **DONE 2026-07-26. Verdict APPROVED after 5 rounds.**
-   The corrected pre-flight is below. **The audit line in the previous version of
+**The actionable resume steps are the "► RESUME HERE" block at the top of this file.
+This section is the gate's record, not a to-do list.** An earlier version of this
+section duplicated the resume steps and told you to flip the plan to `in-progress` —
+that is already done, and following it again would have been harmless but confusing.
+
+**The audit line in the previous version of
    this handoff was wrong in two ways** — it dropped **P34** entirely (its file,
    `20260624-062659-dac1-cfgtest-as-production-path.md`, has no P/C prefix in the
    filename; the H1 is `# P34`) and its arithmetic did not reconcile (`24 + 7 = 31`,
@@ -131,11 +148,6 @@ applicable(26): P1,P2,P3,P4 (floor) · P30,P31,P32,P33,P34 · C4,C10,C11,C12,C13
 total: 26 + 6 = 32   floor-note: C28 floored — its category `dual-resolution-policy`
                      is NOT in `_header.md`'s 19-value enum, so it reads as untagged
 ```
-
-2. **Phase 5 is the next action** — flip the plan to `status: in-progress` (this arms
-   the write-guard against the two declared paths), dispatch Tasks 1-4 in order.
-3. **Then the 4 blocking Phase 5 exit gates:** full-suite test+lint, `ct-qa-reviewer`,
-   doc-drift scan, post-exec Codex `review`. All RUN at Medium.
 
 ## Hazards — read before touching anything
 
@@ -172,7 +184,9 @@ explicitly and never touches `__file__`. Recorded in the plan's NOT-in-scope.
 early-return change cannot be tested. `check_instruction_file_lengths()` is
 repo-rooted and unconditionally non-empty (3 files >200), so `main()` never
 reaches the early return under test. The plan documents that as an **honest
-coverage gap, verified by inspection only** — Failure Modes row at `:966`. Do not
+coverage gap, verified by inspection only** — see the Failure Modes row for
+`main()` / Step 3's conjunct (the plan grew to 1152 lines during the gate, so grep
+for `and not surface_warnings` rather than trusting a line number). Do not
 "fix" it by stubbing; that breaches the no-mocks invariant, and the elaborate
 real-file alternative was considered and rejected on GP#17.
 
@@ -212,8 +226,10 @@ re-attempting the exhaustive mapping; that is the loop this took five rounds to 
 ## Review history — 20 findings, all closed (same-model rounds, pre-gate)
 
 - **Round 1** (12: 2 P1, 2 P2, 8 P3). Headline: a Failure Modes row claiming
-  `Tested? Yes` for a regression no test could observe — all seven aggregate tests
-  pass `claude_dir=` explicitly and are blind to the default.
+  `Tested? Yes` for a regression no test could observe — every aggregate test then
+  written passed `claude_dir=` explicitly and was blind to the default. (The class
+  was 8 tests at that point and is 10 now; `test_default_target_is_the_deployed_home_dir`
+  is still the only one that observes the default.)
 - **Round 2** (8: 1 P1, 7 P3), by a FRESH reviewer that traced every branch of
   `main()`. Headline P1: the mutation table added to fix round 1 contained a row
   that could not fire — **the same defect class recurring inside its own fix.**
