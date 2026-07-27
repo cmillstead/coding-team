@@ -14,49 +14,9 @@ The sections below define the standards your team follows.
 
 ## Engram Knowledge Graph
 
-Use engram for structured knowledge — nodes, edges, relationships, dimensions. Prefer CLI with `--json` over MCP tools when the dev server is running (`npm run dev`).
-
-### Core commands
-
-```bash
-engram search "query" --json                    # Full-text + vector search
-engram search-debug "query" --json              # Search with scoring/ranking debug info
-engram query-nodes --filter '{"type":"note"}' --json  # Structured node query
-engram get-node <id> --json                     # Fetch node by ID
-engram add-node "title" --description "..." --json
-engram update-node <id> --description "..." --json
-engram delete-node <id> --json
-engram get-context --json                       # Context for current session
-engram since-last-session --json                # What changed since last session
-engram capture-session --json                   # Capture current session state
-engram export --json                            # Export full graph
-engram import-bulk <file> --json                # Bulk import nodes/edges
-```
-
-### Edges
-
-```bash
-engram create-edge --from <id> --to <id> --type "related_to" --json
-engram query-edges --node <id> --json
-engram delete-edge <id> --json
-```
-
-### Recall (key-value memory)
-
-```bash
-engram recall-get <key> --json
-engram recall-set <key> <value> --json
-engram list-recall --json
-engram delete-recall <key> --json
-```
-
-### Dimensions & exploration
-
-```bash
-engram query-dimensions --json
-engram create-dimension <name> --json            # Create a new dimension
-engram sql "SELECT count(*) FROM nodes" --json   # Raw SQLite query
-```
+Engram is the structured-knowledge store (nodes, edges, relationships, dimensions).
+Prefer the CLI with `--json` over MCP tools when the dev server is running. Full command
+reference: `~/.claude/reference/engram-cli.md`.
 
 ## Cross-Project Memory
 
@@ -122,49 +82,13 @@ Known rationalization: "they can ask for one if they want it" — they should no
 - Do NOT restart work from scratch — continue from where compaction interrupted
 - Do NOT assert what a prior session did, finished, or lost without checking artifacts on disk first — verify a claim like "nothing was lost" against files, or say you don't know yet
 
-## Model Routing (for coding-team agents, NOT for you)
-
-When dispatching agents through `/coding-team`, use the least powerful model that can handle each agent's task:
-
-| Task type | Model | Examples |
-|-----------|-------|---------|
-| Mechanical | `haiku` | Single file edits, formatting, simple rewrites, grep-and-replace |
-| Implementation | `sonnet` | Feature implementation, test writing, multi-file refactoring, debugging |
-| Architecture/review | `opus` | Planning, design, spec review, code review, complex debugging |
-
-**Signals for escalation:**
-- Touches 1-2 files with a complete spec → `haiku`
-- Touches 3+ files or needs judgment → `sonnet`
-- Requires design decisions or broad codebase understanding → `opus`
-- If a cheaper model fails or returns low-quality results, re-dispatch with the next tier up
-
-## Testing: Real Over Mocks (MANDATORY)
-
-Use real implementations in tests — see `~/.claude/reference/test-files.md` for the base rule. Do NOT use mocks, patches, fakes, or stubs.
-
-**Allowed real dependencies** (set these up instead of mocking):
-- SQLite: use temp databases
-- Postgres/Redis: use Docker test containers
-- File system: use real temp directories
-- HTTP servers: use real test servers (e.g., `httpx.AsyncClient(app=app)`)
-- Ollama/LLM: mock ONLY if the model isn't installed locally
-
-**The ONLY acceptable reasons to mock:**
-- External paid API with no test mode (e.g., Stripe production, Bittensor mainnet)
-- Hardware not available in CI (e.g., GPU)
-- Local LLM / Ollama when the model isn't installed locally
-- Any dependency physically impossible to run locally
-
-If you find yourself reaching for `mock`, `patch`, `MagicMock`, `monkeypatch`, `@mock.patch`, or `unittest.mock` — STOP and find the real implementation instead. When in doubt, ask.
-
 ## Three-Tier Boundaries
 
 ### Always Do
 - Run tests and linting before committing — NEVER commit without verification
 - Follow the project's architectural layer structure — read AGENTS.md or ARCHITECTURE.md if present
-- Use real implementations in tests — NEVER use mocks, patches, or stubs (see Testing section)
+- Use real implementations in tests, NEVER mocks/patches/stubs — full rule at `~/.claude/reference/test-files.md`, hard-blocked by write-guard.py :643, :1054
 - Your team checks for existing utilities before creating new ones, follows TDD, and stores architectural decisions in ContextKeep
-- Use descriptive names — NEVER use single-letter variables outside loops
 
 ### Ask First
 - Adding a new external dependency (check package.json/pyproject.toml first)
@@ -175,39 +99,15 @@ If you find yourself reaching for `mock`, `patch`, `MagicMock`, `monkeypatch`, `
 - Any change that affects 4+ modules or 4+ files
 
 ### Never Do
-- NEVER commit secrets, tokens, API keys, or credentials — instead, move the value to an env var or secret store and reference it.
-- NEVER modify deployed migration files — instead, create a new migration with up and down logic.
-- NEVER skip or disable tests to make CI pass — instead, fix the failing test or report the failure to the user with the error output.
-- NEVER force push to main or release branches — instead, open a PR; if history must change, ask the user first.
-- NEVER commit directly to main or master — always work on a feature branch and create a PR. If you find yourself on main, create a branch with `git checkout -b <descriptive-name>` before making any changes.
-- NEVER commit .env files or sensitive configuration
-- NEVER use `any` in TypeScript — use `unknown` if the type is genuinely unknown
-- NEVER swallow errors with empty catch blocks — at minimum, log them
+- Secrets/token/credential commits, deployed-migration edits, test-skipping, force-push to main/release, direct commits to main/master, and .env commits are all hard-blocked by hooks (git-safety-guard.py :976, :990, :1012; write-guard.py :1048, :1054). When a hook blocks, the block is authoritative.
 - NEVER introduce a new framework or library without explicit approval
 - NEVER claim work is done without running verification (tests, lint, typecheck)
 - After 3 failed attempts at the same approach, STOP and report to the user: what you tried, the error output, and your hypothesis. Do NOT retry a 4th time.
 
 ## Proactive Skill Suggestions
 
-Suggest the right skill at natural transition points — don't wait to be asked:
-
-| When you notice... | Suggest |
-|---|---|
-| Feature implementation complete, about to commit/PR | `/scan-code` before the PR |
-| Security-sensitive code changed (auth, crypto, input handling) | `/scan-security` |
-| Scan findings exist with an implementation plan | `/scan-fix` to remediate atomically |
-| Previous scan findings may not be verified | `/scan-previous` |
-| New user-facing feature or UX change | `/scan-product` |
-| High-stakes code (payments, permissions, data deletion) | `/scan-adversarial` |
-| Production incident, outage, or urgent bug in prod | `agency-engineering-incident-response-commander` for structured response |
-| New to a codebase, or onboarding someone | `/onboard` for guided orientation |
-| Dependencies haven't been checked in a while | `/dep-audit` before the next release |
-| Shipping breaking changes to consumers | `/migration-guide` alongside the release |
-| Docs are thin, missing, or mediocre | `/doc-write` to create or elevate |
-| Feedback memory could be a hook | `/harness-engineer` to evaluate promotion |
-| Harness hasn't been audited recently | `/harness-engineer audit` for maturity check |
-| UI/screen/component change | `/a11y` |
-| New/changed API endpoint | `/api-qa` |
+At natural transition points — feature complete, pre-PR, new API endpoint, UI change —
+read `~/.claude/reference/skill-suggestions.md` for the full trigger-to-skill table.
 
 ## Code Style
 
@@ -221,18 +121,10 @@ Applies to you AND coding-team agents. Issue shell commands as **one command per
 
 coding-team reads `~/.claude/golden-principles.md` during design and planning phases for architectural decisions and ambiguity resolution.
 
-## UI/UX Standards (for coding-team agents)
-
-- **Immediate feedback**: If an action has a delay, always show a loading/progress indicator — never leave the user with no feedback
-- **WCAG 2.2 AA compliance**: Keyboard accessible, color contrast, ARIA labels, focus indicators, semantic HTML, `prefers-reduced-motion` respect
-
 ## Hook Deployment
 
-Hooks: source in `hooks/`, deployed to `~/.claude/hooks/` via `scripts/deploy.sh`. Always deploy BEFORE updating `settings.json` hook references — reversing the order creates an unrecoverable deadlock.
+Always deploy hooks BEFORE updating `settings.json` hook references — reversing the order creates an unrecoverable deadlock.
 
 ## Obsidian Vault
 
-- Location: `~/Documents/obsidian-vault/`
-- Structure: hierarchical MOCs — root `MOC.md` → sub-MOCs (priming, patterns, goals, projects, conversations)
-- Every note has `> Part of [[...moc]]` parent link + `## Related` wikilinks
-- `/save` skill writes to both auto-memory (concise) and vault (detailed)
+Vault structure, MOC linking convention, and `/save` behavior: `~/.claude/reference/obsidian-vault.md`.
