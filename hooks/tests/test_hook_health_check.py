@@ -456,6 +456,527 @@ class TestCheckInstructionFileLengths:
             assert isinstance(item, str)
 
 
+class TestCheckAlwaysLoadedSurface:
+    """Aggregate check over the DEPLOYED always-loaded surface.
+
+    Every test builds a real ~/.claude-shaped tree under tmp_path with real
+    files, then calls the real production function. The function reads a
+    filesystem, so the tests give it one — no mocks, no patches, no
+    monkey-patching (GP#1 Real Over Mocks). Exactly ONE test
+    (test_aggregate_spans_symlinked_and_regular_rules) builds a real symlink,
+    because it is the only one whose property depends on symlink traversal;
+    do not describe the others as exercising symlinks.
+
+    Do NOT reimplement the function's logic inside a test body. Two tests in
+    TestCheckInstructionFileLengths above do exactly that and would stay
+    green with the production function deleted; that pattern is a known
+    defect, not a template.
+    """
+
+    @staticmethod
+    def _write_lines(path, count):
+        """Write a file whose splitlines() length is exactly `count`.
+
+        Deliberately no trailing newline: str.splitlines() counts "a\nb" and
+        "a\nb\n" both as 2, so this is correct as written. Do NOT "fix" it by
+        appending a newline — that changes nothing and invites the reader to
+        believe there is an off-by-one here.
+        """
+        path.write_text("\n".join(f"line {i}" for i in range(count)))
+
+    def test_aggregate_spans_symlinked_and_regular_rules(self, hhc, tmp_path):
+        """The sum counts BOTH owners of ~/.claude/rules/ — symlinks and regular files.
+
+        Sized so the warning exists only if both owners are counted:
+        150 + 40 + 30 = 220 (over 200), but 150 + 40 = 190 and
+        150 + 30 = 180 are both under. Skipping either owner => no warning.
+        """
+        claude_dir = tmp_path / "claude"
+        rules_dir = claude_dir / "rules"
+        rules_dir.mkdir(parents=True)
+        upstream = tmp_path / "upstream"
+        upstream.mkdir()
+
+        self._write_lines(claude_dir / "CLAUDE.md", 150)
+
+        # Owner A: a real symlink, the way scripts/deploy.sh installs this
+        # repo's rules into ~/.claude/rules/.
+        symlink_target = upstream / "from-submodule.md"
+        self._write_lines(symlink_target, 40)
+        (rules_dir / "from-submodule.md").symlink_to(symlink_target)
+        assert (rules_dir / "from-submodule.md").is_symlink()
+
+        # Owner B: a regular file, the way the parent claude-harness repo
+        # tracks its own rules in place (mode 100644).
+        self._write_lines(rules_dir / "from-parent.md", 30)
+
+        warnings = hhc.check_always_loaded_surface(claude_dir=claude_dir)
+
+        assert len(warnings) == 1
+        # Pin the total, not a loose substring — the message also embeds
+        # tmp_path, which could coincidentally contain "220".
+        assert "is 220 lines" in warnings[0]
+
+    def test_broken_symlink_excluded_from_file_count_and_named_unreadable(self, hhc, tmp_path):
+        """A broken symlink under rules/ is a real directory entry that glob()
+        returns but that cannot be read — it must NOT inflate the reported
+        file count while contributing 0 lines, and the warning must say so.
+
+        Sized so the total is over threshold from the readable file alone
+        (201), so the warning fires regardless of whether the broken symlink
+        is (wrongly) counted as a 0-line file or (correctly) excluded.
+        """
+        claude_dir = tmp_path / "claude"
+        rules_dir = claude_dir / "rules"
+        rules_dir.mkdir(parents=True)
+        self._write_lines(claude_dir / "CLAUDE.md", 150)
+        self._write_lines(rules_dir / "readable.md", 51)
+
+        # A real broken symlink: points at a path that does not exist.
+        broken = rules_dir / "broken.md"
+        broken.symlink_to(tmp_path / "does-not-exist.md")
+        assert broken.is_symlink()
+        assert not broken.exists()  # confirms the target is genuinely missing
+
+        warnings = hhc.check_always_loaded_surface(claude_dir=claude_dir)
+
+        assert len(warnings) == 1
+        text = warnings[0]
+        assert "is 201 lines" in text
+        # File count must exclude the broken symlink — 1, not 2.
+        assert f"{rules_dir}/*.md: 51 lines across 1 file(s) (1 unreadable)" in text
+
+    def test_warning_names_both_contributors(self, hhc, tmp_path):
+        """The text ATTRIBUTES each count to its own contributor, plus the total.
+
+        A reader must be able to see which side to reduce. Numbers mirror the
+        real deployed surface (238 + 116 = 354).
+
+        Each assertion pins a LABELLED fragment — "<path>: 238 lines", not a
+        bare "238". A bare-substring version of this test passes even if the
+        two counts are swapped in the format string (reporting CLAUDE.md as
+        116 and rules/ as 238), because every number still appears SOMEWHERE
+        in the message. Attribution is the property under test, so the label
+        and its number must be asserted together. Do NOT weaken these back to
+        bare-number checks.
+        """
+        claude_dir = tmp_path / "claude"
+        rules_dir = claude_dir / "rules"
+        rules_dir.mkdir(parents=True)
+        self._write_lines(claude_dir / "CLAUDE.md", 238)
+        self._write_lines(rules_dir / "some-rule.md", 116)
+
+        warnings = hhc.check_always_loaded_surface(claude_dir=claude_dir)
+
+        assert len(warnings) == 1
+        text = warnings[0]
+        assert "is 354 lines" in text
+        assert "threshold: 200" in text
+        assert f"{claude_dir / 'CLAUDE.md'}: 238 lines" in text
+        assert f"{rules_dir}/*.md: 116 lines across 1 file(s)" in text
+
+    def test_under_threshold_returns_empty(self, hhc, tmp_path):
+        """100 + 50 = 150 is under the 200 threshold — no warning.
+
+        The rules/ dir also holds a non-Markdown DECOY sized so that counting
+        it would flip this test's outcome: 100 + 50 + 100 = 250, over the
+        threshold. Every other fixture in this class contains only .md files,
+        so without this decoy a glob widened from "*.md" to "*" would pass the
+        entire suite while measuring a surface the spec does not define. Only
+        ~/.claude/rules/*.md auto-loads; a .txt sitting there does not.
+        """
+        claude_dir = tmp_path / "claude"
+        rules_dir = claude_dir / "rules"
+        rules_dir.mkdir(parents=True)
+        self._write_lines(claude_dir / "CLAUDE.md", 100)
+        self._write_lines(rules_dir / "small.md", 50)
+        self._write_lines(rules_dir / "notes.txt", 100)
+
+        assert hhc.check_always_loaded_surface(claude_dir=claude_dir) == []
+
+    def test_exactly_at_threshold_is_silent(self, hhc, tmp_path):
+        """A total of exactly 200 does NOT warn — the comparison is `<=`.
+
+        Pairs with test_one_over_threshold_warns below. Together they pin the
+        boundary from both sides: this one fails if `total <= THRESHOLD` is
+        tightened to `<`, and its sibling fails if the threshold constant is
+        moved in either direction.
+
+        The `<`-tightening mutation is visible to THIS TEST ALONE — no other
+        test has a total of exactly 200. Threshold MOVES are not so contained:
+        test_warning_names_both_contributors also asserts "threshold: 200", so
+        it goes red on a threshold change too, despite its 354 total sitting
+        nowhere near the boundary. Do not describe the boundary mutations as
+        invisible to every other test; that was true only before the
+        threshold-text assertion was added.
+        """
+        claude_dir = tmp_path / "claude"
+        rules_dir = claude_dir / "rules"
+        rules_dir.mkdir(parents=True)
+        self._write_lines(claude_dir / "CLAUDE.md", 150)
+        self._write_lines(rules_dir / "small.md", 50)
+
+        assert hhc.check_always_loaded_surface(claude_dir=claude_dir) == []
+
+    def test_one_over_threshold_warns(self, hhc, tmp_path):
+        """A total of 201 warns, and the message reports the threshold it used.
+
+        Asserting "threshold: 200" pins ALWAYS_LOADED_THRESHOLD itself, but be
+        precise about HOW it fails, because the two directions differ:
+        - Raising the constant to >= 201 silences the warning, so this test
+          aborts at `assert len(warnings) == 1` and NEVER REACHES the
+          threshold-text assertion (pytest stops at the first failing assert).
+        - Lowering it below 201 keeps the warning, so execution does reach the
+          text assertion and that is what turns it red.
+        Both directions fail the test; only the second one proves the text
+        assertion is live. Mutation rows 9 and 12 in Step 6 cover them
+        separately for exactly this reason. Do NOT claim this test "fails two
+        ways" under a single mutation.
+
+        Do NOT "fix" a future failure here by editing the expected number — if
+        this test goes red, the threshold moved, and moving it is exactly what
+        the plan prohibits.
+        """
+        claude_dir = tmp_path / "claude"
+        rules_dir = claude_dir / "rules"
+        rules_dir.mkdir(parents=True)
+        self._write_lines(claude_dir / "CLAUDE.md", 150)
+        self._write_lines(rules_dir / "small.md", 51)
+
+        warnings = hhc.check_always_loaded_surface(claude_dir=claude_dir)
+
+        assert len(warnings) == 1
+        assert "is 201 lines" in warnings[0]
+        assert "threshold: 200" in warnings[0]
+
+    def test_missing_claude_md_still_measures_rules(self, hhc, tmp_path):
+        """No ~/.claude/CLAUDE.md: measure what is there, raise nothing."""
+        claude_dir = tmp_path / "claude"
+        rules_dir = claude_dir / "rules"
+        rules_dir.mkdir(parents=True)
+        self._write_lines(rules_dir / "big.md", 250)
+        assert not (claude_dir / "CLAUDE.md").exists()
+
+        warnings = hhc.check_always_loaded_surface(claude_dir=claude_dir)
+
+        assert len(warnings) == 1
+        assert "is 250 lines" in warnings[0]
+        # The absent side must be REPORTED as 0, not silently omitted.
+        assert f"{claude_dir / 'CLAUDE.md'}: 0 lines" in warnings[0]
+
+    def test_missing_rules_dir_still_measures_claude_md(self, hhc, tmp_path):
+        """No ~/.claude/rules/: measure what is there, raise nothing."""
+        claude_dir = tmp_path / "claude"
+        claude_dir.mkdir()
+        self._write_lines(claude_dir / "CLAUDE.md", 250)
+        assert not (claude_dir / "rules").exists()
+
+        warnings = hhc.check_always_loaded_surface(claude_dir=claude_dir)
+
+        assert len(warnings) == 1
+        assert "is 250 lines" in warnings[0]
+        # The absent side must be REPORTED as 0 across 0 files.
+        assert f"{claude_dir / 'rules'}/*.md: 0 lines across 0 file(s)" in warnings[0]
+
+    def test_nothing_deployed_returns_empty(self, hhc, tmp_path):
+        """A machine that deploys neither: warn nothing, raise nothing."""
+        claude_dir = tmp_path / "claude"
+        claude_dir.mkdir()
+
+        assert hhc.check_always_loaded_surface(claude_dir=claude_dir) == []
+
+    def test_claude_dir_absent_entirely_returns_empty(self, hhc, tmp_path):
+        """~/.claude itself does not exist: warn nothing, raise nothing."""
+        assert hhc.check_always_loaded_surface(
+            claude_dir=tmp_path / "no-such-dir"
+        ) == []
+
+    def test_default_target_is_the_deployed_home_dir(self, tmp_path):
+        """Called with NO argument, the function measures $HOME/.claude.
+
+        This is the plan's single most important assertion. Every other test
+        passes claude_dir= explicitly, so none of them can observe the DEFAULT
+        — and the default is exactly what a "simplify this to a repo-relative
+        glob" edit would change. Without this test, that regression ships
+        green, which is the defect this whole plan exists to prevent.
+
+        Path.home() reads the HOME environment variable on POSIX, so pointing
+        HOME at a real temp tree inside try/finally is real environment
+        manipulation against a real filesystem — not monkey-patching, not a mock.
+        Same shape as TestPrThroughputCache::test_fresh_cache_skips_gh above,
+        which swaps PATH the same way.
+
+        The tree is sized so the number is unmistakably NOT the repository's:
+        400 + 300 = 700, a total no repo-relative root could produce.
+        """
+        fake_home = tmp_path / "home"
+        claude_dir = fake_home / ".claude"
+        rules_dir = claude_dir / "rules"
+        rules_dir.mkdir(parents=True)
+        self._write_lines(claude_dir / "CLAUDE.md", 400)
+        self._write_lines(rules_dir / "a-rule.md", 300)
+
+        original_home = os.environ.get("HOME")
+        os.environ["HOME"] = str(fake_home)
+        try:
+            # Load the module AFTER HOME is swapped. The function resolves
+            # Path.home() at call time, but reloading also proves no
+            # import-time constant captured the real home.
+            hhc = load_module()
+            warnings = hhc.check_always_loaded_surface()
+        finally:
+            if original_home is None:
+                os.environ.pop("HOME", None)
+            else:
+                os.environ["HOME"] = original_home
+
+        assert len(warnings) == 1
+        assert "is 700 lines" in warnings[0]
+        assert str(claude_dir / "CLAUDE.md") in warnings[0]
+
+    def test_broken_claude_md_symlink_warns_even_under_threshold(self, hhc, tmp_path):
+        """THE go-dark regression this test guards against.
+
+        Before this fix, ~/.claude/CLAUDE.md was measured by a wrapper that
+        collapsed "absent" and "present but unreadable" into the same 0. A
+        broken CLAUDE.md symlink (the real failure mode when the
+        coding-team submodule is de-initialized) would then silently drop
+        out of the total, leaving only rules_lines. Sized so rules_lines
+        alone (170) sits comfortably UNDER the 200 threshold: with the old
+        code, `total <= ALWAYS_LOADED_THRESHOLD` was True and the function
+        returned [] — completely silent at the exact moment CLAUDE.md (238
+        of 354 lines in production) had gone dark. This test fails RED under
+        that old code and must pass GREEN only because the fix surfaces the
+        unreadable state regardless of where the surviving total lands.
+        """
+        claude_dir = tmp_path / "claude"
+        rules_dir = claude_dir / "rules"
+        rules_dir.mkdir(parents=True)
+
+        # A real broken symlink — the same shape as the deployed
+        # ~/.claude/CLAUDE.md -> skills/coding-team/config/CLAUDE.md symlink
+        # breaking when its target directory disappears.
+        claude_md = claude_dir / "CLAUDE.md"
+        claude_md.symlink_to(tmp_path / "does-not-exist-CLAUDE.md")
+        assert claude_md.is_symlink()
+        assert not claude_md.exists()
+
+        self._write_lines(rules_dir / "small.md", 170)
+
+        warnings = hhc.check_always_loaded_surface(claude_dir=claude_dir)
+
+        assert len(warnings) == 1
+        text = warnings[0]
+        assert str(claude_md) in text
+        assert "unreadable" in text.lower()
+        # The reported total must be flagged as incomplete — a reader must
+        # not mistake the 170-line total for a clean, trustworthy number.
+        assert "incomplete" in text.lower()
+
+    def test_broken_claude_md_symlink_over_threshold_still_names_it_unreadable(
+        self, hhc, tmp_path
+    ):
+        """Extra coverage only — NOT the primary go-dark guard above.
+
+        Same broken-symlink shape, but rules_lines alone (250) already
+        exceeds the threshold, so the warning would fire even under the OLD
+        code. This only pins that the unreadable-CLAUDE.md text still
+        appears when the warning was already going to fire regardless.
+        """
+        claude_dir = tmp_path / "claude"
+        rules_dir = claude_dir / "rules"
+        rules_dir.mkdir(parents=True)
+        claude_md = claude_dir / "CLAUDE.md"
+        claude_md.symlink_to(tmp_path / "does-not-exist-CLAUDE.md")
+        self._write_lines(rules_dir / "big.md", 250)
+
+        warnings = hhc.check_always_loaded_surface(claude_dir=claude_dir)
+
+        assert len(warnings) == 1
+        text = warnings[0]
+        assert str(claude_md) in text
+        assert "unreadable" in text.lower()
+        assert "incomplete" in text.lower()
+
+    def test_claude_md_absent_entirely_with_rules_under_threshold_stays_silent(
+        self, hhc, tmp_path
+    ):
+        """Invariant 1, pinned: genuine absence (no file AND no symlink) is
+        NOT the same as present-but-unreadable, and must stay silent under
+        threshold. Guards against over-correcting the go-dark fix above into
+        warning on absence too.
+        """
+        claude_dir = tmp_path / "claude"
+        rules_dir = claude_dir / "rules"
+        rules_dir.mkdir(parents=True)
+        self._write_lines(rules_dir / "small.md", 50)
+        claude_md = claude_dir / "CLAUDE.md"
+        assert not claude_md.exists()
+        assert not claude_md.is_symlink()
+
+        assert hhc.check_always_loaded_surface(claude_dir=claude_dir) == []
+
+    def test_broken_rules_symlink_warns_even_under_threshold(self, hhc, tmp_path):
+        """THE asymmetric go-dark regression the cross-model gate found.
+
+        The CLAUDE.md-side fix above gated the early return on
+        `claude_md_unreadable` alone, forgetting that a broken rules/*.md
+        entry is the SAME kind of measurement failure. Sized so the readable
+        rules total (150) plus a readable CLAUDE.md (40) sits comfortably
+        UNDER the 200 threshold: with the old (CLAUDE.md-only) condition,
+        `total <= ALWAYS_LOADED_THRESHOLD and not claude_md_unreadable` was
+        True — a broken rules/ symlink with everything else fine still went
+        completely silent. This test fails RED under that condition and
+        must pass GREEN only because measurement_incomplete also accounts
+        for `unreadable > 0`, not just an unreadable CLAUDE.md.
+        """
+        claude_dir = tmp_path / "claude"
+        rules_dir = claude_dir / "rules"
+        rules_dir.mkdir(parents=True)
+        self._write_lines(claude_dir / "CLAUDE.md", 40)
+        self._write_lines(rules_dir / "readable.md", 150)
+
+        # A real broken symlink under rules/ — same shape as
+        # scripts/deploy.sh's prune loop leaving a dangling entry.
+        broken = rules_dir / "broken.md"
+        broken.symlink_to(tmp_path / "does-not-exist-rule.md")
+        assert broken.is_symlink()
+        assert not broken.exists()
+
+        warnings = hhc.check_always_loaded_surface(claude_dir=claude_dir)
+
+        assert len(warnings) == 1
+        text = warnings[0]
+        assert "is 190 lines" in text
+        assert "(1 unreadable)" in text
+        # The rules-only unreadable case must ALSO state the total is
+        # incomplete — not just the CLAUDE.md-unreadable case above.
+        assert "incomplete" in text.lower()
+
+    def test_all_absent_nothing_unreadable_under_threshold_stays_silent(
+        self, hhc, tmp_path
+    ):
+        """Invariant 2, pinned: genuine absence of EITHER or BOTH inputs,
+        with nothing actually unreadable, must still return [] under
+        threshold. Guards against the asymmetry fix above over-correcting
+        into warning whenever any input is merely absent rather than
+        specifically unreadable.
+        """
+        claude_dir = tmp_path / "claude"
+        # Neither CLAUDE.md nor rules/ exists at all.
+        claude_dir.mkdir()
+        assert not (claude_dir / "CLAUDE.md").exists()
+        assert not (claude_dir / "CLAUDE.md").is_symlink()
+        assert not (claude_dir / "rules").exists()
+
+        assert hhc.check_always_loaded_surface(claude_dir=claude_dir) == []
+
+        # CLAUDE.md absent, rules/ present but under threshold and fully
+        # readable.
+        claude_dir2 = tmp_path / "claude2"
+        rules_dir2 = claude_dir2 / "rules"
+        rules_dir2.mkdir(parents=True)
+        self._write_lines(rules_dir2 / "small.md", 50)
+        assert not (claude_dir2 / "CLAUDE.md").exists()
+
+        assert hhc.check_always_loaded_surface(claude_dir=claude_dir2) == []
+
+    def test_broken_rules_directory_symlink_warns_even_under_threshold(
+        self, hhc, tmp_path
+    ):
+        """THE third instance of this class, found by gate round 2.
+
+        ~/.claude/rules ITSELF (not an entry inside it) as a broken symlink:
+        exists() is False, is_symlink() is True, is_dir() is False. The old
+        `rules_entries = sorted(rules_dir.glob("*.md")) if rules_dir.is_dir()
+        else []` read that as "no rules dir" and silently produced
+        rules_lines=0, rules_entries=[], unreadable=0 — identical to genuine
+        absence. Sized so a readable CLAUDE.md (40 lines) sits comfortably
+        UNDER the 200 threshold on its own: with the old code this returned
+        [] — completely silent with the entire rules/ side gone dark. This
+        test fails RED unless the rules/ DIRECTORY's own status (not just
+        its entries') is folded into measurement_incomplete.
+        """
+        claude_dir = tmp_path / "claude"
+        claude_dir.mkdir()
+        self._write_lines(claude_dir / "CLAUDE.md", 40)
+
+        rules_dir = claude_dir / "rules"
+        rules_dir.symlink_to(tmp_path / "does-not-exist-rules-dir")
+        assert rules_dir.is_symlink()
+        assert not rules_dir.exists()
+        assert not rules_dir.is_dir()
+
+        warnings = hhc.check_always_loaded_surface(claude_dir=claude_dir)
+
+        assert len(warnings) == 1
+        text = warnings[0]
+        assert str(rules_dir) in text
+        assert "unreadable" in text.lower()
+        assert "incomplete" in text.lower()
+
+    def test_rules_path_is_a_regular_file_warns_even_under_threshold(
+        self, hhc, tmp_path
+    ):
+        """A second shape of the same third-instance defect: something sits
+        at ~/.claude/rules, but it is a plain FILE, not a directory. is_dir()
+        correctly reports False here too, so this must be caught by the same
+        rules_dir status check as the broken-symlink case above, not by a
+        symlink-specific branch.
+        """
+        claude_dir = tmp_path / "claude"
+        claude_dir.mkdir()
+        self._write_lines(claude_dir / "CLAUDE.md", 40)
+
+        rules_dir = claude_dir / "rules"
+        rules_dir.write_text("this should have been a directory\n")
+        assert rules_dir.is_file()
+        assert not rules_dir.is_dir()
+
+        warnings = hhc.check_always_loaded_surface(claude_dir=claude_dir)
+
+        assert len(warnings) == 1
+        text = warnings[0]
+        assert str(rules_dir) in text
+        assert "unreadable" in text.lower()
+        assert "incomplete" in text.lower()
+
+    def test_rules_directory_unreadable_permissions_warns_even_under_threshold(
+        self, hhc, tmp_path
+    ):
+        """The permission-denied shape of the same defect: rules_dir IS a
+        real directory (is_dir() is True) but its contents cannot be listed.
+        is_dir() cannot see this — only an attempted traversal can, and
+        Path.glob() silently swallows the PermissionError rather than
+        raising it, which is why _measure_rules_dir() traverses via
+        iterdir() inside try/except OSError instead.
+
+        Verified hermetically on this filesystem (macOS, non-root: `id -u`
+        is 501): chmod 000 leaves is_dir() True but iterdir() raises
+        PermissionError. Restores permissions in finally so pytest's
+        tmp_path cleanup can still remove the tree afterward.
+        """
+        claude_dir = tmp_path / "claude"
+        claude_dir.mkdir()
+        self._write_lines(claude_dir / "CLAUDE.md", 40)
+
+        rules_dir = claude_dir / "rules"
+        rules_dir.mkdir()
+        self._write_lines(rules_dir / "small.md", 10)
+        os.chmod(rules_dir, 0o000)
+        try:
+            assert rules_dir.is_dir()
+            warnings = hhc.check_always_loaded_surface(claude_dir=claude_dir)
+        finally:
+            os.chmod(rules_dir, 0o755)
+
+        assert len(warnings) == 1
+        text = warnings[0]
+        assert str(rules_dir) in text
+        assert "unreadable" in text.lower()
+        assert "incomplete" in text.lower()
+
+
 class TestCheckMetrics:
     """Tests for the merged metrics analysis functionality."""
 
@@ -763,8 +1284,68 @@ class TestIntegration:
                 "unhealthy" in reason_lower
                 or "mcp" in reason_lower
                 or "instruction file" in reason_lower
+                or "always-loaded" in reason_lower
                 or "session cost" in reason_lower
                 or "anomal" in reason_lower
             )
         else:
             assert result.stdout.strip() == ""
+
+    def test_main_emits_surface_warning_in_reason(self, tmp_path, capsys):
+        """main() folds the surface warning into its advisory reason.
+
+        This is the ONLY guard on Steps 2 and 4 of this task — NOT Step 3,
+        whose early-return conjunct is verified by inspection only, for the
+        reason Step 7 sets out. It must fail if the
+        `if surface_warnings:` block is deleted, so it asserts on the reason
+        TEXT, not merely on decision == "allow" — main()'s sole output path is
+        allow_with_reason() (hook-health-check.py:779), so "allow" is true by
+        construction and asserting it guards nothing.
+
+        HOME is pointed at a real temp tree so the SURFACE is a number this
+        test controls rather than whatever this machine happens to deploy. The
+        fake ~/.claude/hooks/ is created but left EMPTY, which satisfies
+        main()'s HOOKS_DIR.is_dir() guard (:688-689) while making the hook
+        fan-out a no-op — no subprocess probes, no gh call, no metrics I/O.
+        Real filesystem, real env var, no mocks.
+
+        The HOME swap does NOT isolate the whole run, and this test does not
+        need it to. Two checks stay bound to the real machine:
+        check_instruction_file_lengths() is rooted at Path(__file__).parent.
+        parent and walks the real repo, and check_mcp_health() does a real
+        shutil.which() under an unswapped PATH. Both only ADD to the reason
+        string, so neither can mask the assertions below — but do not read
+        this test as a hermetic main(). It is not one.
+        """
+        fake_home = tmp_path / "home"
+        claude_dir = fake_home / ".claude"
+        (claude_dir / "hooks").mkdir(parents=True)
+        rules_dir = claude_dir / "rules"
+        rules_dir.mkdir()
+        (claude_dir / "CLAUDE.md").write_text(
+            "\n".join(f"line {i}" for i in range(400))
+        )
+        (rules_dir / "a-rule.md").write_text(
+            "\n".join(f"line {i}" for i in range(300))
+        )
+
+        original_home = os.environ.get("HOME")
+        os.environ["HOME"] = str(fake_home)
+        try:
+            # Load AFTER swapping HOME: HOOKS_DIR / SETTINGS_PATH /
+            # METRICS_DIR are module constants resolved at import time.
+            hhc = load_module()
+            hhc.main()
+            captured = capsys.readouterr()
+        finally:
+            if original_home is None:
+                os.environ.pop("HOME", None)
+            else:
+                os.environ["HOME"] = original_home
+
+        assert captured.out.strip(), "main() produced no advisory output"
+        parsed = json.loads(captured.out)
+        assert parsed["decision"] == "allow"
+        reason = parsed["reason"].lower()
+        assert "always-loaded surface" in reason
+        assert "is 700 lines" in reason

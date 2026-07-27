@@ -34,6 +34,21 @@ TIMEOUT_SECONDS = 5
 MAX_METRICS_FILES = 3
 METRICS_STALENESS_DAYS = 7
 
+# Threshold for the AGGREGATE deployed always-loaded surface. Same 200 as the
+# per-file instruction check in check_instruction_file_lengths() — beyond
+# ~200 lines, MANDATORY labels stop working (case study #24) — but what a
+# session actually pays is the TOTAL, and the saturation audit's reduction
+# target (163) is sized against 200.
+#
+# The literal 200 at the per-file check is deliberately NOT replaced with this
+# name. That check is a different measurement (per-file, and rooted at
+# __file__ rather than at home, so its root moves between the deployed hook
+# and the test suite) that
+# this work leaves untouched; binding the two to one constant would couple
+# them, so a future change to the aggregate threshold would silently move the
+# per-file cap too. Two independent 200s is the correct shape here.
+ALWAYS_LOADED_THRESHOLD = 200
+
 
 def check_hook(hook_path: Path) -> str | None:
     """Run a hook with empty JSON input and check for crashes.
@@ -202,6 +217,272 @@ def check_instruction_file_lengths() -> list[str]:
                 continue
 
     return warnings
+
+
+def _read_lines(path: Path) -> int | None:
+    """Return the line count of path, or None if it cannot be read at all.
+
+    "Cannot be read" covers absence, a broken symlink, a permission error, and
+    a decoding failure alike — all raise inside path.read_text(). Returning
+    None (rather than 0) for every one of those cases matters because a
+    caller may need to tell "unreadable" apart from "read successfully and
+    got zero lines" — collapsing them into the same 0 would make a broken
+    symlink indistinguishable from an empty file. check_always_loaded_surface()
+    below is exactly such a caller: it needs "present but unreadable" (e.g. a
+    broken ~/.claude/CLAUDE.md or ~/.claude/rules/*.md symlink) to be a
+    distinct, reportable state rather than silently folded into 0.
+    """
+    try:
+        return len(path.read_text().splitlines())
+    except (OSError, UnicodeDecodeError):
+        return None
+
+
+def _measure_file(path: Path) -> tuple[int, str]:
+    """Return (line_count, status) for a single always-loaded FILE input.
+
+    status is exactly one of:
+      - "measured": read successfully; line_count is meaningful.
+      - "absent": genuinely not there (no file, no symlink at all) —
+        line_count is 0, and this is NOT a measurement failure.
+      - "unreadable": something exists at this path (a file, or a symlink of
+        any kind) but it could not be read (broken symlink target,
+        permission error, decode failure) — line_count is 0, and this IS a
+        measurement failure.
+
+    Used for ~/.claude/CLAUDE.md and for each ~/.claude/rules/*.md entry.
+    See check_always_loaded_surface's docstring (design choice 4) for why
+    every input goes through a shared three-way discrimination like this one
+    instead of each caller reimplementing its own absent/unreadable check.
+    """
+    lines = _read_lines(path)
+    if lines is not None:
+        return lines, "measured"
+    if path.exists() or path.is_symlink():
+        return 0, "unreadable"
+    return 0, "absent"
+
+
+def _measure_rules_dir(rules_dir: Path) -> tuple[list[Path], str]:
+    """Return (entries, status) for the ~/.claude/rules/ DIRECTORY input itself.
+
+    status is exactly one of:
+      - "measured": rules_dir is a real, traversable directory. entries is
+        its sorted *.md children (possibly empty — an empty, readable
+        rules/ is legitimately "measured, found nothing").
+      - "absent": genuinely not there (no file, no symlink at all) —
+        entries is []. NOT a measurement failure.
+      - "unreadable": something exists at this path but cannot be
+        enumerated as a directory: a broken symlink, a regular file sitting
+        where a directory belongs, or a real directory whose contents
+        cannot be listed (permission denied). entries is []. THIS is a
+        measurement failure, unlike "absent".
+
+    is_dir() alone cannot detect the permission-denied case — it confirms
+    the path itself is a directory, not that its contents are readable —
+    and Path.glob() silently swallows PermissionError during traversal and
+    yields no entries, which is the same "unreadable read as measured-empty"
+    defect this function exists to close. Path.iterdir() raises instead of
+    swallowing, so traversal happens inside try/except OSError rather than
+    being inferred from is_dir() alone.
+    """
+    if not rules_dir.exists() and not rules_dir.is_symlink():
+        return [], "absent"
+    if not rules_dir.is_dir():
+        return [], "unreadable"
+    try:
+        entries = sorted(p for p in rules_dir.iterdir() if p.name.endswith(".md"))
+    except OSError:
+        return [], "unreadable"
+    return entries, "measured"
+
+
+def check_always_loaded_surface(claude_dir: Path | None = None) -> list[str]:
+    """Warn when the DEPLOYED always-loaded surface exceeds the line threshold.
+
+    Sums ~/.claude/CLAUDE.md plus every ~/.claude/rules/*.md and compares the
+    TOTAL against ALWAYS_LOADED_THRESHOLD. Both load unconditionally into every
+    session and every subagent, so the sum is the largest fixed component of
+    what a session pays — NOT the total. This project also auto-loads a
+    per-project ~/.claude/projects/<slug>/memory/MEMORY.md into every session
+    (64 lines today, and it grows every time a feedback memory lands), and
+    this check does not measure it. Treat the number this check reports as a
+    floor, not a total.
+
+    Four design choices, each load-bearing:
+
+    1. It reads the DEPLOYED directory (~/.claude), NOT this repository.
+       ~/.claude is itself a git repo (cmillstead/claude-harness) that tracks
+       rules/ in place, and skills/coding-team is a SUBMODULE of it. So
+       ~/.claude/rules/ has TWO owners: symlinks deployed from this repo and
+       regular files owned by the parent. Reading the deployed directory spans
+       both owners by construction, which is precisely why the ownership
+       question does not need resolving for the measurement to be correct.
+       Path.home() is used deliberately instead of the __file__-relative root
+       that check_instruction_file_lengths() above uses. That one derives
+       `repo_root = Path(__file__).parent.parent`, and __file__ is NOT
+       symlink-resolved — the deployed hook is invoked as
+       ~/.claude/hooks/hook-health-check.py, so that root is ~/.claude in
+       production but this repo under pytest. Path.home() is the same in both.
+       Do NOT "simplify" this to a repo_root.glob(): under the test suite that
+       root matches this repo's rules/*.md — 3 files, 61 lines, one of which
+       (README.md) is not deployed and not always-loaded at all. So the
+       regression would ship green while measuring a partly different FILE SET
+       from the one production reads, at a number that depends on how the
+       module was loaded.
+
+    2. It is an AGGREGATE, not a per-file cap. Individual rules files run 5-29
+       lines, so no per-file threshold would ever fire on them. The SUM is the
+       defect. Do NOT convert this to a per-file check.
+
+    3. It is ADVISORY ONLY and never blocks. It returns warning strings that
+       main() folds into the SessionStart advisory emitted via
+       allow_with_reason(). It is expected to fire on every session until the
+       surface-reduction phases land — that visibility is the entire point. Do
+       NOT raise the threshold, suppress the warning, or add an exemption to
+       stop it firing. A separate, later change (audit finding F2) adds a
+       BLOCKING per-file cap in write-guard.py; that one must land only after
+       the reductions, because a blocking cap would block the very edits that
+       reduce the surface. This warning carries no such ordering hazard.
+
+    4. EVERY always-loaded input this check reads — ~/.claude/CLAUDE.md, the
+       ~/.claude/rules/ DIRECTORY itself, and each individual rules/*.md
+       entry — is routed through the same affirmative three-way
+       discrimination (_measure_file() for files, _measure_rules_dir() for
+       the directory): "measured" (read/listed successfully), "absent"
+       (genuinely not there at all — not a failure), or "unreadable"
+       (present but could not be measured — IS a failure). Every input's
+       status is collected into one `statuses` list, and
+       `measurement_incomplete = any(status == "unreadable" for status in
+       statuses)` is the ENTIRE derivation — no per-input special case, no
+       enumerated list of "known" failure modes to keep in sync by hand.
+       That flag, not any per-input branch, is what gates the early return
+       (`if total <= ALWAYS_LOADED_THRESHOLD and not measurement_incomplete`).
+
+       This shape exists because the alternative — enumerating known failure
+       modes one at a time — kept missing one. Three separate review passes
+       found three separate instances of the identical class, each entering
+       through a different input this check reads: an unreadable CLAUDE.md
+       file, an unreadable rules/*.md entry, and an unmeasurable rules/
+       directory itself (broken symlink, a regular file where a directory
+       belongs, or a real directory whose contents raise OSError on
+       listing — is_dir() alone cannot see that last one, and glob()
+       silently swallows PermissionError rather than surfacing it). Each
+       time, the surviving total fell to or under ALWAYS_LOADED_THRESHOLD
+       and the check went dark, because "could not measure" had silently
+       become "measured, found nothing" for exactly the one input not yet
+       covered. Routing every input through an affirmative measured/
+       absent/unreadable discrimination — rather than patching each newly
+       discovered failure mode into the gate condition — means a future
+       fourth input is added to the `statuses` enumeration, with
+       measurement_incomplete following automatically; it cannot recreate
+       this class by being forgotten as a new conjunct. A rules/*.md entry
+       specifically is ALSO excluded from the measured line count and the
+       reported file count when unreadable (never silently counted as 0
+       lines against a file count that includes it) and is named via the
+       "(N unreadable)" fragment in the warning text.
+
+    5. ~/.claude/CLAUDE.md is a deploy symlink (-> skills/coding-team/
+       config/CLAUDE.md) exactly like a rules/ entry, and carries 238 of the
+       354 currently-deployed lines, so its unreadability is one of the
+       largest things measurement_incomplete (design choice 4) can catch —
+       alongside the rules/ directory itself going unreadable, which can
+       silently drop the entire rules/ side to 0 the same way. Genuine
+       ABSENCE (no file and no symlink at all, for either CLAUDE.md or
+       rules/) is NOT unreadable and stays silent under threshold — see
+       below. _measure_file() and _measure_rules_dir() both keep "absent"
+       distinct from "unreadable" by checking exists()/is_symlink() rather
+       than inferring absence from a None line count alone, which is what
+       let a broken symlink masquerade as absence in the original defect.
+
+    Degrades silently ONLY when ~/.claude/CLAUDE.md is genuinely ABSENT (no
+    file, no symlink) or ~/.claude/rules/ is absent (a machine that deploys
+    neither): missing inputs mean there is nothing to measure, not a problem
+    to report. Returns [] in that case. Whenever measurement_incomplete is
+    True (design choice 4) — ANY measured input's status is "unreadable" —
+    the check always surfaces, even when the surviving total is under
+    threshold. The function itself does not otherwise raise, though
+    Path.home() can raise RuntimeError if HOME is unset and there is no
+    passwd entry for the current user — this function does not guard
+    against that.
+
+    Args:
+        claude_dir: Root to measure. Defaults to ~/.claude. Tests pass a real
+            temporary directory; production passes nothing.
+    """
+    if claude_dir is None:
+        claude_dir = Path.home() / ".claude"
+
+    claude_md = claude_dir / "CLAUDE.md"
+    rules_dir = claude_dir / "rules"
+
+    claude_md_lines, claude_md_status = _measure_file(claude_md)
+    rules_entries, rules_dir_status = _measure_rules_dir(rules_dir)
+
+    # Every input's status lands in ONE list. measurement_incomplete is the
+    # entire derivation — see design choice 4 for why a fourth input only
+    # needs its status appended here, nothing more.
+    statuses = [claude_md_status, rules_dir_status]
+
+    rules_files = []
+    rules_lines = 0
+    unreadable = 0
+    for entry in rules_entries:
+        lines, status = _measure_file(entry)
+        statuses.append(status)
+        if status == "measured":
+            rules_files.append(entry)
+            rules_lines += lines
+        else:
+            # Entries come from _measure_rules_dir()'s iterdir(), so each one
+            # is a real directory entry that exists — "absent" cannot occur
+            # here, only "unreadable" (e.g. a broken per-entry symlink).
+            unreadable += 1
+
+    total = claude_md_lines + rules_lines
+    measurement_incomplete = any(status == "unreadable" for status in statuses)
+    if total <= ALWAYS_LOADED_THRESHOLD and not measurement_incomplete:
+        return []
+
+    unreadable_fragment = f" ({unreadable} unreadable)" if unreadable else ""
+
+    if claude_md_status == "unreadable":
+        claude_md_fragment = (
+            f"{claude_md}: UNREADABLE (broken symlink, permission error, or "
+            "decode failure) — excluded from the total below, so the "
+            "reported total is INCOMPLETE, not a true total"
+        )
+    else:
+        claude_md_fragment = f"{claude_md}: {claude_md_lines} lines"
+
+    if rules_dir_status == "unreadable":
+        rules_fragment = (
+            f"{rules_dir}/*.md: UNREADABLE (broken symlink, not a directory, "
+            "or permission denied) — could not be listed, so the reported "
+            "total is INCOMPLETE, not a true total"
+        )
+    else:
+        rules_fragment = (
+            f"{rules_dir}/*.md: {rules_lines} lines across "
+            f"{len(rules_files)} file(s){unreadable_fragment}"
+        )
+
+    incomplete_note = (
+        " At least one always-loaded input above could not be measured, so "
+        "this total is INCOMPLETE — treat it as a floor, not the true total."
+        if measurement_incomplete
+        else ""
+    )
+
+    return [
+        f"Always-loaded surface is {total} lines "
+        f"(threshold: {ALWAYS_LOADED_THRESHOLD}). "
+        f"{claude_md_fragment}. "
+        f"{rules_fragment}."
+        f"{incomplete_note} "
+        "Both load into every session and every subagent — reduce whichever "
+        "side is larger."
+    ]
 
 
 def check_mcp_health() -> list[str]:
@@ -624,6 +905,13 @@ def main():
     # Check instruction file lengths (case study #24: context saturation)
     length_warnings = check_instruction_file_lengths()
 
+    # Check the DEPLOYED always-loaded surface as an aggregate (F1). Separate
+    # from the per-file check above for two reasons: that one's glob list has
+    # no entry for CLAUDE.md or rules/*.md, and its __file__-relative root
+    # differs between the deployed hook and the test suite. This one is
+    # home-relative and aggregate.
+    surface_warnings = check_always_loaded_surface()
+
     # Check skill symlinks (merged from symlink-integrity-check.py)
     symlink_issues = check_skill_symlinks()
 
@@ -631,7 +919,8 @@ def main():
     metrics_parts = check_metrics()
 
     if (not unhealthy and not mcp_issues and not length_warnings
-            and not symlink_issues and not metrics_parts):
+            and not symlink_issues and not metrics_parts
+            and not surface_warnings):
         return  # All healthy, no metrics — silent success
 
     parts = []
@@ -653,6 +942,11 @@ def main():
             f"Instruction file length check: {len(length_warnings)} file(s) over 200 lines.\n"
             "Context saturation degrades compliance beyond ~200 lines:\n"
             + "\n".join(f"  - {w}" for w in length_warnings)
+        )
+    if surface_warnings:
+        parts.append(
+            "Always-loaded surface check:\n"
+            + "\n".join(f"  - {w}" for w in surface_warnings)
         )
     if symlink_issues:
         parts.append(

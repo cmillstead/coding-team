@@ -66,13 +66,16 @@ inferred that from their absence in *this* repo's `git ls-files` without checkin
 whether `~/.claude` was itself a repo. It is, and it tracks them
 (`2e6a014`, `b8efdc8`). There was never a data-loss exposure.
 
-What is real: `~/.claude/rules/` has **two owners**. Seven entries are symlinks
+What is real: `~/.claude/rules/` has **two owners**. Two entries are symlinks
 (`120000`) deployed from this repo; five are regular files (`100644`) owned by
 the parent — `scan-finding-completeness.md` (29), `defensive-simplify-guard.md`
 (16), `no-known-broken.md` (15), `text-discipline.md` (14),
 `exemption-override.md` (5). That is **79 of the 116 remaining lines, now 68% of
 the rules surface** — up from a third, because Phase 1 removed only from the
-side this repo owns.
+side this repo owns. *(Count corrected 2026-07-26: this paragraph read "Seven
+entries are symlinks" before — that was the pre-Phase-1 figure, taken before 5
+symlinked rules moved to `reference/`. Verified now: 2 symlinks + 5 regular
+files = 7 entries, 116 lines = 37 + 79.)*
 
 The consequence is measurement, not loss: anything auditing from this repo sees
 37 lines and reports clean, while the real surface is 116. Later reduction phases
@@ -83,6 +86,12 @@ advised — two repos deploying into one directory is the defect; duplicating th
 source deepens it. Pick one owner, record the decision, then extend
 `deploy-drift-check.py` to walk the deployed dir and label deployed-only files by
 owning repo (foreign ≠ drift).
+
+**Measurement half CLOSED 2026-07-26:** `check_always_loaded_surface()` in
+`hook-health-check.py` now reports the full 116-line rules surface by reading
+the DEPLOYED dir, so the number no longer depends on which repo the auditing
+code happens to be rooted in. Only the deployed-only *drift* direction remains
+open.
 
 The prune loop's `[[ -L ]]` plus its `case "$target_abs" in "$REPO_ROOT/rules/"*)`
 target guard is what kept it from deleting the parent's 5 files on its first real
@@ -103,8 +112,24 @@ consolidate) as ~4 lines, AFTER Groups B–D so it arrives on a small surface.
 
 - **Groups B/C/D** — deletions, extractions out of `CLAUDE.md`, compressions.
   Target 354 → 163.
-- **F1** — `hook-health-check.py:184-188` globs only `agents/*.md`, `phases/*.md`,
-  `skills/*/SKILL.md`. Add `config/*.md` + `rules/*.md` and an aggregate check.
+- **F1** — **DONE 2026-07-26.** `hooks/hook-health-check.py` now carries
+  `check_always_loaded_surface()`: an AGGREGATE, WARNING-ONLY check summing the
+  DEPLOYED `~/.claude/CLAUDE.md` + `~/.claude/rules/*.md` against 200. It reads the
+  deployed tree, not either repo, so it spans both owners by construction — the
+  rules-ownership question does not have to be settled for the number to be right.
+  It fires today at 354 (238 + 116) and is MEANT to, every session, until the
+  reductions close the gap. Do NOT suppress it or raise the threshold.
+  The audit's original prescription — adding `config/*.md` + `rules/*.md` to
+  `check_instruction_file_lengths`'s glob list — was rejected on two independent
+  grounds: (i) that function's `repo_root` is `Path(__file__).parent.parent` and
+  `Path(__file__)` is not symlink-resolved, so it resolves to `~/.claude` for the
+  deployed hook but to this repo under pytest — the added glob would report the
+  deployed 7 files (116 lines) in production but this repo's 3 (61 lines,
+  including a `README.md` that is not deployed and never auto-loads) under
+  pytest, two different file sets that no test could pin; and (ii) it is
+  a PER-FILE check, so a 200-line threshold never fires on 5-29-line rules at any
+  root. The pre-existing per-file 200-line check is unchanged.
+  Plan: `docs/plans/2026-07-26-always-loaded-surface-measurement.md`.
 - **F2** — `write-guard.py:767` caps only `SKILL.md`. Extend to `config/CLAUDE.md`.
   **MUST land LAST** — at 238 lines a cap that blocks >200 would block the very
   edits that reduce it.
