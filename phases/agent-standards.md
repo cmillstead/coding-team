@@ -4,6 +4,8 @@ Standards that apply to agents dispatched by `/coding-team`. Not loaded outside 
 
 ## Model Routing
 
+Use the least powerful model that can handle each agent's task.
+
 | Task type | Model | Examples |
 |-----------|-------|---------|
 | Mechanical | `haiku` | Single file edits, formatting, simple rewrites, grep-and-replace |
