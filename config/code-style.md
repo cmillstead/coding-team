@@ -2,6 +2,10 @@
 
 Language-specific rules that agents must follow across all projects.
 
+## General
+- Use descriptive names — NEVER use single-letter variables outside loops
+- NEVER swallow errors with empty catch/except blocks — at minimum, log them
+
 ## Python
 - NEVER use bare `except:` or `except Exception:` — catch specific exceptions
 - NEVER use mutable default arguments (`def foo(items=[])`) — use `None` + conditional

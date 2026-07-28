@@ -66,6 +66,9 @@ Loaded on demand by the skill router. Not needed during active phase work.
 | `reference/mcp-resilience.md` | ct-spec-reviewer.md, ct-harden-auditor.md, ct-simplify-auditor.md, ct-qa-reviewer.md, ct-harness-engineer.md | Repo-wide MCP retry-once-then-degrade rule that codesight-fallback instantiates |
 | `reference/test-files.md` | ct-qa-reviewer.md, ct-spec-reviewer.md, SKILL.md, skills/tdd/SKILL.md | Test file rules — real implementations, no mocks |
 | `reference/dark-features.md` | ct-implementer.md | Dark feature detection — verify every new feature is reachable from ≥1 entry point |
+| `reference/engram-cli.md` | global CLAUDE.md | Engram knowledge-graph CLI command reference |
+| `reference/skill-suggestions.md` | global CLAUDE.md | Proactive skill-suggestion trigger table |
+| `reference/obsidian-vault.md` | global CLAUDE.md | Obsidian vault structure and `/save` convention |
 | `skills/debug/reference.md` | debug/SKILL.md | Pattern-analysis signature table, after-3-failed-fixes detail |
 
 **Agent definitions** (used by the execution loop):

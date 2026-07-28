@@ -1,10 +1,4 @@
----
-alwaysApply: true
-description: Hooks are the authority — comply with blocks, report errors, never bypass or work around a hook constraint.
----
-
 # Hook Bypass Rule
-<!-- Deploy source: scripts/deploy.sh copies this to ~/.claude/rules/ -->
 
 If a hook blocks your action, comply — the hook is the authority.
 If a hook errors, STOP and report the error to the user.

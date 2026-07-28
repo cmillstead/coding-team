@@ -8,27 +8,43 @@ Every state claim below was verified by command at write time.
 
 ---
 
-## ► RESUME HERE
+## ✅ COMPLETE — 2026-07-27. Nothing here is actionable. Do NOT re-execute.
 
-**The user chose: drive Groups B/C/D as one pass.** They asked to compact first;
-this handoff exists so that survives.
+Both queued items landed the same day this handoff was written. Kept as the record
+of how, not as work.
 
-**The approach they approved — do NOT re-plan it:**
-1. Merge `docs/audit-arithmetic-reconcile` (1 commit, `74940c5`, unpushed).
-2. Execute Groups B/C/D as **ONE pass**, using the **live hook warning as the
-   oracle instead of a projected target**. Cut → re-run the probe → repeat until
-   the warning stops firing.
-3. Bring the user **a single cut list for approval**, not per-rule questions.
-   They are ~a week into this and explicitly do not want to be drip-fed decisions.
+- **Item 1** — `docs/audit-arithmetic-reconcile` merged via **PR #126**.
+- **Item 2** — Groups B/C/D executed in one pass via **PR #127**. Surface went
+  **354 → 190**, ten lines under the 200 threshold. The `hook-health-check.py`
+  always-loaded warning no longer fires.
 
-**The oracle command** (this is the whole point of having built F1 — you no longer
-need arithmetic, you have live measurement):
+Verify in one command — it should print nothing:
 
 ```bash
-echo '{}' | python3 ~/.claude/hooks/hook-health-check.py
-# Currently reports: "Always-loaded surface is 354 lines (threshold: 200)"
-# Done when this line stops appearing.
+echo '{}' | python3 ~/.claude/hooks/hook-health-check.py | grep 'Always-loaded surface'
 ```
+
+If that DOES print a line, the surface regressed after 2026-07-27; treat it as new
+work and do not follow the plan below, which is spent.
+
+**What landed** (4 commits on `reduce/always-loaded-surface-groups-bcd`): extractions
+to `reference/{engram-cli,skill-suggestions,obsidian-vault}.md`; deletion of
+`rules/config-files.md` and of the model-routing / UI-UX sections that already
+duplicated `phases/agent-standards.md`; reflowing (not rewording) of hard-wrapped
+prose, since the check counts newlines; and a new Root Cause Over Symptom rule.
+
+**The one finding worth carrying forward.** An intermediate commit collapsed six
+"NEVER" rules into one line claiming all six were hook-enforced. QA review found
+**three of those claims were false or partial** — test-skipping matches zero patterns
+in `MOCK_PATTERNS`, force-push is never modeled in `git-safety-guard.py` (the branch
+check reads the checked-out branch, never the push refspec), and the secret check is
+filename-only on the `git add` path. Fixed in `109bcce` by stating them as prose that
+says plainly nothing enforces them. **Deleting prose in favor of "a hook covers this"
+requires reading the hook body first — a citation is not evidence.**
+
+**Genuinely still open, and deliberately not done:** the hooks do not actually block
+force-push to main or test-skipping. That is real work, out of scope for a
+documentation reduction, and nothing currently tracks it.
 
 ---
 
@@ -107,11 +123,11 @@ reopen the cut list below, do NOT re-surface dropped items as "quick wins", and 
 NOT add newly-discovered work to this file. If you find a new defect while doing
 item 2, fix it silently if it is inside your diff, or say nothing if it is not.
 
-### The only two things
-1. **Merge `docs/audit-arithmetic-reconcile`** — 2 min, 1 commit (`74940c5`).
-2. **Groups B/C/D** — 2–3 hrs. **THE WORK.** Unblocked. Approach at the top.
+### The only two things — BOTH DONE 2026-07-27
+1. ~~**Merge `docs/audit-arithmetic-reconcile`**~~ — done, PR #126.
+2. ~~**Groups B/C/D**~~ — done, PR #127. Surface 354 → 190, warning silent.
 
-That is the end of the pile. When item 2's warning goes quiet, this is DONE.
+That was the end of the pile, and the pile is now empty.
 
 **There is no backlog section in this file, deliberately.** The operator deleted it
 on 2026-07-27. Do not reconstruct it, do not append newly-discovered work to this
