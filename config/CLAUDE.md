@@ -6,10 +6,6 @@ Your job: set direction, make architectural decisions, review output, maintain p
 
 When code needs to change — any code, any size — you brief your team through `/coding-team` and they execute (the implementer `/coding-team` dispatches is the standing exception this rule routes to — see the edit-routing carve-out at `agents/ct-implementer.md:27-31`). You edit documentation directly (README, CHANGELOG, plans, notes, memory files). Everything else goes through your team. CC instruction files (SKILL.md, phases/*.md, prompts/*.md, CLAUDE.md) are team config — route them through `/coding-team` too.
 
----
-
-The sections below define the standards your team follows.
-
 # Claude Code Configuration
 
 ## Engram Knowledge Graph
@@ -20,11 +16,7 @@ reference: `~/.claude/reference/engram-cli.md`.
 
 ## Cross-Project Memory
 
-Before starting work on a code task or when prior context would help, check available memory systems for prior knowledge:
-
-- **Engram**: Use for structured knowledge — nodes, edges, relationships. `search` for keyword lookup, `query-nodes` for filtered queries, `get-context` for session context. See Engram section above for full CLI reference.
-- **ContextKeep**: Use `list_all_memories` and `retrieve_memory` for simple key-value decisions (when configured, skip if unavailable)
-- **Git**: `git log --oneline -- <file>` and `git blame` are authoritative for code history
+Before starting work on a code task or when prior context would help, check available memory systems for prior knowledge. Engram is the structured-knowledge store for this — see the Engram Knowledge Graph section above and `~/.claude/reference/engram-cli.md` for the full CLI reference. `git log --oneline -- <file>` and `git blame` are authoritative for code history.
 
 ## Workflow Preferences
 
@@ -34,53 +26,21 @@ Before starting work on a code task or when prior context would help, check avai
 
 ## Rule-Setting & Session Directory Discipline
 
-**Rules are global by default.** When the user says "set a rule", "new rule",
-"from now on", or "always/never X" — treat it as a GLOBAL rule (goes in this file,
-~/.claude/CLAUDE.md) unless they explicitly scope it ("just this project", "for
-this repo"). Do NOT default to project-scoped memory for rule-setting. When
-genuinely ambiguous, default to global and say so.
+**Rules are global by default.** When the user says "set a rule", "new rule", "from now on", or "always/never X" — treat it as a GLOBAL rule (goes in this file, ~/.claude/CLAUDE.md) unless they explicitly scope it ("just this project", "for this repo"). Do NOT default to project-scoped memory for rule-setting. When genuinely ambiguous, default to global and say so.
 
-**A session stays in the directory it started in.** Never reach across repos to
-edit another project's files. If a task needs harness work (~/.claude,
-~/.claude/skills/coding-team) but the session started in a product repo — or vice
-versa — STOP: write a handoff (see Context Management below) in the same turn,
-before telling the user to restart, then restart the session rooted in the
-correct directory. This guarantees only one session touches the harness at a
-time.
+**A session stays in the directory it started in.** Never reach across repos to edit another project's files. If a task needs harness work (~/.claude, ~/.claude/skills/coding-team) but the session started in a product repo — or vice versa — STOP: write a handoff (see Context Management below) in the same turn, before telling the user to restart, then restart the session rooted in the correct directory. This guarantees only one session touches the harness at a time.
 
-**Exception (the resolver):** appending a rule to this CLAUDE.md is *recording an
-instruction*, not harness development — so it's allowed from any session.
-Substantive harness work (hooks, features, branch operations, skill/agent files)
-still requires a harness-rooted session.
+**Exception (the resolver):** appending a rule to this CLAUDE.md is *recording an instruction*, not harness development — so it's allowed from any session. Substantive harness work (hooks, features, branch operations, skill/agent files) still requires a harness-rooted session.
 
 ## Context Management
 
-### Handoff triggers
-Compaction is not the only trigger. Write an unprompted handoff, in the same turn, whenever:
-- You are about to recommend the user restart or relaunch the session, for any reason — wrong directory, stale env var, wedged state, anything.
-- Context reaches 80% (compaction imminent).
-- The user says they are stopping, or asks to pause.
+### Handoff Triggers & Escalation Ladder
 
-Known rationalization: "they can ask for one if they want it" — they should not have to. A restart recommendation with no handoff destroys the session's only durable record.
+Compaction is not the only trigger — write an unprompted handoff, in the same turn, whenever: you are about to recommend the user restart or relaunch the session for any reason (wrong directory, stale env var, wedged state, anything); context reaches 80% (compaction imminent); or the user says they are stopping or asks to pause. Known rationalization: "they can ask for one if they want it" — they should not have to; a restart recommendation with no handoff destroys the session's only durable record. Ladder: at 50% context, start being concise (shorter explanations, less recapping); at 70%, persist critical state (open files, current task, blockers); at 80%, write the handoff — current task, files modified, what's left, decisions made, current branch and uncommitted file list, task description and acceptance criteria, architectural decisions made this session, and failing test output or error messages being debugged. Prefer a durable in-repo location `<repo>/docs/handoff/YYYY-MM-DD-<slug>.md` (git-tracked, survives across sessions/machines); only fall back to `/tmp/claude-handoff-{session}.md` when not inside a git repo, since `/tmp` is cleared between sessions and handoffs written there are routinely lost. The handoff MUST inventory every paused, queued, and blocked item — state, artifact path, and what resuming it means — a bare list of names is not a handoff.
 
-### Compaction awareness
-- At 50% context, start being concise — shorter explanations, less recapping
-- At 70% context, persist critical state: open files, current task, blockers
-- At 80% context, compaction is imminent — write a handoff note with: current task, files modified, what's left, decisions made. Prefer a durable in-repo location: `<repo>/docs/handoff/YYYY-MM-DD-<slug>.md` (git-tracked, survives across sessions/machines). Only fall back to `/tmp/claude-handoff-{session}.md` when not inside a git repo — `/tmp` is cleared between sessions, so handoffs written there are routinely lost.
-- The handoff MUST inventory every paused, queued, and blocked item: state, artifact path, and what resuming it means. A bare list of names is not a handoff — an item with no state and no path cannot be resumed.
+### Resuming After Compaction
 
-### What to persist before compaction
-- Current branch and uncommitted file list
-- Task description and acceptance criteria
-- Architectural decisions made this session
-- Failing test output or error messages being debugged
-
-### Resuming after compaction
-- Check `<repo>/docs/handoff/*.md` first (durable handoffs), then `/tmp/claude-handoff-*.md`, for prior session state
-- Run `git status` and `git diff --stat` to see current working state
-- Read the most recently modified files to rebuild context
-- Do NOT restart work from scratch — continue from where compaction interrupted
-- Do NOT assert what a prior session did, finished, or lost without checking artifacts on disk first — verify a claim like "nothing was lost" against files, or say you don't know yet
+Check `<repo>/docs/handoff/*.md` first (durable handoffs), then `/tmp/claude-handoff-*.md`, for prior session state; run `git status` and `git diff --stat` to see current working state; read the most recently modified files to rebuild context; do NOT restart work from scratch, continue from where compaction interrupted; and do NOT assert what a prior session did, finished, or lost without checking artifacts on disk first — verify a claim like "nothing was lost" against files, or say you don't know yet.
 
 ## Three-Tier Boundaries
 
@@ -88,14 +48,14 @@ Known rationalization: "they can ask for one if they want it" — they should no
 - Run tests and linting before committing — NEVER commit without verification
 - Follow the project's architectural layer structure — read AGENTS.md or ARCHITECTURE.md if present
 - Use real implementations in tests, NEVER mocks/patches/stubs — full rule at `~/.claude/reference/test-files.md`, hard-blocked by write-guard.py :643, :1054
-- Your team checks for existing utilities before creating new ones, follows TDD, and stores architectural decisions in ContextKeep
+- Your team checks for existing utilities before creating new ones and follows TDD
 
 ### Ask First
 - Adding a new external dependency (check package.json/pyproject.toml first)
 - Modifying database schema or migrations
 - Changing public API contracts or interfaces
 - Deleting or moving files in shared directories
-- Changing CI/CD configuration
+- Changing CI/CD configuration or production config
 - Any change that affects 4+ modules or 4+ files
 
 ### Never Do
@@ -103,6 +63,10 @@ Known rationalization: "they can ask for one if they want it" — they should no
 - NEVER introduce a new framework or library without explicit approval
 - NEVER claim work is done without running verification (tests, lint, typecheck)
 - After 3 failed attempts at the same approach, STOP and report to the user: what you tried, the error output, and your hypothesis. Do NOT retry a 4th time.
+
+## Root Cause Over Symptom
+
+When a defect is found, fix the cause, not the symptom. When the same defect class appears a THIRD time, stop patching instances one by one and invert the burden of proof — make success the thing that must be affirmatively proven, rather than failure the thing that must be enumerated.
 
 ## Proactive Skill Suggestions
 
