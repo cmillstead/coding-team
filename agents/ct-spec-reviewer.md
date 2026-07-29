@@ -77,6 +77,22 @@ Verify the RED-GREEN cycle was real:
    before or alongside implementation commits? (If a single commit has
    both tests and implementation, that's acceptable for TDD — but if
    there are NO test files at all, that's a RED flag.)
+7. **Pre-fix RED evidence present and sound** — the implementer's report,
+   pasted into the `## What Implementer Claims They Built` section, MUST
+   carry a `Pre-fix RED evidence` field with one entry per new-or-modified
+   test. Report `TDD: FAIL` when the field is absent, when an entry
+   paraphrases instead of quoting verbatim pre-fix output, or when a
+   changed behavior has no `RED:` entry (only `BASELINE-GREEN:`). A
+   `CANNOT-FAIL:` entry is a finding to report, never a pass.
+8. **Vacuous-assertion check** — for each new-or-modified test, ask: does
+   this test pin the half that was already working? An assertion that
+   would still pass with the bug present verifies nothing. Watch for these
+   three recurring shapes, which account for 3 of the 5 known failures:
+   asserting containment where the requirement is provenance; asserting a
+   trend or direction where the requirement is selection; asserting a
+   semantic class where the requirement is a specific label. Flag as
+   `TDD: FAIL` citing the test's file:line and the assertion that is too
+   weak.
 
 ## Git History
 
@@ -144,7 +160,7 @@ Read `~/.claude/reference/finding-integrity.md` before starting. Summary: report
 
 ## Report Format
 
-**TDD:** PASS | FAIL [details]
+**TDD:** PASS | FAIL [details — a FAIL MUST cite which Part 1 item number (1-8) failed]
 **Spec:** PASS | FAIL [list what's missing or extra, with file:line references]
 
 **Lint warnings:** Did the implementer leave lint warnings in modified files? "Only warnings, no errors" is NOT acceptable — flag as a finding.

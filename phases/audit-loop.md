@@ -8,8 +8,9 @@ After the completeness check passes and implementer reports DONE or DONE_WITH_CO
    Also run `mcp__codesight__query` with operation `get-changes` and params `{repoPath: "<working directory>", gitRef: "BASE..HEAD", includeImpact: true}` to get a symbol-level diff with downstream impact analysis. Pass BOTH the file list AND the symbol-level changes to each auditor.
    After recording changes, run `mcp__codesight__query` with operation `invalidate-cache` for the repo so auditors see fresh symbol data reflecting the implementer's commits.
    **Pre-compute for spec reviewer:** Run `git log --oneline BASE..HEAD` and include the output in the spec reviewer's `## Git History` section. The spec reviewer has no Bash tool — it cannot run git commands itself.
+   Also paste the implementer's DONE report verbatim into the spec reviewer's `## What Implementer Claims They Built` section, including its `Pre-fix RED evidence` field in full. An empty or missing section makes the spec reviewer FAIL every task, since it has nothing to check TDD discipline against.
 2. Dispatch audit agents IN PARALLEL via Agent tool (spec reviewer and simplify auditor as read-only Explore; harden auditor and harness engineer as general-purpose to allow Bash tool access). Each auditor is dispatched backgrounded (default); record the `agentId` returned by each dispatch — step 3 uses it to reap:
-   a. Spec reviewer (see ~/.claude/agents/ct-spec-reviewer.md) — "does it match the spec? was TDD followed?"
+   a. Spec reviewer (see ~/.claude/agents/ct-spec-reviewer.md) — "does it match the spec? was TDD followed? is the pre-fix RED evidence present and sound?"
    b. Simplify auditor (see ~/.claude/agents/ct-simplify-auditor.md) — "is there a simpler way?"
    c. Harden auditor (see ~/.claude/agents/ct-harden-auditor.md) — "what would an attacker try?"
    d. Prompt-craft auditor (see ~/.claude/agents/ct-prompt-craft-auditor.md) — triggers when BOTH:

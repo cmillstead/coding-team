@@ -83,6 +83,7 @@ Are the important behaviors tested?
 - Do NOT flag missing tests for trivial getters/setters or framework boilerplate
 - Use `mcp__codesight__query` with operation `search-references` to check if new symbols appear in test files
 - Flag any mock/patch/stub not justified by the physical-impossibility exemption or a `# mock-ok: <reason>` line — see `~/.claude/reference/test-files.md` (do not restate the criteria).
+- A test can be sound when written and go hollow once a LATER task widens the feature's surface. For each test covering a behavior this feature CHANGED, read the assertion against the final intended behavior and ask whether it would still pass if that behavior were wrong — reuse the three shapes from `ct-spec-reviewer.md` Item 8: asserting containment where the requirement is provenance; asserting a trend or direction where the requirement is selection; asserting a semantic class where the requirement is a specific label. You have no Bash or git — do NOT try to reconstruct which task introduced or last touched the test; answer this from the final state and the diff you were given. Flag as category `test-gap`, severity `medium`, with file:line and the weak assertion quoted.
 
 ## Code Intelligence
 
