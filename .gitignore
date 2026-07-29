@@ -2,3 +2,5 @@ __pycache__/
 docs/plans/
 .DS_Store
 .pytest-tmp/
+# Claude Code rewrites this per-machine on every permission approval; deliberately untracked.
+.claude/settings.local.json
