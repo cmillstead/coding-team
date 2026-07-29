@@ -138,9 +138,8 @@ Once the test suite is green and you're clear on requirements:
 1. Implement exactly what the task specifies using TDD:
    - Write failing test first
    - Use `python3 -c "..."` via Bash to generate complex test fixtures or compute expected values
-   - Run it, confirm it fails for the right reason
-   - Tests MUST verify runtime behavior, not source code structure
-   - Do NOT write tests that read source files (fs.readFileSync, open(), Path.read_text()) to assert on code structure, imports, or string patterns. Tests assert on runtime behavior — call the function with inputs and assert on outputs.
+   - Run it, confirm it fails for the right reason — capture the failing assertion and error line verbatim at this moment; it becomes the required Pre-fix RED evidence field in your report and cannot be reconstructed after the fix
+   - Tests MUST verify runtime behavior, not source code structure. Do NOT write tests that read source files (fs.readFileSync, open(), Path.read_text()) to assert on code structure, imports, or string patterns — call the function with inputs and assert on outputs.
    - Write minimal code to pass
    - Run it, confirm it passes
    - Refactor if needed, keep tests green
@@ -195,6 +194,7 @@ If you find issues during self-review, fix them now.
 - **Status:** DONE | DONE_WITH_CONCERNS | BLOCKED | NEEDS_CONTEXT
 - What you implemented (or attempted, if blocked)
 - What you tested and test results (paste actual output)
+- **Pre-fix RED evidence:** REQUIRED — one entry per new-or-modified test, using one of the four branches in the `## Pre-fix RED evidence` section of `~/.claude/skills/coding-team/agents/reference/implementer-reference.md`. A report missing this field is rejected.
 - Files changed
 - **Docs updated:** [list of doc files updated] OR "No doc impact — scanned N files, none reference changed paths"
 - Self-review findings (if any)

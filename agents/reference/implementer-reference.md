@@ -18,6 +18,19 @@ If `mcp__codesight__query` returns a connection error, timeout, or API error: do
 
 Additional context (GitHub issues, dependency analysis, LSP diagnostics) is pre-computed by the orchestrator and included in your task context when relevant.
 
+## Pre-fix RED evidence
+
+Required field in every DONE report. One entry per new-or-modified test, each using EXACTLY ONE of these four branches:
+
+1. `RED: <test id>` followed by the verbatim failing assertion and error line, captured BEFORE the fix. Verbatim means copied from the actual run — not a paraphrase, not a description, not post-fix output.
+2. `BASELINE-GREEN: <test id> — <reason>` — the test legitimately passes before the fix because it pins behavior the change must NOT break (preservation/invariant test).
+3. `CANNOT-FAIL: <test id> — <reason>` — you could not construct a pre-fix state in which it fails. This IS a finding: report `DONE_WITH_CONCERNS`. Do not silently keep the test.
+4. `NO-TEST-CHANGES: <reason>` — this task added and modified zero test files.
+
+Coverage rule: every changed behavior needs at least 1 `RED:` entry. A report that changes behavior and carries only `BASELINE-GREEN:` entries is a FAIL — go back and capture the RED.
+
+Known rationalization: "the test obviously would have failed" — an assertion you did not run produced no output, and a field with no output is an empty field. Run it before the fix or use branch 3.
+
 ## CI Fix Context
 
 Expected fields from orchestrator:
