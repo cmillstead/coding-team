@@ -116,3 +116,22 @@ For every REQUIRED validation/teaching-error the spec names (a "must", a "reject
 
 ### C26
 for any test that claims to PIN a whole config/payload/object ("asserts every field", "proven-teeth", "all audited knobs") by asserting fields one-by-one: does it ALSO assert the exact top-level key SET (a `Object.keys(...).sort()` toEqual, a full-object `toEqual`/`toStrictEqual`, or an explicit absence list that is provably COMPLETE)? If it only asserts the fields it names, ADDING a new key or LEAKING a key from a sibling branch passes silently — the teeth are one-directional. Flag it and add the key-set pin. Two amplifiers to check: (1) if the value's type is `Partial<T>`/an open interface AND it reaches the sink via a spread or a variable (not a fresh object literal at the return), tsc's excess-property check does NOT fire, so the type is NOT a backstop for additions; (2) an absence/omission list (`expect("x" in obj).toBe(false)`) is only as strong as its completeness — enumerate the sibling branch's full key set and diff, don't hand-pick a few.
+
+### C27
+for any migration/startup code that DROPs+CREATEs or repairs a
+schema object on a deployed DB: (a) does it validate the SHAPE (required columns via
+`pragma('main.table_info(...)')`, case-folded names) of every table the recreated object
+references — not just table existence — and fail SAFE (skip + warn, leave the old object
+working) when the shape is non-canonical? (b) is every object reference schema-qualified
+(`main.`) so a same-named TEMP table/trigger cannot shadow the read, the DROP, or the guard?
+(c) remember `sqlite_master` queries are main-only but bare `PRAGMA`/`DROP` are NOT — a
+mixed pair silently checks one namespace and mutates another. Add tests for: partial/
+non-canonical table shape (repair skipped, DB unchanged), same-named TEMP table AND TEMP
+trigger present (repair still lands on main), and uppercase-declared canonical columns
+(repair still proceeds).
+
+### C28
+For every value whose DERIVATION the plan changes, do two greps before dispatch. (a) **All other readers**: grep for every call site and consumer of that value; for each, ask which derivation policy it assumes and whether the plan updates it. (b) **Contracts asserting the old behavior**: grep docstrings, module headers, comments and adjacent plans for prose stating the current guarantee — a documented invariant that the change falsifies is a REGRESSION, not a gap, and it will not show up as a failing test if no test covers the interaction. When two components must answer different questions about the same input (how was it SPELLED vs. what OWNS it), say so explicitly in the plan and route each question to its own input — never let one resolution policy leak across the boundary.
+
+### C29
+For every new or modified test in the diff, name the ONE behavior it is meant to guard, then ask: would this exact assertion still pass under the specific wrong behavior the test claims to prevent? If yes, the assertion is vacuous — tighten it to the value, source, or label the requirement actually names.

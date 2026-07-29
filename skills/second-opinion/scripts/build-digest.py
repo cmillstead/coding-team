@@ -100,11 +100,20 @@ EXIT_DIGEST_PROBLEM = 3
 
 # ---------------------------------------------------------------------------
 # Regex for extracting the Design default sentence (design face).
+#
+# A Design default is contractually a SINGLE sentence, but entries wrap prose
+# at ~95 columns, so the sentence itself often spans 2+ physical lines. The
+# label regex captures only the FIRST physical line; ``_extract_design_defaults``
+# below (mirroring the review face's ``_extract_check_faces``) walks forward
+# from the label to assemble the FULL body, bounded by whichever comes FIRST:
+# the next bold ``**Label:**`` line, a blank line, or EOF. A wrapped sentence
+# contains no blank line, so this is a safe (and here, correct) bound.
 # ---------------------------------------------------------------------------
 _DESIGN_DEFAULT_RE = re.compile(
-    r'^\*\*Design default:\*\*[ \t]+(.+?)[ \t]*$',
+    r'^\*\*Design default:\*\*[ \t]*(.*)$',
     re.MULTILINE,
 )
+_BLANK_LINE_RE = re.compile(r'^[ \t]*$', re.MULTILINE)
 
 # ---------------------------------------------------------------------------
 # Regexes for extracting the check face (review face). Two source formats
@@ -216,6 +225,34 @@ def _extract_check_faces(text: str) -> list[str]:
     return faces
 
 
+def _extract_design_defaults(text: str) -> list[str]:
+    """Return every Design default occurrence found in ``text``, each
+    collapsed to a SINGLE line.
+
+    The design face renders one bullet per entry on one line, so a body that
+    wraps across physical lines is joined with single spaces (and internal
+    whitespace runs normalized) rather than kept as embedded newlines — an
+    embedded newline would break the digest's one-bullet-per-line format.
+
+    The body is bounded by whichever comes FIRST: the next bold ``**Label:**``
+    line, a blank line, or EOF (see ``_DESIGN_DEFAULT_RE`` docstring above).
+    """
+    defaults: list[str] = []
+    for m in _DESIGN_DEFAULT_RE.finditer(text):
+        inline = m.group(1).strip()
+        start = m.end()
+        next_label = _BOLD_LABEL_RE.search(text, start)
+        blank_line = _BLANK_LINE_RE.search(text, start)
+        bounds = [b.start() for b in (next_label, blank_line) if b]
+        end = min(bounds) if bounds else len(text)
+        body = text[start:end].strip('\n')
+        parts = [p for p in (inline, body) if p]
+        combined = " ".join(" ".join(part.split()) for part in parts)
+        if combined:
+            defaults.append(combined)
+    return defaults
+
+
 # ---------------------------------------------------------------------------
 # Regex for parsing the canonical entry ID from the first H1 heading line.
 # Every entry begins with ``# <P|C><digits>`` (e.g. ``# C1``, ``# P33``); that
@@ -305,7 +342,7 @@ def _collect_entries(
                 continue
             matches = _extract_check_faces(text)
         else:
-            matches = _DESIGN_DEFAULT_RE.findall(text)
+            matches = _extract_design_defaults(text)
 
         if len(matches) == 0:
             errors.append(f"{display} ({path.name}): GAP — no {label} found")

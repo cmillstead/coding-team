@@ -823,3 +823,113 @@ def test_cli_invalid_face_returns_digest_problem():
 
     # Assert
     assert rc == EXIT_DIGEST_PROBLEM
+
+
+# ---------------------------------------------------------------------------
+# Test 20 — design face: a Design default WRAPPED across 2+ physical lines is
+# extracted in FULL and rendered on ONE line (single-space joins), not
+# truncated at the first physical line.
+# ---------------------------------------------------------------------------
+def test_wrapped_design_default_extracted_in_full_on_one_line(tmp_path):
+    """A Design default spanning 3 physical lines renders as one full, single-line bullet."""
+    # Arrange
+    content = (
+        "# C27\n\n"
+        "| ID | Pattern | Check |\n"
+        "|----|---------|------|\n"
+        "| C27 | Some pattern | Some check |\n\n"
+        "**Design default:** Repair/self-heal code on a deployed DB validates shape (case-folded,\n"
+        "`main.`-qualified `table_info`) before recreating any object that references it, qualifies\n"
+        "every DROP/lookup with `main.`, and fails safe (skip + warn) on any non-canonical state —\n"
+        "existence checks alone are wedge-installers.\n"
+    )
+    (tmp_path / "c27-slug.md").write_text(content, encoding="utf-8")
+
+    # Act
+    text, errors = render_digest(tmp_path)
+
+    # Assert — full sentence present, on one line, no embedded newline
+    assert errors == []
+    expected = (
+        "- **C27:** Repair/self-heal code on a deployed DB validates shape (case-folded, "
+        "`main.`-qualified `table_info`) before recreating any object that references it, qualifies "
+        "every DROP/lookup with `main.`, and fails safe (skip + warn) on any non-canonical state — "
+        "existence checks alone are wedge-installers."
+    )
+    assert expected in text
+    assert "existence checks alone are wedge-installers.\n" not in text.split(expected)[0]
+    # No embedded newline inside the rendered bullet line itself.
+    for line in text.split("\n"):
+        assert not line.startswith("- **C27:**") or line == expected
+
+
+# ---------------------------------------------------------------------------
+# Test 21 — design face: a single-line Design default still extracts
+# identically to before the wrap fix (no regression).
+# ---------------------------------------------------------------------------
+def test_single_line_design_default_unaffected_by_wrap_fix(tmp_path):
+    """A Design default that fits on one physical line extracts unchanged."""
+    # Arrange
+    _write_entry(tmp_path, "p01", "A short single-line sentence.")
+
+    # Act
+    text, errors = render_digest(tmp_path)
+
+    # Assert
+    assert errors == []
+    assert "- **P1:** A short single-line sentence." in text
+
+
+# ---------------------------------------------------------------------------
+# Test 22 — design face: extraction of a wrapped Design default STOPS at the
+# next bold '**Label:**' line and does not absorb it.
+# ---------------------------------------------------------------------------
+def test_wrapped_design_default_stops_at_next_bold_label(tmp_path):
+    """A wrapped Design default does not bleed into a following bold-labeled section."""
+    # Arrange
+    content = (
+        "# C90\n\n"
+        "**Design default:** First line of the sentence continues\n"
+        "onto a second physical line before it ends.\n"
+        "**Another label:** This must never appear in the extracted body.\n"
+    )
+    (tmp_path / "c90-slug.md").write_text(content, encoding="utf-8")
+
+    # Act
+    text, errors = render_digest(tmp_path)
+
+    # Assert
+    assert errors == []
+    assert (
+        "- **C90:** First line of the sentence continues onto a second physical line before it ends."
+        in text
+    )
+    assert "Another label" not in text
+
+
+# ---------------------------------------------------------------------------
+# Test 23 — design face: extraction of a wrapped Design default STOPS at a
+# blank line.
+# ---------------------------------------------------------------------------
+def test_wrapped_design_default_stops_at_blank_line(tmp_path):
+    """A wrapped Design default does not absorb text after a blank line separator."""
+    # Arrange
+    content = (
+        "# C91\n\n"
+        "**Design default:** First line of the sentence continues\n"
+        "onto a second physical line before it ends.\n"
+        "\n"
+        "This trailing paragraph must never appear in the extracted body.\n"
+    )
+    (tmp_path / "c91-slug.md").write_text(content, encoding="utf-8")
+
+    # Act
+    text, errors = render_digest(tmp_path)
+
+    # Assert
+    assert errors == []
+    assert (
+        "- **C91:** First line of the sentence continues onto a second physical line before it ends."
+        in text
+    )
+    assert "trailing paragraph" not in text
