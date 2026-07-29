@@ -174,10 +174,10 @@ Before the first task, the full test suite runs to establish a **baseline**. Pre
 
 Each task gets a **task team**: an implementer (using TDD) plus an audit team of 3-4 reviewers (spec and simplify are read-only; harden has Bash access for dependency audits) dispatched in parallel after the implementer reports done.
 
-**Implementer** reports one of: DONE, DONE_WITH_CONCERNS, NEEDS_CONTEXT, or BLOCKED. Blocked tasks are assessed and escalated — never ignored or retried without changes.
+**Implementer** reports one of: DONE, DONE_WITH_CONCERNS, NEEDS_CONTEXT, or BLOCKED. Every report carries **pre-fix RED evidence**: per new-or-modified test, either the verbatim failing output captured before the fix, or an explicit reason it was legitimately green, could not be made to fail, or that no test changed. A test that cannot be made to fail is itself a finding, not something to keep quietly. Blocked tasks are assessed and escalated — never ignored or retried without changes.
 
 **Audit team** (read-only, fresh agents each round):
-- **Spec reviewer** — does the code match the spec? Was TDD followed? Flags possible doc drift.
+- **Spec reviewer** — does the code match the spec? Was TDD followed, and is the pre-fix RED evidence present and sound? Flags vacuous assertions — tests that pin the half that already worked — and possible doc drift.
 - **Simplify auditor** — dead code, naming, over-abstraction. Only flags things "clearly wrong, not just imperfect."
 - **Harden auditor** — input validation, injection vectors, auth, race conditions. Exploitable issues, not theoretical risks.
 - **Prompt-craft auditor** (conditional) — only for tasks modifying CC instruction files. Checks framing, tool names, prohibitions, thresholds.
@@ -251,7 +251,7 @@ These are symlink targets in `skills/` that can be exposed as independent slash 
 
 ### TDD
 
-All implementation follows test-driven development: RED (write failing test) → verify RED → GREEN (minimal code to pass) → verify GREEN → REFACTOR → repeat. If code is written before a test, delete it and start over.
+All implementation follows test-driven development: RED (write failing test) → verify RED → GREEN (minimal code to pass) → verify GREEN → REFACTOR → repeat. The verified-RED output is captured verbatim and carried in the implementer's report, so the cycle is checkable by a reviewer rather than self-attested. If code is written before a test, delete it and start over.
 
 ### Verification
 
