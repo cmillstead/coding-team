@@ -194,7 +194,7 @@ If you find issues during self-review, fix them now.
 - **Status:** DONE | DONE_WITH_CONCERNS | BLOCKED | NEEDS_CONTEXT
 - What you implemented (or attempted, if blocked)
 - What you tested and test results (paste actual output)
-- **Pre-fix RED evidence:** REQUIRED — one entry per new-or-modified test, using one of the four branches in the `## Pre-fix RED evidence` section of `agents/reference/implementer-reference.md`. A report missing this field is rejected.
+- **Pre-fix RED evidence:** REQUIRED — one entry per new-or-modified test, using one of the four branches in the `## Pre-fix RED evidence` section of `~/.claude/skills/coding-team/agents/reference/implementer-reference.md`. A report missing this field is rejected.
 - Files changed
 - **Docs updated:** [list of doc files updated] OR "No doc impact — scanned N files, none reference changed paths"
 - Self-review findings (if any)
