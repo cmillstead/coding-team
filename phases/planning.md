@@ -190,7 +190,7 @@ After writing the plan:
    - **Medium/Large plan: REQUIRE the plan Codex `review` gate.** After the plan-doc-reviewer approves, check `command -v codex >/dev/null 2>&1`. If Codex is available, run `/second-opinion review` before saving. If Codex is not available, log "Codex unavailable — plan Codex gate skipped" and proceed.
 4. **Cross-model tiebreaker (iteration 2+) — tier-conditional:**
    - **Trivial/Small plan: SKIP the tiebreaker** — per the ladder. A Small plan hitting 2 reviewer rounds does NOT trigger serial external Codex calls.
-   - **Medium/Large plan:** If the reviewer found issues on the second pass AND `command -v codex >/dev/null 2>&1` succeeds, offer: "Plan reviewer and planner disagree after 2 rounds. Run `/second-opinion review` as tiebreaker? (Y/n)". If yes, run it — Codex findings override when they align with the reviewer.
+   - **Medium/Large plan:** If the reviewer found issues on the second pass AND `command -v codex >/dev/null 2>&1` succeeds, run `/second-opinion review` as tiebreaker — disagreement after 2 rounds IS the trigger. Print "Plan reviewer and planner disagree after 2 rounds — running `/second-opinion review` as tiebreaker.", then run it. Codex findings override when they align with the reviewer.
 5. If Approved: save plan and proceed
 
 Save plan to: `docs/plans/YYYY-MM-DD-<feature>.md` (always in the **main repo root**, not a worktree)

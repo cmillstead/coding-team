@@ -15,7 +15,7 @@ After the plan passes review and is saved:
 
 2. Run: `command -v codex >/dev/null 2>&1` to check if Codex CLI is available.
 
-3. **If Codex is available AND the planned tier is ≥ Medium** (per `phases/task-weight.md`): offer the plan second-opinion (REQUIRED). If the planned tier is Trivial or Small: SKIP the plan second-opinion — proceed directly to step 4. Risk signals determine the framing of the offer, not whether to make it. Print this VERBATIM (substitute actual values), then STOP — do not print anything after this block. This STOP applies only to this step's Y/n offer, not to step 4's print below. Your next message depends on the user's answer:
+3. **If Codex is available AND the planned tier is ≥ Medium** (per `phases/task-weight.md`): run the plan second-opinion (REQUIRED). If the planned tier is Trivial or Small: SKIP the plan second-opinion — proceed directly to step 4. Risk signals determine the framing of the print, not whether to run the gate. Print this VERBATIM (substitute actual values), then run the gate:
 
 > ---
 >
@@ -23,12 +23,12 @@ After the plan passes review and is saved:
 >
 > [If risk signals fired: "This plan [touches N files / modifies security surface / has opus-tier tasks / etc.]."]
 >
-> Run `/second-opinion review` for an independent second opinion on the plan? (Y/n)
+> Running `/second-opinion review` on the plan — required at tier ≥ Medium.
 >
 > ---
 
-   - User says yes: run `/second-opinion review` against the plan file. After Codex review completes, continue with step 4.
-   - User says no or sends a different message: continue with step 4.
+   - Run `/second-opinion review` against the plan file. After Codex review completes, continue with step 4.
+   - If the user has overridden the gate for this session (see the override below), skip it and continue with step 4.
 
 4. **If Codex is not available OR second-opinion review is done**, print this VERBATIM (substitute actual values):
 
@@ -54,7 +54,6 @@ After the plan passes review and is saved:
 - "The user wants to move fast" — speed does not exempt the gate. The question takes 5 seconds to ask. Skipping it risks hours of rework.
 - "The plan was already reviewed by the plan reviewer" — plan reviewer checks internal consistency. Second-opinion checks cross-model blind spots. These are different quality dimensions.
 - "It's a small/trivial plan" — Trivial and Small plans skip the plan second-opinion (per `phases/task-weight.md` gate matrix). Medium+ plans run it. Tier-scoped skips are correct; unscoped "skip because small" is still a violation.
-- "Codex will slow things down" — the user decides whether to accept the offer. Your job is to present it, not pre-decide.
 - **User override (equal force):** If the user has said "never ask about second opinion" or "skip second-opinion gates" in this session, skip second-opinion in planning for the rest of the session. A valid user override is as authoritative as a tier-skip — honor it without resistance.
 
 **Final step — enter Phase 5.** Read `phases/execution.md` now and execute its first step. Do not stop to summarize and do not wait for a go-ahead phrase from the user — the block above is a status print, not a question, and a passing gate verdict is not a completion.

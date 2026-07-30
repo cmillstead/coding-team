@@ -112,7 +112,7 @@ Each phase reads its detail file on entry. Do not read ahead — load only the a
 **Input:** Approved design doc from Phase 2.
 **Output:** Reviewed spec at `docs/plans/YYYY-MM-DD-<feature>-design.md`.
 **Detail:** Read `phases/spec-review.md`
-**Exit gate:** User has confirmed the written spec.
+**Exit gate:** Spec written and reviewed (design approval came in Phase 2 — this phase adds no gate).
 
 ### Phase 4: Planning
 **Purpose:** Produce detailed implementation plan with TDD tasks.

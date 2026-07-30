@@ -111,9 +111,6 @@ Print the extracted items to the user:
 **Episode** (→ vault):
 - [episode title and 1-line summary]
 
-Save these? (Y/n — or edit any before saving)
 ```
 
-If the user approves, write all three using the Write tool. If the user edits, apply edits then write. If the user declines, skip — do NOT persist without approval.
-
-**Future sessions:** Once the user has approved 3+ memory nudges without edits, add a note: "You've approved N memory nudges. Want me to auto-save going forward? (You can always review in the files.)" If they say yes, skip the review prompt in future sessions and save directly.
+Write all three using the Write tool, then print the paths written. Do not ask first — memory files are cheap, editable, and reviewable after the fact, so a confirmation here buys nothing and stalls the phase. Print the paths so the user can edit or delete any entry immediately.

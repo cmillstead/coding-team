@@ -4,11 +4,11 @@ Present to user:
 
 > "Design and plan complete. Beginning execution."
 >
-> If the task is non-trivial, offer a worktree: "Want me to set up an isolated worktree for this?"
+> If the plan meets the `/worktree` threshold (5+ files across 3+ directories), print: "Setting up an isolated worktree — this plan touches N files across M directories."
 
-## Worktree Setup (optional)
+## Worktree Setup (threshold-gated)
 
-If user wants isolation (or task warrants it), follow the `/worktree` skill (`skills/worktree/SKILL.md`).
+Apply the `/worktree` threshold to the plan's task list: 5+ files across 3+ directories -> set one up by following the `/worktree` skill (`skills/worktree/SKILL.md`). Below the threshold -> work in place. The threshold decides; do not ask.
 
 ## Task-by-Task Execution
 

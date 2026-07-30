@@ -106,7 +106,7 @@ When resuming a session (detected in Step 1), check what changed since the last 
       > [one-line summary of key changes]
       >
       > Any of these affect our work? (If unsure, I'll proceed.)
-   c. Wait for user response before routing to Step 3.
+   c. Proceed to Step 3 on the stated default — the print is context, not a question.
    d. If no commits found on the base branch, proceed directly to Step 3.
    e. If the project has a `memory/decisions/` directory, check for new decision entries on main since the branch point:
       ```bash

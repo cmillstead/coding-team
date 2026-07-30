@@ -85,8 +85,9 @@ If no PR exists, start from step 1.
       ```
       - If the matched line is `- [x]` OR contains `skip:` → gate satisfied, continue to step 5.
       - If the matched line is `- [ ]` and does NOT contain `skip:`:
-        Print: "Second-opinion gate not completed. Active plan: $ACTIVE_PLAN. Run `/second-opinion review` before shipping, or edit the plan to mark `- [x] Second-opinion review (skip: <reason>)` and try `/release` again."
-        STOP and wait for user response. Do NOT proceed to push.
+        Print: "Second-opinion gate not completed. Active plan: $ACTIVE_PLAN. Running `/second-opinion review` now." Then RUN it — the gate is required, so running it is the resolution; asking permission to satisfy a required gate is a stall.
+        - On PASS: mark the checklist line `- [x]` and continue to step 5.
+        - On FAIL: STOP and report the findings. Do NOT push with an unresolved gate — that is a genuine blocker, not a decision point.
       - If no `Second-opinion review` line is present in the plan (back-compat with older plans): gate satisfied, continue to step 5.
 
 5. **Review diff:**

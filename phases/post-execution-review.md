@@ -16,7 +16,7 @@ After all tasks are executed and verified:
 
 2. Run: `command -v codex >/dev/null 2>&1` to check if Codex CLI is available.
 
-3. **If Codex is available AND the EFFECTIVE tier is Small, Medium, or Large**: run the post-exec Codex `review` (REQUIRED). If the EFFECTIVE tier is Trivial: SKIP the review — proceed directly to step 4. Print this VERBATIM (substitute actual values), then STOP — do not print anything after this block. Your next message depends on the user's answer:
+3. **If Codex is available AND the EFFECTIVE tier is Small, Medium, or Large**: run the post-exec Codex `review` (REQUIRED). If the EFFECTIVE tier is Trivial: SKIP the review — proceed directly to step 4. Print this VERBATIM (substitute actual values), then run the review:
 
 > ---
 >
@@ -25,16 +25,12 @@ After all tasks are executed and verified:
 > [If risk signals fired: "This diff [changes N files / touches security-sensitive code / modifies CC instructions / etc.]."]
 > [If no risk signals: "Clean diff — N files changed."]
 >
-> Run Codex on the full diff? Options: **review** / **challenge** (adversarial — recommended for security-sensitive changes) / **both** / **skip**
->
-> (Codex `challenge` is always offered, never required — see `phases/task-weight.md` canonical Codex principle.)
+> Running `/second-opinion review` on the full diff — required at EFFECTIVE tier Small, Medium, or Large.
 >
 > ---
 
-   - User says "review": run `/second-opinion review` against the diff. Then continue with step 3a.
-   - User says "challenge": run `/second-opinion challenge` against the diff. Then continue with step 3a.
-   - User says "both": run `/second-opinion review` first, then `/second-opinion challenge`. Then continue with step 3a.
-   - User says "skip" or sends a different message: edit the active plan file's Completion Checklist — change `- [ ] Second-opinion review` to `- [x] Second-opinion review (skip: <one-sentence reason from the user>)`. If no reason was given, use `(skip: user-declined)`. The lifecycle hook accepts either `[x]` or any line containing `skip:`. Then continue with step 4.
+   - Run `/second-opinion review` against the diff. Then continue with step 3a.
+   - If the user has already overridden the gate via the plan checklist (see **User override** below), skip the review and continue with step 4.
 
    3a. **After Codex review completes — findings gate.** If Codex returned ANY P1 or P2 findings:
    - List every finding with severity
@@ -62,7 +58,7 @@ After all tasks are executed and verified:
 >
 > ---
 
-5. **Verify the gate is marked.** The choice (review/challenge/both/skip) should already have updated the active plan file's `- [ ] Second-opinion review` line — `/second-opinion` does the edit on review/challenge/both, and the skip branch above instructs you to do it manually. Re-read the plan to confirm the line is now `- [x]` or contains `skip:`. If it isn't, the lifecycle hook will block pipeline completion — fix the plan now.
+5. **Verify the gate is marked.** The Codex `review` run should already have updated the active plan file's `- [ ] Second-opinion review` line — `/second-opinion` does the edit on completion; the **User override** below is the manual route. Re-read the plan to confirm the line is now `- [x]` or contains `skip:`. If it isn't, the lifecycle hook will block pipeline completion — fix the plan now.
 
 The plan's frontmatter `status` field stays `in-progress` through this phase — it is flipped to `complete` by the orchestrator at the end of Phase 6 (see `phases/completion.md` "Final: mark plan complete"). Post-execution-review only manages the second-opinion checklist line, not the frontmatter status.
 

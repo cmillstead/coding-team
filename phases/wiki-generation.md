@@ -13,24 +13,16 @@
 After producing the completion summary, generate a project learnings article for the vault wiki.
 
 **Step 1: Determine topic.**
-Read `~/Documents/obsidian-vault/AI/wiki/_master-index.md` using the Read tool. Based on the feature's domain, suggest the best-fit topic first, then present the full menu for confirmation or change:
+Read `~/Documents/obsidian-vault/AI/wiki/_master-index.md` using the Read tool. Based on the feature's domain, SELECT the best-fit topic and proceed with it — do not present a menu. The index is readable and the article is editable, so a confirmation here only stalls the phase. Print one line naming the topic chosen:
 
 ```
-Wiki article for this feature. Suggested topic: {best-fit}
-
-1. ai-agents — Autonomous agent architectures
-2. ai-coding-tools — CLI tools and code intelligence
-3. ai-data-tools — Federated query engines and data-aware LLM infra
-4. rag — Retrieval-Augmented Generation techniques
-5. security — AI-augmented security tools
-6. New topic (I'll specify)
-7. Skip wiki article
-
-Topic? (number or name)
+Wiki article filed under: {topic}
 ```
 
-- If user picks 1-5: use that topic directory.
-- If user picks 6: ask for topic name and description. Create directory with Bash tool (`mkdir -p`). Create `_index.md` using the Write tool:
+Existing topics include `ai-agents` (autonomous agent architectures), `ai-coding-tools` (CLI tools and code intelligence), `ai-data-tools` (federated query engines and data-aware LLM infra), `rag` (retrieval-augmented generation), and `security` (AI-augmented security tools) — read `_master-index.md` for the live list rather than trusting this one.
+
+- If an existing topic fits: use that topic directory.
+- If no existing topic fits: name a new topic yourself from the feature's domain. Create the directory with the Bash tool (`mkdir -p`). Create `_index.md` using the Write tool:
   ```markdown
   # {Topic Name}
 
@@ -45,7 +37,7 @@ Topic? (number or name)
   ```
   Add row to the `## Topics` table in `_master-index.md`:
   `| [[{topic-slug}/_index|{Topic Name}]] | {description} |`
-- If user picks 7: skip wiki generation, proceed to Decision Log.
+The tier matrix in `phases/task-weight.md` decides whether a wiki article runs at all — there is no per-run skip option to offer.
 
 **Step 2: Generate article.**
 Content comes from the completion summary already produced. Do NOT re-analyze the codebase. If the completion summary lacks decisions or patterns, ask the user: "Any key decisions or patterns worth noting? (or 'none')"
@@ -84,4 +76,4 @@ Write to `~/Documents/obsidian-vault/AI/wiki/{topic}/{slug}.md` using the Write 
 Read the topic's `_index.md` using the Read tool. Find the `## Articles` table. Append a new table row:
 `| [[{topic}/{slug}|{Feature Name}]] | {one-line description} |`
 
-Known rationalization: "This project isn't wiki-worthy" — the user decides via the skip option, not the agent.
+Known rationalization: "This project isn't wiki-worthy" — the tier matrix in `phases/task-weight.md` decides that, not the agent's taste.
