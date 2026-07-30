@@ -403,9 +403,10 @@ class TestLifecycleDeadKeyEndToEnd:
     code) must block on its own — that is what proves the fixture (git init,
     plan file, cwd wiring) is genuinely exercised via the real discovery path,
     not silently falling through for an unrelated reason (missing git init,
-    wrong cwd, ambiguous plan). Only once the control is trusted does the
-    EXPERIMENT (`tool_response`, the real production key) mean anything:
-    empty before T2, blocking after.
+    wrong cwd, ambiguous plan). Only once the control is trusted do the two
+    EXPERIMENTS below mean anything: both empty before T2, both blocking
+    after — one exercising the `hook_event_name` path, the other isolating
+    the `tool_response` key alone (QA F2 — see each test's docstring).
     """
 
     @pytest.fixture
@@ -433,15 +434,53 @@ class TestLifecycleDeadKeyEndToEnd:
         assert "second-opinion" in reason.lower()
         assert str(plan) in reason
 
-    def test_experiment_tool_response_key_blocks(self, repo_and_plan):
-        """EXPERIMENT: the real PostToolUse key `tool_response` must also
-        block, with a reason naming the second-opinion branch and plan path.
+    def test_experiment_hook_event_name_path_blocks(self, repo_and_plan):
+        """EXPERIMENT (event-name path): `hook_event_name: PostToolUse` with
+        `tool_response` present must block, with a reason naming the
+        second-opinion branch and plan path.
 
-        Empty stdout before T2 (this is the dead-key defect this task fixes);
-        blocks after T2."""
+        QA F2 correction: at T1b authoring time this event genuinely
+        exercised the `tool_response` KEY, because production then only
+        checked `"tool_result" in event`. After T2 added the
+        `event_name == "PostToolUse"` disjunct, that clause short-circuits
+        BEFORE the result key is ever consulted (coding-team-lifecycle.py's
+        `is_post` check) — so this event now pins the EVENT-NAME path, not
+        the key. It still has value end-to-end through the real dispatcher
+        (kept, not removed) but the docstring must say what it actually
+        exercises. See `test_experiment_tool_response_key_only_blocks` below
+        for the case that genuinely isolates the key.
+
+        Empty stdout before T2 (the dead-key defect this task fixed); blocks
+        after T2."""
         repo, plan = repo_and_plan
         event = {
             "hook_event_name": "PostToolUse",
+            "tool_name": "Skill",
+            "tool_input": {"skill": "coding-team"},
+            "tool_response": "done",
+        }
+        out, rc = _run_script(POSTTOOLUSE_DISPATCHER, event, cwd=repo)
+        assert rc == 0
+        parsed = json.loads(out) if out.strip() else None
+        assert parsed is not None, f"expected block, got {out!r}"
+        assert parsed.get("decision") == "block"
+        reason = parsed.get("reason", "")
+        assert "second-opinion" in reason.lower()
+        assert str(plan) in reason
+
+    def test_experiment_tool_response_key_only_blocks(self, repo_and_plan):
+        """EXPERIMENT (key path): `tool_response` present with NO
+        `hook_event_name` at all must block end-to-end through the real
+        dispatcher + real hook.
+
+        QA F2: this is the case `test_experiment_hook_event_name_path_blocks`
+        no longer covers once T2 added the event-name disjunct — reverting
+        `"tool_response"` out of the `has_result` tuple at
+        coding-team-lifecycle.py:89 reintroduces the original dead-key
+        defect, and only a key-only fixture like this one can catch it;
+        the event-name fixture above would still pass."""
+        repo, plan = repo_and_plan
+        event = {
             "tool_name": "Skill",
             "tool_input": {"skill": "coding-team"},
             "tool_response": "done",
