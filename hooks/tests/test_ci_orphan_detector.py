@@ -6,6 +6,8 @@ import subprocess
 import time
 from pathlib import Path
 
+import pytest
+
 HOOKS_DIR = Path(__file__).resolve().parent.parent  # tests/ -> hooks/
 
 
@@ -156,6 +158,7 @@ def make_shims(tmp_path: Path, gh_body: str):
     timeout_path = shim_dir / "timeout"
     timeout_path.write_text(
         "#!/bin/bash\n"
+        f'printf \'%s\\n\' "$*" >> "{tmp_path / "timeout-calls.log"}"\n'
         'if [ "$1" = "-k" ]; then\n'
         "    shift 3\n"
         "else\n"
@@ -168,6 +171,52 @@ def make_shims(tmp_path: Path, gh_body: str):
     env = os.environ.copy()
     env["PATH"] = f"{shim_dir}{os.pathsep}{env.get('PATH', '')}"
     return env, log_file
+
+
+def make_isolated_shims(tmp_path: Path, gh_body: str, timeout_binary_name: str | None = None):
+    """Build a fully-controlled PATH (no inherited PATH entries) containing
+    gh, bash, jq, git, date, sed, and grep, plus — when requested — ONE
+    timeout-style binary under the given name ("timeout" or "gtimeout") that
+    logs its argv to timeout-calls.log before passing through to the real
+    command. Omitting timeout_binary_name yields a PATH with neither
+    `timeout` nor `gtimeout` resolvable, for bounded-or-nothing coverage.
+    """
+    shim_dir = tmp_path / "iso-shim-bin"
+    shim_dir.mkdir(exist_ok=True)
+    log_file = tmp_path / "gh-calls.log"
+    timeout_log = tmp_path / "timeout-calls.log"
+
+    for tool in ("bash", "jq", "git", "date", "sed", "grep"):
+        real = shutil.which(tool)
+        assert real is not None, f"{tool} not found via shutil.which"
+        (shim_dir / tool).symlink_to(real)
+
+    gh_path = shim_dir / "gh"
+    gh_path.write_text(
+        "#!/bin/bash\n"
+        f'printf \'%s\\n\' "$*" >> "{log_file}"\n'
+        f"{gh_body}"
+    )
+    gh_path.chmod(0o755)
+
+    if timeout_binary_name is not None:
+        timeout_path = shim_dir / timeout_binary_name
+        timeout_path.write_text(
+            "#!/bin/bash\n"
+            f'printf \'%s\\n\' "$*" >> "{timeout_log}"\n'
+            'if [ "$1" = "-k" ]; then\n'
+            "    shift 3\n"
+            "else\n"
+            "    shift 1\n"
+            "fi\n"
+            'exec "$@"\n'
+        )
+        timeout_path.chmod(0o755)
+
+    env = {"PATH": str(shim_dir)}
+    if "HOME" in os.environ:
+        env["HOME"] = os.environ["HOME"]
+    return env, log_file, timeout_log
 
 
 def run_hook(cwd: Path, env: dict):
@@ -690,3 +739,154 @@ class TestParkedMergedBranchQAFindings:
         assert rc == 0
         assert err == ""
         assert out.strip() == ""
+
+
+class TestLegacyTimeoutFallback:
+    """Bounded-or-nothing coverage for the orphan-PR and stale-branch
+    sections' TIMEOUT_CMD hoist. Previously these two sections hardcoded
+    bare `timeout 10`, which silently no-ops (by accident) when no `timeout`
+    binary exists — the parked section already resolves TIMEOUT_CMD and
+    skips its gh lookups by design when unresolved; these tests pin the same
+    property for the legacy sections."""
+
+    def test_no_timeout_binary_skips_orphan_lookup(self, tmp_path):
+        repo = make_repo(tmp_path / "repo", branch="main")
+        orphan_body = _echo_json([
+            {"number": 5, "title": "Fix CI", "statusCheckRollup": [{"conclusion": "FAILURE"}]}
+        ])
+        env, log_file, timeout_log = make_isolated_shims(
+            tmp_path, gh_script(orphan=orphan_body)
+        )
+        rc, out, err = run_hook(repo, env)
+        assert rc == 0
+        assert err == ""
+        assert out == ""
+        log_content = log_file.read_text() if log_file.exists() else ""
+        assert log_content == ""
+
+    def test_no_timeout_binary_skips_open_pr_heads_lookup(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        _run(["git", "init", "-b", "main"], cwd=repo)
+        _run(["git", *_GIT_IDENTITY, "commit", "--allow-empty", "-m", "x"], cwd=repo)
+        _run(["git", "checkout", "-b", "old-stale"], cwd=repo)
+        old_env = os.environ.copy()
+        old_env["GIT_AUTHOR_DATE"] = _OLD_DATE
+        old_env["GIT_COMMITTER_DATE"] = _OLD_DATE
+        _run(["git", *_GIT_IDENTITY, "commit", "--allow-empty", "-m", "old"],
+             cwd=repo, env=old_env)
+        last_commit_ts = _commit_ts(repo, "old-stale")
+        _run(["git", "checkout", "main"], cwd=repo)
+
+        env, log_file, timeout_log = make_isolated_shims(tmp_path, gh_script())
+        rc, out, err = run_hook(repo, env)
+        assert rc == 0
+        assert err == ""
+        log_content = log_file.read_text() if log_file.exists() else ""
+        assert log_content == ""
+        reason = parse_envelope(out)
+        age_days = (int(time.time()) - last_commit_ts) // 86400
+        expected = _expected_stale_reason([("old-stale", age_days)])
+        assert reason == expected
+
+    @pytest.mark.parametrize("timeout_name", ["timeout", "gtimeout"])
+    def test_legacy_sections_use_timeout_wrapper(self, tmp_path, timeout_name):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        _run(["git", "init", "-b", "main"], cwd=repo)
+        _run(["git", *_GIT_IDENTITY, "commit", "--allow-empty", "-m", "x"], cwd=repo)
+        _run(["git", "checkout", "-b", "old-stale"], cwd=repo)
+        old_env = os.environ.copy()
+        old_env["GIT_AUTHOR_DATE"] = _OLD_DATE
+        old_env["GIT_COMMITTER_DATE"] = _OLD_DATE
+        _run(["git", *_GIT_IDENTITY, "commit", "--allow-empty", "-m", "old"],
+             cwd=repo, env=old_env)
+        last_commit_ts = _commit_ts(repo, "old-stale")
+        _run(["git", "checkout", "main"], cwd=repo)
+
+        orphan_body = _echo_json([
+            {"number": 5, "title": "Fix CI", "statusCheckRollup": [{"conclusion": "FAILURE"}]}
+        ])
+        env, log_file, timeout_log = make_isolated_shims(
+            tmp_path, gh_script(orphan=orphan_body), timeout_binary_name=timeout_name,
+        )
+        rc, out, err = run_hook(repo, env)
+        assert rc == 0
+        assert err == ""
+        timeout_content = timeout_log.read_text() if timeout_log.exists() else ""
+        timeout_lines = timeout_content.splitlines()
+        orphan_calls = [line for line in timeout_lines if "statusCheckRollup" in line]
+        stale_calls = [line for line in timeout_lines if "headRefName" in line]
+        assert len(orphan_calls) == 1, timeout_content
+        assert len(stale_calls) == 1, timeout_content
+        assert orphan_calls[0].startswith("-k 1 10 "), orphan_calls[0]
+        assert stale_calls[0].startswith("-k 1 10 "), stale_calls[0]
+
+        reason = parse_envelope(out)
+        age_days = (int(time.time()) - last_commit_ts) // 86400
+        expected_orphan = _expected_orphan_reason([(5, "Fix CI", 1)])
+        expected_stale = _expected_stale_reason([("old-stale", age_days)])
+        expected = expected_orphan + "\n\n" + expected_stale
+        assert reason == expected
+
+    def test_env_inheritance_does_not_leak_into_legacy_sections(self, tmp_path):
+        """Design 2-3: pr_json/open_pr_heads must be explicitly reset before
+        the timeout-availability guard, not inherit a same-named value from
+        the calling environment."""
+        repo = make_repo(tmp_path / "repo", branch="main")
+        orphan_body = _echo_json([
+            {"number": 5, "title": "Fix CI", "statusCheckRollup": [{"conclusion": "FAILURE"}]}
+        ])
+        env, log_file, timeout_log = make_isolated_shims(
+            tmp_path, gh_script(orphan=orphan_body)
+        )
+        env["pr_json"] = "not-json-junk"
+        env["open_pr_heads"] = "some-branch-name"
+        rc, out, err = run_hook(repo, env)
+        assert rc == 0
+        assert err == ""
+        assert out == ""
+        log_content = log_file.read_text() if log_file.exists() else ""
+        assert log_content == ""
+
+    def test_orphan_fetch_fails_silent_with_timeout_present(self, tmp_path):
+        """Mirrors test_gh_merged_query_fails_silent: TIMEOUT_CMD resolved,
+        but the wrapped gh call itself exits non-zero — no false orphan
+        report, and the failure must not surface as an error."""
+        repo = make_repo(tmp_path / "repo", branch="main")
+        env, log_file, timeout_log = make_isolated_shims(
+            tmp_path, gh_script(orphan="exit 1"), timeout_binary_name="timeout",
+        )
+        rc, out, err = run_hook(repo, env)
+        assert rc == 0
+        assert err == ""
+        assert out == ""
+
+    def test_open_pr_heads_fetch_fails_silent_stale_scan_unaffected(self, tmp_path):
+        """Mirrors test_gh_merged_query_fails_silent: TIMEOUT_CMD resolved,
+        but the open-PR-heads gh call exits non-zero — open_pr_heads falls
+        back to empty (no suppression data), and the LOCAL stale scan still
+        runs and reports the stale branch."""
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        _run(["git", "init", "-b", "main"], cwd=repo)
+        _run(["git", *_GIT_IDENTITY, "commit", "--allow-empty", "-m", "x"], cwd=repo)
+        _run(["git", "checkout", "-b", "old-stale"], cwd=repo)
+        old_env = os.environ.copy()
+        old_env["GIT_AUTHOR_DATE"] = _OLD_DATE
+        old_env["GIT_COMMITTER_DATE"] = _OLD_DATE
+        _run(["git", *_GIT_IDENTITY, "commit", "--allow-empty", "-m", "old"],
+             cwd=repo, env=old_env)
+        last_commit_ts = _commit_ts(repo, "old-stale")
+        _run(["git", "checkout", "main"], cwd=repo)
+
+        env, log_file, timeout_log = make_isolated_shims(
+            tmp_path, gh_script(open_heads="exit 1"), timeout_binary_name="timeout",
+        )
+        rc, out, err = run_hook(repo, env)
+        assert rc == 0
+        assert err == ""
+        reason = parse_envelope(out)
+        age_days = (int(time.time()) - last_commit_ts) // 86400
+        expected = _expected_stale_reason([("old-stale", age_days)])
+        assert reason == expected

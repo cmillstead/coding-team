@@ -7,11 +7,18 @@
 command -v gh  >/dev/null 2>&1 || exit 0
 command -v jq  >/dev/null 2>&1 || exit 0
 
+# Resolve a bounded-timeout binary once. Every gh network call in this hook
+# is bounded-or-nothing: wrapped in TIMEOUT_CMD, or not made at all.
+TIMEOUT_CMD=$(command -v timeout || command -v gtimeout || true)
+
 # --- Orphan PR detection ---
 # Fetch open PRs with status checks (10s timeout)
 orphan_lines=""
-pr_json=$(timeout 10 gh pr list --author @me --state open \
-  --json number,title,statusCheckRollup --limit 20 2>/dev/null) || true
+pr_json=""
+if [ -n "$TIMEOUT_CMD" ]; then
+    pr_json=$("$TIMEOUT_CMD" -k 1 10 gh pr list --author @me --state open \
+      --json number,title,statusCheckRollup --limit 20 2>/dev/null) || true
+fi
 
 if [ -n "$pr_json" ] && echo "$pr_json" | jq empty 2>/dev/null; then
     # Build orphan report: for each PR, count checks with FAILURE conclusion
@@ -35,7 +42,10 @@ cutoff=$(date -v-14d +%s 2>/dev/null || date -d '14 days ago' +%s 2>/dev/null) |
 # Fetch all open PR head refs ONCE. Previously this hook made one `gh pr list
 # --head` network call per stale branch, so session-start latency scaled with
 # local branch count. One bounded call + local lookup keeps it constant-time.
-open_pr_heads=$(timeout 10 gh pr list --state open --json headRefName --limit 200 2>/dev/null | jq -r '.[].headRefName' 2>/dev/null) || open_pr_heads=""
+open_pr_heads=""
+if [ -n "$TIMEOUT_CMD" ]; then
+    open_pr_heads=$("$TIMEOUT_CMD" -k 1 10 gh pr list --state open --json headRefName --limit 200 2>/dev/null | jq -r '.[].headRefName' 2>/dev/null) || open_pr_heads=""
+fi
 
 if [ "$cutoff" -gt 0 ]; then
     while IFS= read -r branch; do
@@ -68,7 +78,6 @@ fi
 # most 2 gh lookups per run and skipped entirely if no timeout binary exists,
 # so this never adds unbounded latency to session start.
 parked_lines=""
-TIMEOUT_CMD=$(command -v timeout || command -v gtimeout || true)
 toplevel=$(git rev-parse --show-toplevel 2>/dev/null)
 
 if [ -n "$TIMEOUT_CMD" ] && [ -n "$toplevel" ]; then
