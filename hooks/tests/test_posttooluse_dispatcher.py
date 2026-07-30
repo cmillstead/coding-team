@@ -369,7 +369,19 @@ class TestLintWarningEnforcer:
 
 
 class TestCodingTeamLifecycle:
-    """Test 7c: coding-team-lifecycle — non-coding-team Skill passes through."""
+    """Test 7c: coding-team-lifecycle — non-coding-team Skill passes through.
+
+    Hermeticity note: these tests pass no `cwd`, so they run against
+    whatever repo the test process's cwd happens to be. That is safe ONLY
+    because coding-team-lifecycle.py's skill-name check
+    (`skill_name != "coding-team"` at :78-79) returns before any plan
+    resolution runs — reordering the hook so plan resolution precedes that
+    early return would make these tests start reading the REAL
+    docs/plans/ directory (where an armed plan currently sits) and their
+    results would become repo-state-dependent. If you move that early
+    return, add `cwd=` here (see `TestLifecycleDeadKeyEndToEnd` below for
+    the pattern).
+    """
 
     @pytest.fixture
     def non_ct_skill_event(self):
@@ -417,7 +429,15 @@ class TestLifecycleDeadKeyEndToEnd:
 
     def test_control_legacy_tool_result_key_blocks(self, repo_and_plan):
         """CONTROL: shipped code recognizes `tool_result` and blocks via the
-        second-opinion branch, naming the temp plan path."""
+        second-opinion branch, naming the temp plan path.
+
+        By design this is INVARIANT across the dead-key fix — it passes both
+        BEFORE and AFTER T2, since `tool_result` was always recognized. It
+        proves the fixture is wired (git init, cwd, plan discovery), nothing
+        more. Liveness evidence for the fix itself lives solely in
+        `test_experiment_hook_event_name_path_blocks` and
+        `test_experiment_tool_response_key_only_blocks` below — do not read
+        "the control passes" as evidence the fix works."""
         repo, plan = repo_and_plan
         event = {
             "hook_event_name": "PostToolUse",

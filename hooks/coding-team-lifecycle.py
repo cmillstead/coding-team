@@ -8,10 +8,8 @@ PostToolUse on Skill (PreToolUse path is a hard no-op):
   - If skill is "coding-team" -> enforce second-opinion gate via active-plan checkbox
   - Any other skill -> silent return
 
-A block emitted here is POST-EXECUTION FEEDBACK: the Skill tool has already run
-by the time this hook fires, and the block reason is shown to Claude to act on
-in its next turn — it does not undo or prevent the tool call that already
-happened.
+A block emitted here is post-execution feedback: the tool has already run,
+and the reason is shown to Claude.
 
 Second-opinion gate (PostToolUse):
   Reads the active plan file under $MAIN_ROOT/docs/plans/ — the unique plan whose
