@@ -86,6 +86,12 @@ def main() -> None:
     event_name = event.get("hook_event_name")
     has_result = any(
         event.get(k) is not None
+        # tool_output is speculative/unobserved fallback, not a confirmed payload
+        # key — the live-probe finding (harness-modularization
+        # .paul/phases/01-spine/01-02-PROBE-FINDING.md:24-26) disproved it as
+        # something a subagent wrongly asserted from docs. Kept anyway: a
+        # harmless widened fallback costs nothing, but do not cite its
+        # presence here as evidence of a real contract.
         for k in ("tool_response", "tool_result", "tool_output")
     )
     if event_name == "PreToolUse":
@@ -130,7 +136,10 @@ def main() -> None:
     output.block(
         "Second-opinion gate: edit the active plan file's Completion Checklist to "
         "mark second-opinion done ('- [x] Second-opinion review') or add a skip "
-        f"reason ('- [x] Second-opinion review (skip: <reason>)'). Active plan: {plan_path}"
+        f"reason ('- [x] Second-opinion review (skip: <reason>)'). Active plan: {plan_path}. "
+        "If this plan is actually finished or abandoned, flip its frontmatter to "
+        "`status: complete` instead — it will keep gating unrelated new pipelines "
+        "until you do."
     )
 
 
