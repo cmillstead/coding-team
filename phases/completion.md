@@ -197,3 +197,5 @@ After the user chooses a completion option and it's been executed, print this bl
 > **Starting something new?** `/clear` then `/coding-team` with your next task. If it's an unfamiliar codebase, start with `/onboard` for a guided orientation.
 >
 > ---
+
+**Final step — this is the terminal phase.** Phase 6 is the end of the pipeline; there is no next phase to enter. Stopping here, after the user has chosen a completion option, is the one legitimate stop in the whole sequence.

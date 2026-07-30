@@ -74,8 +74,6 @@ After finding a matching plan, determine where the user left off:
 > **Progress:** <Tasks 1-N of M complete (last commit: <short sha> <message>)> OR <No tasks started yet>
 > **Next:** <Task N+1: <task name>> OR <Phase action>
 > **Tests:** <All passing | N failures | not yet checked>
->
-> Ready to continue? Proceed?
 > ---
 
 **Recovery heuristics by clear point:**

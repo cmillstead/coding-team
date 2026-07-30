@@ -145,7 +145,7 @@ After the user approves the design doc, print this block VERBATIM (do not paraph
 >
 > **Design doc approved.**
 >
-> **Next:** Phase 3 will write the spec and run automated review. "Proceed to Phase 3"
+> **Continuing to Phase 3** — writing the spec and running automated review.
 >
 > **After Phase 3:** The spec gets written to `docs/plans/`. Then Phase 4 produces the implementation plan.
 >
@@ -157,3 +157,5 @@ After the user approves the design doc, print this block VERBATIM (do not paraph
 > - `/prompt-craft audit` — if the design involves new agent prompts or skills, audit them now before they're baked into the plan
 >
 > ---
+
+**Final step — enter Phase 3.** The required approval was already given above — that is what triggered this block; it is not a second gate. Read `phases/spec-review.md` now and execute its first step. Do not re-summarize what was just approved and do not wait for a go-ahead phrase. **If the tier gate at the top of this file routed this task past the next phase, that routing wins** — enter the phase it named instead. If the user asks for design changes, stay in this phase and revise until the design is approved — do not enter Phase 3 early, and once it is approved do not stop to ask again.
