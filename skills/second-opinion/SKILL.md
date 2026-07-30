@@ -105,7 +105,7 @@ Independent review of a plan or diff. Use `codex review --base main` for diffs, 
 
 Always capture output: `2>&1 | tee /tmp/second-opinion-review-${REVIEW_ID}.txt`
 
-For plan reviews AND diff/code-fix re-reviews, iterate up to 5 rounds each. For plan reviews, use `codex exec resume`; address each issue with real improvements between rounds. The inter-round verification gate below applies before EVERY re-dispatch on BOTH paths. See reference.md for the iterative-revision protocol (both loops) and the verification gate.
+For plan reviews AND diff/code-fix re-reviews, iterate up to 2 rounds each — the DEFAULT CAP. Rounds beyond 2 run ONLY when the user explicitly asks for more in this session; findings still open at the cap are presented to the user with your fix/accept recommendation per finding, not looped on. Empirical basis for the cap: in logged multi-round gates, rounds 3+ predominantly found defects introduced by the previous round's own fixes (one gate self-reported "4-for-4 on prose fixes introducing prose defects") — the loop reviews itself, not the work. For plan reviews, use `codex exec resume`; address each issue with real improvements between rounds. The inter-round verification gate below applies before EVERY re-dispatch on BOTH paths. See reference.md for the iterative-revision protocol (both loops) and the verification gate.
 
 ### Inter-round verification gate — MANDATORY
 

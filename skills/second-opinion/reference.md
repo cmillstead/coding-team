@@ -66,7 +66,7 @@ Please re-review. End with VERDICT: APPROVED or VERDICT: REVISE" \
   2>&1 | tee /tmp/second-opinion-review-${REVIEW_ID}.txt
 ```
 
-Max 5 rounds. If `resume` fails (session expired), fall back to a fresh `codex exec` with prior context in the prompt.
+Max 2 rounds by default (more only at explicit user request — see SKILL.md Mode 1). If `resume` fails (session expired), fall back to a fresh `codex exec` with prior context in the prompt.
 
 ### Record PAUL plan-review PASS
 
@@ -105,7 +105,7 @@ When a diff/code review (`codex review --base main`, `codex review --uncommitted
 4. Summarize the fixes you made in response to the findings (so the re-review has visibility into what changed).
 5. Re-dispatch the diff review: `codex review --base main` (or `--uncommitted`), or `codex exec` with the updated `git diff`. Capture output as usual.
 
-Max 5 rounds, consistent with the plan-revision loop. If findings persist after the cap, present remaining findings to the user rather than looping further.
+Max 2 rounds by default, consistent with the plan-revision loop (more only at explicit user request). If findings persist after the cap, present remaining findings to the user with a fix/accept recommendation per finding rather than looping further.
 
 ### Challenge: adversarial review
 ```bash
