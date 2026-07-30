@@ -311,7 +311,7 @@ class TestParkedMergedBranchDetection:
         assert rc == 0
         assert err == ""
         log_content = log_file.read_text() if log_file.exists() else ""
-        merged_calls = [l for l in log_content.splitlines() if "--state merged" in l]
+        merged_calls = [line for line in log_content.splitlines() if "--state merged" in line]
         assert len(merged_calls) == 2
 
     def test_subdir_cwd_finds_root(self, tmp_path):
