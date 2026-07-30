@@ -4,9 +4,14 @@
 Only acts on the `coding-team` entry-point skill. Sub-skills (debug, second-opinion,
 harness-engineer, etc.) are designed to be invoked WITHIN the pipeline and pass through.
 
-PostToolUse on Skill (PreToolUse path is a no-op now):
+PostToolUse on Skill (PreToolUse path is a hard no-op):
   - If skill is "coding-team" -> enforce second-opinion gate via active-plan checkbox
   - Any other skill -> silent return
+
+A block emitted here is POST-EXECUTION FEEDBACK: the Skill tool has already run
+by the time this hook fires, and the block reason is shown to Claude to act on
+in its next turn — it does not undo or prevent the tool call that already
+happened.
 
 Second-opinion gate (PostToolUse):
   Reads the active plan file under $MAIN_ROOT/docs/plans/ — the unique plan whose
@@ -78,7 +83,14 @@ def main() -> None:
     if skill_name != "coding-team":
         return
 
-    is_post = "tool_result" in event
+    event_name = event.get("hook_event_name")
+    has_result = any(
+        event.get(k) is not None
+        for k in ("tool_response", "tool_result", "tool_output")
+    )
+    if event_name == "PreToolUse":
+        return                                    # hard no-op even with a result key
+    is_post = event_name == "PostToolUse" or has_result
     if not is_post:
         # PreToolUse path is now a no-op — recursion guard removed; re-entry resumes
         # via session-resume.md based on durable plan-file state.
