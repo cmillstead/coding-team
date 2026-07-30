@@ -454,7 +454,7 @@ hooks/                            # Claude Code hooks, deployed to ~/.claude/hoo
   paul-apply-agent-guard.py       #   Path B fence — blocks an Agent dispatch that executes a PAUL plan lacking a fresh Codex PASS
   paul-apply-review-guard.py      #   Path A fence — blocks /paul:apply when no fresh Codex PASS exists
   write-guard.py                  #   blocks orchestrator edits to instruction files during Phase 5
-  ci-orphan-detector.sh           #   SessionStart — detects and flags orphaned CI runs
+  ci-orphan-detector.sh           #   SessionStart — flags open PRs with failing CI, stale local branches, and checkouts parked on merged branches
   _lib/                           #   shared hook utilities
     __init__.py
     event.py                      #     event parsing
