@@ -29,7 +29,7 @@ After the user approves an approach, print this block VERBATIM (do not paraphras
 >
 > **Approach approved.**
 >
-> **Continue now:** "Proceed to Phase 2"
+> **Continuing to Phase 2.**
 >
 > [Only if context `used_percentage` is above 60%:]
 > **Context at N%.** Clear first: `/clear` then `/coding-team continue`
@@ -43,3 +43,5 @@ After the user approves an approach, print this block VERBATIM (do not paraphras
 > ---
 
 **If the user rejects all approaches** or says 'never mind': acknowledge, do NOT proceed to Phase 2. Ask if they want to explore a different direction or end the task.
+
+**Final step — enter Phase 2.** The required approval was already given above — that is what triggered this block; it is not a second gate. Read `phases/design-team.md` now and execute its first step. Do not re-summarize what was just approved and do not wait for a go-ahead phrase. **If the tier gate at the top of this file routed this task past the next phase, that routing wins** — enter the phase it named instead. **This step applies only on the approval branch.** If the user rejected all approaches, follow the rejection branch above instead and do not enter any phase.

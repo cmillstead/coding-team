@@ -51,7 +51,7 @@ After all tasks are executed and verified:
 >
 > **All tasks executed and verified.**
 >
-> **Next:** Phase 6 completion. "Proceed to Phase 6"
+> **Continuing to Phase 6** — completion.
 >
 > **Preview — offered again in Phase 6:**
 > - `/retrospective` — engineering retrospective (coding-team's, not gstack's `/retro`)
@@ -67,3 +67,5 @@ After all tasks are executed and verified:
 The plan's frontmatter `status` field stays `in-progress` through this phase — it is flipped to `complete` by the orchestrator at the end of Phase 6 (see `phases/completion.md` "Final: mark plan complete"). Post-execution-review only manages the second-opinion checklist line, not the frontmatter status.
 
 **User override:** If the user wants to skip second-opinion, edit the active plan file's Completion Checklist line to `- [x] Second-opinion review (skip: <reason>)`. The lifecycle hook reads this checkbox — verbal instructions alone will not bypass the gate.
+
+**Final step — enter Phase 6.** Read `phases/completion.md` now and execute its first step. Do not stop to summarize and do not wait for a go-ahead phrase from the user — the block above is a status print, not a question, and a passing gate verdict is not a completion.

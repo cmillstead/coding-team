@@ -15,7 +15,7 @@ After the plan passes review and is saved:
 
 2. Run: `command -v codex >/dev/null 2>&1` to check if Codex CLI is available.
 
-3. **If Codex is available AND the planned tier is ≥ Medium** (per `phases/task-weight.md`): offer the plan second-opinion (REQUIRED). If the planned tier is Trivial or Small: SKIP the plan second-opinion — proceed directly to step 4. Risk signals determine the framing of the offer, not whether to make it. Print this VERBATIM (substitute actual values), then STOP — do not print anything after this block. Your next message depends on the user's answer:
+3. **If Codex is available AND the planned tier is ≥ Medium** (per `phases/task-weight.md`): offer the plan second-opinion (REQUIRED). If the planned tier is Trivial or Small: SKIP the plan second-opinion — proceed directly to step 4. Risk signals determine the framing of the offer, not whether to make it. Print this VERBATIM (substitute actual values), then STOP — do not print anything after this block. This STOP applies only to this step's Y/n offer, not to step 4's print below. Your next message depends on the user's answer:
 
 > ---
 >
@@ -36,7 +36,7 @@ After the plan passes review and is saved:
 >
 > **Plan saved to `docs/plans/<actual-path>`.**
 >
-> **Next:** Phase 5 execution. "Proceed to Phase 5"
+> **Continuing to Phase 5** — execution.
 >
 > **Recommended before execution:**
 > - `/worktree` — set up an isolated workspace (offered automatically)
@@ -56,3 +56,5 @@ After the plan passes review and is saved:
 - "It's a small/trivial plan" — Trivial and Small plans skip the plan second-opinion (per `phases/task-weight.md` gate matrix). Medium+ plans run it. Tier-scoped skips are correct; unscoped "skip because small" is still a violation.
 - "Codex will slow things down" — the user decides whether to accept the offer. Your job is to present it, not pre-decide.
 - **User override (equal force):** If the user has said "never ask about second opinion" or "skip second-opinion gates" in this session, skip second-opinion in planning for the rest of the session. A valid user override is as authoritative as a tier-skip — honor it without resistance.
+
+**Final step — enter Phase 5.** Read `phases/execution.md` now and execute its first step. Do not stop to summarize and do not wait for a go-ahead phrase from the user — the block above is a status print, not a question, and a passing gate verdict is not a completion.

@@ -42,9 +42,11 @@ After the user confirms the spec, print this block VERBATIM (substitute the actu
 >
 > **Spec confirmed and saved to `docs/plans/<actual-path>`.**
 >
-> **Next:** Phase 4 will produce the implementation plan. "Proceed to Phase 4"
+> **Continuing to Phase 4** — producing the implementation plan.
 >
 > [Only if context `used_percentage` is above 60%:]
 > **Context at N%.** Clear first: `/clear` then `/coding-team continue`
 >
 > ---
+
+**Final step — enter Phase 4.** The required approval was already given above — that is what triggered this block; it is not a second gate. Read `phases/planning.md` now and execute its first step. Do not re-summarize what was just approved and do not wait for a go-ahead phrase. **If the tier gate at the top of this file routed this task past the next phase, that routing wins** — enter the phase it named instead. If the user asks for spec changes, stay in this phase and revise until the written spec is confirmed — do not enter Phase 4 early, and once it is confirmed do not stop to ask again.

@@ -1,6 +1,6 @@
 ## Documentation Drift Scan (after all tasks)
 
-After plan completeness verification passes and before proceeding to Phase 6, check for documentation drift across the full diff.
+After plan completeness verification passes, check for documentation drift across the full diff before returning to `execution.md` (see Final step below).
 
 **Tier gate:** SKIP this scan ONLY when the EFFECTIVE tier (from the single
 end-of-execution recompute in `phases/task-weight.md`) is Trivial. Small/Medium/Large
@@ -51,4 +51,6 @@ Skip the scan (regardless of tier) when ANY of these hold:
 
 3. **If MUST_FIX findings:** dispatch an implementer via Agent tool to fix the doc issues as a single task.
 
-4. **If only NICE_TO_HAVE or no drift:** proceed to Phase 6. Note NICE_TO_HAVE items in the completion summary for `/doc-sync` to pick up.
+4. **If only NICE_TO_HAVE or no drift:** continue. Note NICE_TO_HAVE items in the completion summary for `/doc-sync` to pick up.
+
+**Final step — return to `execution.md`.** The scan is complete; continue from the point that invoked this scan (`execution.md:188`) and carry on through the rest of Phase 5. Do not re-read `execution.md` from the top and do not re-enter Phase 5 — the tier recompute and QA review above `:188` have already run for this feature.
