@@ -445,7 +445,7 @@ hooks/                            # Claude Code hooks, deployed to ~/.claude/hoo
   session-start-dispatcher.py     #   SessionStart dispatcher — runs hook-health-check, deploy-drift-check, ci-orphan-detector.sh, and related checks as subprocesses
   builder-self-check.py           #   validates implementer agent output quality
   codesight-hooks.py              #   codesight indexing integration
-  coding-team-lifecycle.py        #   session lifecycle management (start/end markers)
+  coding-team-lifecycle.py        #   PostToolUse(Skill) — second-opinion checkbox gate, read from plan frontmatter
   deploy-drift-check.py           #   SessionStart — detects source↔deployed hook drift
   git-safety-guard.py             #   prevents force push, main branch commits, etc.
   hook-health-check.py            #   SessionStart — verifies all Python hooks are healthy

@@ -4,9 +4,12 @@
 Only acts on the `coding-team` entry-point skill. Sub-skills (debug, second-opinion,
 harness-engineer, etc.) are designed to be invoked WITHIN the pipeline and pass through.
 
-PostToolUse on Skill (PreToolUse path is a no-op now):
+PostToolUse on Skill (PreToolUse path is a hard no-op):
   - If skill is "coding-team" -> enforce second-opinion gate via active-plan checkbox
   - Any other skill -> silent return
+
+A block emitted here is post-execution feedback: the tool has already run,
+and the reason is shown to Claude.
 
 Second-opinion gate (PostToolUse):
   Reads the active plan file under $MAIN_ROOT/docs/plans/ — the unique plan whose
@@ -78,7 +81,20 @@ def main() -> None:
     if skill_name != "coding-team":
         return
 
-    is_post = "tool_result" in event
+    event_name = event.get("hook_event_name")
+    has_result = any(
+        event.get(k) is not None
+        # tool_output is speculative/unobserved fallback, not a confirmed payload
+        # key — the live-probe finding (harness-modularization
+        # .paul/phases/01-spine/01-02-PROBE-FINDING.md:24-26) disproved it as
+        # something a subagent wrongly asserted from docs. Kept anyway: a
+        # harmless widened fallback costs nothing, but do not cite its
+        # presence here as evidence of a real contract.
+        for k in ("tool_response", "tool_result", "tool_output")
+    )
+    if event_name == "PreToolUse":
+        return                                    # hard no-op even with a result key
+    is_post = event_name == "PostToolUse" or has_result
     if not is_post:
         # PreToolUse path is now a no-op — recursion guard removed; re-entry resumes
         # via session-resume.md based on durable plan-file state.
@@ -118,7 +134,10 @@ def main() -> None:
     output.block(
         "Second-opinion gate: edit the active plan file's Completion Checklist to "
         "mark second-opinion done ('- [x] Second-opinion review') or add a skip "
-        f"reason ('- [x] Second-opinion review (skip: <reason>)'). Active plan: {plan_path}"
+        f"reason ('- [x] Second-opinion review (skip: <reason>)'). Active plan: {plan_path}. "
+        "If this plan is actually finished or abandoned, flip its frontmatter to "
+        "`status: complete` instead — it will keep gating unrelated new pipelines "
+        "until you do."
     )
 
 

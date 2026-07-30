@@ -50,14 +50,15 @@ def _run_hook(event: dict, cwd: Path) -> subprocess.CompletedProcess:
 def _post_event(skill: str = "coding-team") -> dict:
     """PostToolUse event for a Skill invocation."""
     return {
+        "hook_event_name": "PostToolUse",
         "tool_name": "Skill",
         "tool_input": {"skill": skill},
-        "tool_result": "done",
+        "tool_response": "done",
     }
 
 
 def _pre_event(skill: str = "coding-team") -> dict:
-    """PreToolUse event (no tool_result key)."""
+    """PreToolUse event (no result key)."""
     return {
         "tool_name": "Skill",
         "tool_input": {"skill": skill},
@@ -376,3 +377,131 @@ def test_non_coding_team_skill_skips(repo: Path):
     result = _run_hook(_post_event(skill="debug"), cwd=repo)
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == ""
+
+
+def test_hook_event_name_absent_falls_back_to_result_key(repo: Path):
+    """No `hook_event_name`, but `tool_response` present -> treated as PostToolUse."""
+    _write_plan(repo, "plan.md", _active_plan("[ ]"))
+    event = {
+        "tool_name": "Skill",
+        "tool_input": {"skill": "coding-team"},
+        "tool_response": "done",
+    }
+    result = _run_hook(event, cwd=repo)
+    assert result.returncode == 0, result.stderr
+    parsed = _parse_or_none(result.stdout)
+    assert parsed is not None, f"expected JSON output, got {result.stdout!r}"
+    assert parsed.get("decision") == "block"
+    assert "second-opinion" in parsed.get("reason", "").lower()
+
+
+def test_hook_event_name_pretooluse_is_noop(repo: Path):
+    """`hook_event_name: PreToolUse` -> no-op EVEN IF a result key is present."""
+    _write_plan(repo, "plan.md", _active_plan("[ ]"))
+    event = {
+        "hook_event_name": "PreToolUse",
+        "tool_name": "Skill",
+        "tool_input": {"skill": "coding-team"},
+        "tool_response": "done",
+    }
+    result = _run_hook(event, cwd=repo)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == ""
+    assert result.stderr.strip() == ""
+
+
+def test_null_tool_response_is_not_post(repo: Path):
+    """`{"tool_response": None}` with no `hook_event_name` -> NOT PostToolUse."""
+    _write_plan(repo, "plan.md", _active_plan("[ ]"))
+    event = {
+        "tool_name": "Skill",
+        "tool_input": {"skill": "coding-team"},
+        "tool_response": None,
+    }
+    result = _run_hook(event, cwd=repo)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == ""
+    assert result.stderr.strip() == ""
+
+
+def test_unknown_event_name_with_result_still_posts(repo: Path):
+    """An unrecognized `hook_event_name` still falls back to result-key detection.
+
+    Regression test for the discriminator's whole rationale: a renamed event
+    name (e.g. a future `PostToolUseV2`) must not silently re-inert the hook.
+    """
+    _write_plan(repo, "plan.md", _active_plan("[ ]"))
+    event = {
+        "hook_event_name": "PostToolUseV2",
+        "tool_name": "Skill",
+        "tool_input": {"skill": "coding-team"},
+        "tool_response": "done",
+    }
+    result = _run_hook(event, cwd=repo)
+    assert result.returncode == 0, result.stderr
+    parsed = _parse_or_none(result.stdout)
+    assert parsed is not None, f"expected JSON output, got {result.stdout!r}"
+    assert parsed.get("decision") == "block"
+    assert "second-opinion" in parsed.get("reason", "").lower()
+
+
+def test_hook_event_name_postuse_with_no_result_key_still_posts(repo: Path):
+    """`hook_event_name: PostToolUse` alone (no result key at all) -> block.
+
+    QA F3: pins the `event_name == "PostToolUse"` half of the discriminator
+    independently of `has_result`. Without this test, replacing the whole
+    disjunction `event_name == "PostToolUse" or has_result` with plain
+    `has_result` still passes the full suite (verified by experiment: 1081
+    passed, 0 failed) because every OTHER "post" fixture also happens to
+    carry a result key. This is the durable half — the one that still
+    detects PostToolUse after a *future* payload-key rename, which is
+    exactly the failure class that created this task.
+    """
+    _write_plan(repo, "plan.md", _active_plan("[ ]"))
+    event = {
+        "hook_event_name": "PostToolUse",
+        "tool_name": "Skill",
+        "tool_input": {"skill": "coding-team"},
+    }
+    result = _run_hook(event, cwd=repo)
+    assert result.returncode == 0, result.stderr
+    parsed = _parse_or_none(result.stdout)
+    assert parsed is not None, f"expected JSON output, got {result.stdout!r}"
+    assert parsed.get("decision") == "block"
+    assert "second-opinion" in parsed.get("reason", "").lower()
+
+
+def test_stale_armed_plan_blocks_new_pipeline_entry(repo: Path):
+    """A single leftover `status: in-progress` plan with an unchecked box
+    blocks the FIRST invocation of an unrelated NEW coding-team pipeline.
+
+    QA F4: distinct from `test_unchecked_blocks` in INTENT, not mechanism —
+    documents the newly-live consequence of re-arming this hook. Before this
+    fix, an abandoned/crashed plan's `status: in-progress` was inert and had
+    no user-visible effect (the hook was dead). Now it gates every
+    subsequent `Skill(coding-team)` call, including one that has nothing to
+    do with the stale plan, until someone flips its frontmatter.
+    """
+    _write_plan(repo, "abandoned-plan.md", _active_plan("[ ]"))
+    result = _run_hook(_post_event(skill="coding-team"), cwd=repo)
+    assert result.returncode == 0, result.stderr
+    parsed = _parse_or_none(result.stdout)
+    assert parsed is not None, f"expected JSON output, got {result.stdout!r}"
+    assert parsed.get("decision") == "block"
+    reason = parsed.get("reason", "")
+    assert "second-opinion" in reason.lower()
+    assert "abandoned-plan.md" in reason
+
+
+def test_unchecked_block_reason_includes_stale_plan_remedy(repo: Path):
+    """QA F4: block reason names BOTH remedies — mark the checkbox done, or
+    (if the plan is actually finished/abandoned) flip its frontmatter to
+    `status: complete` instead of leaving it gating unrelated pipelines."""
+    _write_plan(repo, "plan.md", _active_plan("[ ]"))
+    result = _run_hook(_post_event(), cwd=repo)
+    assert result.returncode == 0, result.stderr
+    parsed = _parse_or_none(result.stdout)
+    assert parsed is not None, f"expected JSON output, got {result.stdout!r}"
+    reason = parsed.get("reason", "")
+    assert "second-opinion" in reason.lower()
+    assert "status: complete" in reason
