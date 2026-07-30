@@ -21,6 +21,8 @@ from pathlib import Path
 
 import pytest
 
+from .test_coding_team_lifecycle import _active_plan, _init_repo, _write_plan
+
 HOOKS_DIR = Path(__file__).resolve().parent.parent  # tests/ -> hooks/
 POSTTOOLUSE_DISPATCHER = HOOKS_DIR / "posttooluse-dispatcher.py"
 USAGE_LOG = Path.home() / ".config" / "codesight-mcp" / "usage.log"
@@ -35,8 +37,16 @@ def _run_script(
     script: Path,
     event: dict,
     env: dict | None = None,
+    cwd: Path | None = None,
 ) -> tuple[str, int]:
-    """Run hook script via subprocess with event on stdin. Return (stdout, returncode)."""
+    """Run hook script via subprocess with event on stdin. Return (stdout, returncode).
+
+    `cwd` defaults to None (inherit the test process's cwd), matching every
+    pre-existing caller. Pass it explicitly for hooks that resolve state from
+    the working directory (e.g. coding-team-lifecycle.py's active-plan lookup
+    via git) — see `test_coding_team_lifecycle.py`'s `_run_hook`, which this
+    mirrors.
+    """
     merged_env = {**os.environ, **(env or {})}
     result = subprocess.run(
         [sys.executable, str(script)],
@@ -45,6 +55,7 @@ def _run_script(
         text=True,
         timeout=20,
         env=merged_env,
+        cwd=str(cwd) if cwd is not None else None,
     )
     return result.stdout, result.returncode
 
@@ -363,9 +374,10 @@ class TestCodingTeamLifecycle:
     @pytest.fixture
     def non_ct_skill_event(self):
         return {
+            "hook_event_name": "PostToolUse",
             "tool_name": "Skill",
             "tool_input": {"skill": "some-other-skill"},
-            "tool_result": {"success": True},
+            "tool_response": {"success": True},
         }
 
     def test_exits_0(self, non_ct_skill_event):
@@ -375,6 +387,73 @@ class TestCodingTeamLifecycle:
     def test_silent_for_non_ct_skill(self, non_ct_skill_event):
         out, _ = _run_script(POSTTOOLUSE_DISPATCHER, non_ct_skill_event)
         assert '"decision": "block"' not in out
+
+
+class TestLifecycleDeadKeyEndToEnd:
+    """T1b: real dispatcher + real coding-team-lifecycle.py, dead-key regression.
+
+    Unlike TestCodingTeamLifecycle above (which stubs nothing but only checks
+    silence for a non-coding-team skill), this class runs the actual
+    second-opinion BLOCK path end-to-end: real subprocess dispatcher, real
+    subprocess lifecycle hook, real temp git repo with an unchecked
+    in-progress plan. No stub handlers — see `_run_handler` unit tests above
+    for that pattern; it does not apply here.
+
+    The CONTROL (legacy `tool_result` key, already recognized by shipped
+    code) must block on its own — that is what proves the fixture (git init,
+    plan file, cwd wiring) is genuinely exercised via the real discovery path,
+    not silently falling through for an unrelated reason (missing git init,
+    wrong cwd, ambiguous plan). Only once the control is trusted does the
+    EXPERIMENT (`tool_response`, the real production key) mean anything:
+    empty before T2, blocking after.
+    """
+
+    @pytest.fixture
+    def repo_and_plan(self, tmp_path: Path):
+        _init_repo(tmp_path)
+        plan = _write_plan(tmp_path, "plan.md", _active_plan("[ ]"))
+        return tmp_path, plan
+
+    def test_control_legacy_tool_result_key_blocks(self, repo_and_plan):
+        """CONTROL: shipped code recognizes `tool_result` and blocks via the
+        second-opinion branch, naming the temp plan path."""
+        repo, plan = repo_and_plan
+        event = {
+            "hook_event_name": "PostToolUse",
+            "tool_name": "Skill",
+            "tool_input": {"skill": "coding-team"},
+            "tool_result": "done",
+        }
+        out, rc = _run_script(POSTTOOLUSE_DISPATCHER, event, cwd=repo)
+        assert rc == 0
+        parsed = json.loads(out) if out.strip() else None
+        assert parsed is not None, f"CONTROL failed — expected block, got {out!r}"
+        assert parsed.get("decision") == "block"
+        reason = parsed.get("reason", "")
+        assert "second-opinion" in reason.lower()
+        assert str(plan) in reason
+
+    def test_experiment_tool_response_key_blocks(self, repo_and_plan):
+        """EXPERIMENT: the real PostToolUse key `tool_response` must also
+        block, with a reason naming the second-opinion branch and plan path.
+
+        Empty stdout before T2 (this is the dead-key defect this task fixes);
+        blocks after T2."""
+        repo, plan = repo_and_plan
+        event = {
+            "hook_event_name": "PostToolUse",
+            "tool_name": "Skill",
+            "tool_input": {"skill": "coding-team"},
+            "tool_response": "done",
+        }
+        out, rc = _run_script(POSTTOOLUSE_DISPATCHER, event, cwd=repo)
+        assert rc == 0
+        parsed = json.loads(out) if out.strip() else None
+        assert parsed is not None, f"expected block, got {out!r}"
+        assert parsed.get("decision") == "block"
+        reason = parsed.get("reason", "")
+        assert "second-opinion" in reason.lower()
+        assert str(plan) in reason
 
 
 class TestBuilderSelfCheck:

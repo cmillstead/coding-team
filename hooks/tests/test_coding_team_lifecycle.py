@@ -50,14 +50,15 @@ def _run_hook(event: dict, cwd: Path) -> subprocess.CompletedProcess:
 def _post_event(skill: str = "coding-team") -> dict:
     """PostToolUse event for a Skill invocation."""
     return {
+        "hook_event_name": "PostToolUse",
         "tool_name": "Skill",
         "tool_input": {"skill": skill},
-        "tool_result": "done",
+        "tool_response": "done",
     }
 
 
 def _pre_event(skill: str = "coding-team") -> dict:
-    """PreToolUse event (no tool_result key)."""
+    """PreToolUse event (no result key)."""
     return {
         "tool_name": "Skill",
         "tool_input": {"skill": skill},
@@ -376,3 +377,69 @@ def test_non_coding_team_skill_skips(repo: Path):
     result = _run_hook(_post_event(skill="debug"), cwd=repo)
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == ""
+
+
+def test_hook_event_name_absent_falls_back_to_result_key(repo: Path):
+    """No `hook_event_name`, but `tool_response` present -> treated as PostToolUse."""
+    _write_plan(repo, "plan.md", _active_plan("[ ]"))
+    event = {
+        "tool_name": "Skill",
+        "tool_input": {"skill": "coding-team"},
+        "tool_response": "done",
+    }
+    result = _run_hook(event, cwd=repo)
+    assert result.returncode == 0, result.stderr
+    parsed = _parse_or_none(result.stdout)
+    assert parsed is not None, f"expected JSON output, got {result.stdout!r}"
+    assert parsed.get("decision") == "block"
+    assert "second-opinion" in parsed.get("reason", "").lower()
+
+
+def test_hook_event_name_pretooluse_is_noop(repo: Path):
+    """`hook_event_name: PreToolUse` -> no-op EVEN IF a result key is present."""
+    _write_plan(repo, "plan.md", _active_plan("[ ]"))
+    event = {
+        "hook_event_name": "PreToolUse",
+        "tool_name": "Skill",
+        "tool_input": {"skill": "coding-team"},
+        "tool_response": "done",
+    }
+    result = _run_hook(event, cwd=repo)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == ""
+    assert result.stderr.strip() == ""
+
+
+def test_null_tool_response_is_not_post(repo: Path):
+    """`{"tool_response": None}` with no `hook_event_name` -> NOT PostToolUse."""
+    _write_plan(repo, "plan.md", _active_plan("[ ]"))
+    event = {
+        "tool_name": "Skill",
+        "tool_input": {"skill": "coding-team"},
+        "tool_response": None,
+    }
+    result = _run_hook(event, cwd=repo)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == ""
+    assert result.stderr.strip() == ""
+
+
+def test_unknown_event_name_with_result_still_posts(repo: Path):
+    """An unrecognized `hook_event_name` still falls back to result-key detection.
+
+    Regression test for the discriminator's whole rationale: a renamed event
+    name (e.g. a future `PostToolUseV2`) must not silently re-inert the hook.
+    """
+    _write_plan(repo, "plan.md", _active_plan("[ ]"))
+    event = {
+        "hook_event_name": "PostToolUseV2",
+        "tool_name": "Skill",
+        "tool_input": {"skill": "coding-team"},
+        "tool_response": "done",
+    }
+    result = _run_hook(event, cwd=repo)
+    assert result.returncode == 0, result.stderr
+    parsed = _parse_or_none(result.stdout)
+    assert parsed is not None, f"expected JSON output, got {result.stdout!r}"
+    assert parsed.get("decision") == "block"
+    assert "second-opinion" in parsed.get("reason", "").lower()
