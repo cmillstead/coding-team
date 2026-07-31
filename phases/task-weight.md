@@ -55,7 +55,7 @@ A task has a risk signal if it DOES any of:
 | Wiki article | SKIP | SKIP unless patterns | RUN | RUN |
 | Decision-log prompt | SKIP | RUN | RUN | RUN |
 | Completion summary file | SKIP | RUN | RUN | RUN |
-| Codex `challenge` | SKIP | SKIP | RUN if trust-boundary | RUN if trust-boundary |
+| Codex `challenge` | SKIP (name in report) | SKIP (name in report) | RUN if trust-boundary | RUN if trust-boundary |
 
 Reading rule: **Trivial** skips ALL discretionary gates (single haiku task, one test+lint run only). **Small** additionally KEEPS the QA reviewer, the per-task verification subagent, AND the post-exec Codex `review` — it only sheds the design team, the plan Codex gate, and wiki/decision-log ceremony. The Trivial-vs-Small difference is exactly: QA reviewer + verification subagent + post-exec review + doc-drift + completion summary all RUN at Small and SKIP at Trivial. Every gate task in this plan (Tasks 9, 9a, 11, 12, 13, 14, 17, 18, 19) must encode precisely the column values above — no task invents a different fast lane. The END-OF-EXECUTION gates (QA, doc-drift, verification sweep, post-exec review, Phase-6) all read the EFFECTIVE tier from the single recompute (Task 9a); only the pre-diff gates (dialogue, design team, plan Codex, spec reviewer) read the planned tier.
 
@@ -69,7 +69,9 @@ These skips are SCOPED to the quantified tiers + risk signals above. An UNSCOPED
 
 ## Canonical Codex principle (stated ONCE here)
 
-**Codex `challenge` RUNS at Medium or Large when the diff touches a trust boundary; otherwise it SKIPS.** "Touches a trust boundary" means the diff carries the **security / trust-boundary**, **payment / billing / financial**, or **data-deletion / destructive-data** risk signal from the semantic checklist above — judged by what the diff DOES, not by filename. `review` is tier-gated per the matrix. Neither is a question to the user: both are decided here. Other files reference this line; where they restate it for local readability (e.g. inside a printed user-facing block), they attribute it here.
+**Codex `challenge` RUNS at Medium or Large when the diff touches a trust boundary; otherwise it SKIPS.** "Touches a trust boundary" means the diff carries the **security / trust-boundary**, **payment / billing / financial**, or **data-deletion / destructive-data** risk signal from the semantic checklist above — judged by what the diff DOES, not by filename. `review` is tier-gated per the matrix. Neither is a question to the user: both are decided here.
+
+**When `challenge` SKIPS at Trivial/Small, name it in the completion report** under "Gates not run" (`phases/completion.md`), with the `/second-opinion challenge` invocation. SKIP means "does not run by default," never "is hidden." This preserves the opt-in that the old `offered` cell provided without reintroducing a mid-pipeline question. Note the risk ladder makes this safe by construction: any diff carrying a security, payment, destructive-data, public-contract, schema, dependency, or instruction-file signal is Medium MINIMUM, so trust-boundary work cannot reach the SKIP cells at all. Other files reference this line; where they restate it for local readability (e.g. inside a printed user-facing block), they attribute it here.
 
 ## Classification procedure
 

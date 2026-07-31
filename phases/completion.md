@@ -95,6 +95,9 @@ After all tasks, produce a summary that includes audit findings across all round
 
 ### Out-of-scope observations
 - [anything auditors flagged outside the task scope]
+
+### Gates not run
+- [At Trivial/Small:] Codex `challenge` skipped per the matrix — `/second-opinion challenge` runs it on this diff. Report only, never ask (`phases/task-weight.md`).
 ```
 
 Recurring patterns are the signal — if the same finding type appears across multiple tasks or rounds, it indicates a systemic issue worth noting for future work.
