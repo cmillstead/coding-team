@@ -455,6 +455,69 @@ class TestCheckInstructionFileLengths:
         for item in result:
             assert isinstance(item, str)
 
+    def test_nested_submodule_phases_and_agents_are_checked(self, hhc, tmp_path):
+        """Production root is ~/.claude, where phase files live under skills/<sub>/.
+
+        `__file__` is NOT symlink-resolved and the deployed hook is invoked as
+        ~/.claude/hooks/hook-health-check.py, so in production repo_root is
+        ~/.claude -- where `phases/*.md` matches NOTHING because ~/.claude has no
+        phases/ dir. The real phase files sit at skills/coding-team/phases/*.md
+        and went unchecked. This pins the nested globs that close that gap.
+
+        Calls the real function against a real tree (GP#1) -- it does NOT
+        reimplement the glob loop, unlike the older test above.
+        """
+        long = "\n".join(f"line {i}" for i in range(250))
+        short = "\n".join(f"line {i}" for i in range(10))
+
+        (tmp_path / "skills" / "coding-team" / "phases").mkdir(parents=True)
+        (tmp_path / "skills" / "coding-team" / "agents").mkdir(parents=True)
+        (tmp_path / "skills" / "coding-team" / "phases" / "big.md").write_text(long)
+        (tmp_path / "skills" / "coding-team" / "phases" / "small.md").write_text(short)
+        (tmp_path / "skills" / "coding-team" / "agents" / "big.md").write_text(long)
+
+        warnings = hhc.check_instruction_file_lengths(repo_root=tmp_path)
+        joined = "\n".join(warnings)
+
+        assert "skills/coding-team/phases/big.md" in joined
+        assert "skills/coding-team/agents/big.md" in joined
+        assert "small.md" not in joined
+
+    def test_no_duplicate_warning_when_globs_overlap(self, hhc, tmp_path):
+        """A file reachable by two patterns is reported once, not twice.
+
+        Under the pytest root the submodule's own `phases/*.md` already matches;
+        the nested `skills/*/phases/*.md` must not double-report anything.
+        """
+        long = "\n".join(f"line {i}" for i in range(250))
+        (tmp_path / "phases").mkdir(parents=True)
+        (tmp_path / "phases" / "big.md").write_text(long)
+
+        warnings = hhc.check_instruction_file_lengths(repo_root=tmp_path)
+
+        assert len([w for w in warnings if "phases/big.md" in w]) == 1
+
+    def test_symlinked_agent_reported_once_not_twice(self, hhc, tmp_path):
+        """~/.claude/agents/x.md symlinks to skills/coding-team/agents/x.md.
+
+        Both `agents/*.md` and `skills/*/agents/*.md` therefore yield the SAME
+        underlying file under two different paths. Deduping on the unresolved glob
+        path misses that and double-reports it; dedupe is on the resolved target.
+        Builds a real symlink because the property under test IS symlink traversal.
+        """
+        long = "\n".join(f"line {i}" for i in range(250))
+        real_dir = tmp_path / "skills" / "coding-team" / "agents"
+        real_dir.mkdir(parents=True)
+        real = real_dir / "bloated.md"
+        real.write_text(long)
+
+        (tmp_path / "agents").mkdir()
+        (tmp_path / "agents" / "bloated.md").symlink_to(real)
+
+        warnings = hhc.check_instruction_file_lengths(repo_root=tmp_path)
+
+        assert len([w for w in warnings if "bloated.md" in w]) == 1
+
 
 class TestCheckAlwaysLoadedSurface:
     """Aggregate check over the DEPLOYED always-loaded surface.

@@ -43,7 +43,7 @@ Before writing a word, read the code:
 | Non-obvious setup steps | Getting Started tutorial |
 | Multiple configuration options | Configuration reference |
 
-Ask the user which to prioritize if multiple are needed. Default to README first.
+If multiple are needed, write them in table order — README first.
 
 ### 3. Write with these principles
 

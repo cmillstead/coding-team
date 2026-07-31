@@ -189,23 +189,68 @@ def check_external_hook(hook_path: Path) -> str | None:
         return None  # Unknown type, skip silently
 
 
-def check_instruction_file_lengths() -> list[str]:
+def check_instruction_file_lengths(repo_root: Path | None = None) -> list[str]:
     """Check that instruction files (agents, phases, skills) are under 200 lines.
 
     Case study #24: beyond ~200 lines, MANDATORY labels stop working.
     Files over 200 lines should be split or have content extracted to on-demand files.
+
+    `repo_root` defaults to `Path(__file__).parent.parent`, which resolves
+    DIFFERENTLY in the two contexts this runs in — and that divergence is why the
+    nested globs below exist:
+
+      - under pytest, `__file__` is this repo's `hooks/`, so the root is THIS repo
+        and the flat `agents/*.md` / `phases/*.md` patterns match;
+      - in production the deployed hook is invoked as
+        `~/.claude/hooks/hook-health-check.py` and `__file__` is NOT
+        symlink-resolved, so the root is `~/.claude` — which has an `agents/`
+        dir (symlinks into this repo, which is why ct-implementer.md was
+        reported) but NO `phases/` dir at all. The flat `phases/*.md` pattern
+        therefore matched NOTHING in production, and every phase file went
+        unchecked. Three were over threshold when this was found.
+
+    The nested `skills/*/phases/*.md` and `skills/*/agents/*.md` patterns close
+    that gap from the `~/.claude` root. They are additive and root-agnostic: under
+    the pytest root they match nothing the flat patterns did not already cover, so
+    no expectation changes and nothing is double-reported (results are deduped
+    below regardless).
+
+    Do NOT "fix" this by switching to `Path.home()`. The sibling
+    check_always_loaded_surface() uses Path.home() deliberately because it measures
+    the DEPLOYED surface in both contexts; this function measures whichever repo it
+    ships inside, and repointing it at ~/.claude would change the file set under
+    test — the exact regression that sibling's docstring warns about.
     """
     warnings = []
-    repo_root = Path(__file__).parent.parent
+    if repo_root is None:
+        repo_root = Path(__file__).parent.parent
 
     instruction_globs = [
         "agents/*.md",
         "phases/*.md",
         "skills/*/SKILL.md",
+        # Nested: the ~/.claude production root reaches submodule instruction
+        # files only through skills/<submodule>/.
+        "skills/*/phases/*.md",
+        "skills/*/agents/*.md",
     ]
 
+    # Dedupe on the RESOLVED target, not the glob path. ~/.claude/agents/x.md is a
+    # symlink to skills/coding-team/agents/x.md, so both patterns yield the same
+    # underlying file under two different paths — comparing unresolved paths would
+    # report it twice. Falls back to the raw path when resolution fails (broken
+    # symlink / ELOOP), which at worst restores the old duplicate rather than
+    # dropping a real warning.
+    seen: set[Path] = set()
     for pattern in instruction_globs:
         for filepath in repo_root.glob(pattern):
+            try:
+                key = filepath.resolve()
+            except (OSError, ValueError, RuntimeError):
+                key = filepath
+            if key in seen:
+                continue
+            seen.add(key)
             try:
                 line_count = len(filepath.read_text().splitlines())
                 if line_count > 200:
