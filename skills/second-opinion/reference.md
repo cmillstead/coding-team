@@ -110,7 +110,9 @@ Max 2 rounds by default, consistent with the plan-revision loop (more only at ex
 ### Challenge: adversarial review
 ```bash
 REVIEW_ID=$(uuidgen | tr '[:upper:]' '[:lower:]' | head -c 8)
+# Challenge escalates reasoning effort to xhigh; the global default stays high (~/.codex/config.toml).
 codex exec \
+  -c model_reasoning_effort=xhigh \
   "You are an adversarial code reviewer. Your job is to BREAK this code.
 
 Run 'git diff main' to see the changes, then read the surrounding codebase for context.
