@@ -62,14 +62,22 @@ change; no renumber; table-safe because an inline-code span contains no `|`). Gr
 - **floor** — reserved for always-applicable entries (P1–P4 plan-symbol concerns; any
   untagged/unclassifiable entry defaults here). A `floor` entry is always `applicable` WHEN IN SCOPE — scope-mismatch is checked first, so a `scope:plan` floor entry (P1–P4) is correctly scope-dismissed in a pure `diff` review.
 
-**Category enum (20):**
+**Category enum (22):**
 `plan-symbol · negative-existence · ambiguity-guard · helper-reuse · metric-aggregate ·
 path-equality · sentinel-semantics · ci-config · lossy-stash · test-hermeticity · command-grammar ·
 select-threading · concurrency-lock · default-flip · migration-parity · tenant-isolation ·
-test-fixture-completeness · uniqueness-enforcement · input-shape-guard · vacuous-assertion`
+test-fixture-completeness · uniqueness-enforcement · input-shape-guard · vacuous-assertion ·
+dual-resolution-policy · correction-provenance`
 
-(`test-fixture-completeness`, `uniqueness-enforcement`, `input-shape-guard`, and `vacuous-assertion`
-are `reasoning-shape` — no grep battery; they always deep-check when in scope. See C20, C21, C22, C29.)
+(`test-fixture-completeness`, `uniqueness-enforcement`, `input-shape-guard`, `vacuous-assertion`,
+`dual-resolution-policy`, and `correction-provenance` are `reasoning-shape` — no grep battery; they
+always deep-check when in scope. See C20, C21, C22, C29, C28, C30.)
+
+`dual-resolution-policy` (C28) was live and in use before it was listed here, so the engine read it
+as off-enum and floored C28 as untagged. That failed SAFE — an untagged entry always deep-checks,
+and a `reasoning-shape` entry is never dismissible anyway — so the omission changed no outcome; it
+is listed now so the tag is recognized rather than tolerated. Registered 2026-08-05 alongside
+`correction-provenance` (C30).
 
 ## Grep battery (provable categories only)
 
