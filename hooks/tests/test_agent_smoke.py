@@ -12,7 +12,12 @@ import yaml
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 AGENTS_DIR = REPO_ROOT / "agents"
 
-VALID_MODELS = {"opus", "sonnet", "haiku"}
+# Mirrors the Agent tool's own `model` parameter enum — the only authority for
+# tier names, since this repo has none. A closed, un-maintained copy of this set
+# is what let a stale tier survive unnoticed (TRK-126); extend it whenever a new
+# tier ships. Reaching this assertion at all is now rare: agent files carry no
+# `model` key, so it only fires on a deliberately re-added tier.
+VALID_MODELS = {"opus", "sonnet", "haiku", "fable"}
 
 KNOWN_TOOLS = {"Read", "Edit", "Write", "Bash", "Glob", "Grep", "LSP", "Agent"}
 
@@ -92,11 +97,20 @@ class TestFrontmatter:
 
     def test_required_fields_present(self, agent_path: Path):
         fm, _ = _parse_frontmatter(agent_path.read_text())
-        for field in ("name", "description", "model"):
+        for field in ("name", "description"):
             assert field in fm, f"Missing required field: {field}"
 
     def test_model_is_valid_tier(self, agent_path: Path):
+        """Validate the tier only when one is present.
+
+        Agent files normally carry no `model` key — a dispatch inherits the
+        operator's session model (TRK-126). scripts/check-model-tiers.py owns
+        whether a tier may exist at all; this test owns whether a tier that
+        does exist names something real.
+        """
         fm, _ = _parse_frontmatter(agent_path.read_text())
+        if "model" not in fm:
+            pytest.skip("no model tier — the agent inherits the session model")
         assert fm["model"] in VALID_MODELS, (
             f"Invalid model '{fm['model']}' — must be one of {VALID_MODELS}"
         )
