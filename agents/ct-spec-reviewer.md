@@ -1,7 +1,6 @@
 ---
 name: Coding Team Spec Reviewer
 description: Verifies implementer built what was requested — spec compliance and TDD discipline check (read-only)
-model: haiku
 tools:
   - mcp__codesight__query
   - Read

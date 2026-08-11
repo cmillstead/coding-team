@@ -1,7 +1,6 @@
 ---
 name: Coding Team Simplify Auditor
 description: Audits recently changed code for unnecessary complexity, dead code, and naming issues (read-only)
-model: haiku
 tools:
   - mcp__codesight__query
   - Read

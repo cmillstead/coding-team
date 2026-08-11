@@ -1,7 +1,6 @@
 ---
 name: Coding Team Plan Doc Reviewer
 description: Reviews implementation plans for completeness, spec alignment, task decomposition, and finding coverage (read-only)
-model: sonnet
 tools:
   - Read
   - Glob

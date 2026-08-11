@@ -1,7 +1,6 @@
 ---
 name: Coding Team Prompt-Craft Auditor
 description: Audits CC instruction files for clarity, actionability, and correct CC behavior — triggers on PROMPT_CRAFT_ADVISORY tasks (read-only)
-model: sonnet
 tools:
   - Read
   - Glob
