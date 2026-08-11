@@ -29,9 +29,18 @@ checker = _load_checker()
 
 
 def _make_repo(tmp_path, files=None):
-    """Build a synthetic repo with agents/ and phases/ plus {relpath: content}."""
-    (tmp_path / "agents").mkdir(parents=True, exist_ok=True)
-    (tmp_path / "phases").mkdir(parents=True, exist_ok=True)
+    """Build a synthetic repo with agents/ and phases/ plus {relpath: content}.
+
+    Each scan dir is seeded with one clean live file: a dir that exists but
+    yields zero scanned files is itself a violation (see
+    TestEmptyScanDirectory), and these tests are about their listed content,
+    not about scan-set coverage. Tests that need an empty or excluded-only
+    dir build it by hand instead of calling this helper.
+    """
+    for scan_dir in ("agents", "phases"):
+        (tmp_path / scan_dir).mkdir(parents=True, exist_ok=True)
+        seed = tmp_path / scan_dir / "seed-clean.md"
+        seed.write_text("This live file keeps the scan set non-empty.\n", encoding="utf-8")
     for rel, content in (files or {}).items():
         target = tmp_path / rel
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -243,6 +252,42 @@ class TestJustificationMarker:
         # Assert
         assert len(result) == 1
 
+    def test_undelimited_marker_before_key_does_not_suppress(self, tmp_path):
+        """A line-leading marker with no comment terminator must not swallow the tier.
+
+        Regression: with no terminator anywhere on the line, terminator
+        truncation never fires and the captured "reason" is the dispatch text
+        itself — `Dispatch via Agent tool (model: haiku).` clears the length
+        floor while justifying nothing. A marker can only annotate a key that
+        PRECEDES it on the line.
+        """
+        # Arrange
+        root = _make_repo(tmp_path, {
+            "phases/x.md": "model-tier-ok: Dispatch via Agent tool (model: haiku).\n",
+        })
+
+        # Act
+        result = checker.find_violations(root)
+
+        # Assert
+        assert len(result) == 1
+
+    def test_undelimited_marker_after_key_still_suppresses(self, tmp_path):
+        """The escape hatch survives: a real reason AFTER the key needs no comment syntax."""
+        # Arrange
+        root = _make_repo(tmp_path, {
+            "phases/x.md": (
+                "Dispatch via Agent tool (model: haiku). "
+                "model-tier-ok: mechanical rename batch, operator approved 2026-08-11\n"
+            ),
+        })
+
+        # Act
+        result = checker.find_violations(root)
+
+        # Assert
+        assert result == []
+
     def test_justification_is_per_line_not_per_file(self, tmp_path):
         """One valid marker must not excuse a DIFFERENT line in the same file.
 
@@ -315,8 +360,11 @@ class TestScanSetBoundaries:
 class TestMissingScanDirectory:
     def test_missing_phases_dir_is_a_failure_not_a_silent_pass(self, tmp_path):
         """A renamed scan dir must fail loudly, never scan nothing and pass."""
-        # Arrange
+        # Arrange — agents/ gets a live file so only the missing dir is at fault
         (tmp_path / "agents").mkdir(parents=True)
+        (tmp_path / "agents" / "impl.md").write_text(
+            "Dispatch via Agent tool.\n", encoding="utf-8"
+        )
         # phases/ deliberately absent
 
         # Act
@@ -325,6 +373,46 @@ class TestMissingScanDirectory:
         # Assert
         assert len(result) == 1
         assert "phases/" in result[0]
+
+
+class TestEmptyScanDirectory:
+    def test_empty_scan_dirs_are_failures_not_silent_passes(self, tmp_path):
+        """Dirs that exist but hold zero live files must fail loudly.
+
+        Regression: only a MISSING dir failed; live files moved into a nested
+        subdirectory (invisible to the non-recursive glob) left both dirs
+        present-but-empty and the guard passed vacuously.
+        """
+        # Arrange
+        (tmp_path / "agents").mkdir(parents=True)
+        (tmp_path / "phases").mkdir(parents=True)
+
+        # Act
+        result = checker.find_violations(tmp_path)
+
+        # Assert
+        assert len(result) == 2
+        assert any("agents/" in violation for violation in result)
+        assert any("phases/" in violation for violation in result)
+
+    def test_dir_with_only_excluded_readme_is_a_failure(self, tmp_path):
+        """An excluded README.md must not count as scan coverage."""
+        # Arrange
+        (tmp_path / "agents").mkdir(parents=True)
+        (tmp_path / "agents" / "README.md").write_text(
+            "model: haiku | sonnet | opus\n", encoding="utf-8"
+        )
+        (tmp_path / "phases").mkdir(parents=True)
+        (tmp_path / "phases" / "planning.md").write_text(
+            "Dispatch via Agent tool.\n", encoding="utf-8"
+        )
+
+        # Act
+        result = checker.find_violations(tmp_path)
+
+        # Assert
+        assert len(result) == 1
+        assert "agents/" in result[0]
 
 
 class TestScriptExitCodes:

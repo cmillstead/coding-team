@@ -11,10 +11,21 @@ inherit the session model.
 Checks (stdlib only, no third-party deps):
   1. No file in agents/*.md or phases/*.md contains a `model:` token, unless
      that same line carries a justification marker `model-tier-ok: <reason>`
-     whose reason survives stripping a trailing comment terminator and is at
-     least MIN_JUSTIFICATION_CHARS long.
-  2. Both scan directories exist — a renamed directory must fail loudly rather
-     than let the guard scan nothing and pass forever.
+     AFTER the last `model:` key on the line, whose reason survives truncation
+     at the first comment terminator and is at least MIN_JUSTIFICATION_CHARS
+     long. A marker positioned before the key cannot justify it.
+  2. Each scan directory exists AND yields at least one scanned file — a
+     renamed directory, or one whose live files moved into a nested
+     subdirectory (invisible to the non-recursive glob), must fail loudly
+     rather than let the guard scan nothing and pass forever.
+
+Known limitations:
+  Explicit-key YAML (`? model` on one line, `: sonnet` on the next) parses to
+  a `model` key but never puts `model:` on a single line, so this line-based
+  scan cannot see it. Catching that form needs real YAML parsing, which would
+  break this script's stdlib-only convention. The agent smoke test's YAML
+  parse of agent frontmatter is the complementary semantic check that covers
+  it.
 
 The scan set uses non-recursive glob, mirroring check-indexes.py's check 1.
 That structurally excludes agents/reference/*, which holds prose such as
@@ -73,7 +84,7 @@ ALLOWLIST: set[tuple[str, str]] = set()
 MODEL_KEY_RE = re.compile(r"""(?<![\w-])["']?model["']?\s*:""")
 
 # A bare `model-tier-ok:` is not a justification; it must carry real reason text.
-# Two rules that LOOK sufficient and are not, both measured against real input:
+# Three rules that LOOK sufficient and are not, all measured against real input:
 #   1. "marker followed by non-whitespace" accepts `<!-- model-tier-ok: -->`,
 #      because the `-` of the `-->` terminator is itself non-whitespace.
 #   2. "strip a terminator off the END of the reason" accepts
@@ -81,6 +92,12 @@ MODEL_KEY_RE = re.compile(r"""(?<![\w-])["']?model["']?\s*:""")
 #      is `--> Dispatch (model: haiku).`, which does not END with a terminator,
 #      so nothing is stripped and 27 characters of the LINE ITSELF become the
 #      "reason". A marker at the start of a line swallows the tier it excuses.
+#   3. "marker anywhere on the line" accepts
+#      `model-tier-ok: Dispatch via Agent tool (model: haiku).` — with NO
+#      terminator on the line, truncation never fires and the dispatch text
+#      itself is the reason. Position is load-bearing: the marker must FOLLOW
+#      the last `model:` key on the line, because it can only annotate a key
+#      that precedes it.
 # The reason ends where its COMMENT ends. Truncate at the FIRST terminator.
 JUSTIFICATION_RE = re.compile(r"model-tier-ok:(?P<reason>.*)$")
 MIN_JUSTIFICATION_CHARS = 8
@@ -101,14 +118,16 @@ def _is_allowlisted(rel_path, line):
     )
 
 
-def _has_justification(line):
-    """Return True when the line carries a `model-tier-ok:` marker with a reason.
+def _has_justification(line, search_from):
+    """Return True when a `model-tier-ok:` marker with a reason follows the key.
 
-    The reason ends at the first comment terminator, not at end of line — a
-    marker at the START of a line must not claim the rest of that line, tier
-    included, as its own justification.
+    `search_from` is the end of the last `model:` key match on the line: a
+    marker can only justify a key that PRECEDES it, so a line-leading marker
+    never counts — see rule 3 above. The reason still ends at the first
+    comment terminator, not at end of line, so a marker must not claim the
+    rest of its line, tier included, as its own justification.
     """
-    match = JUSTIFICATION_RE.search(line)
+    match = JUSTIFICATION_RE.search(line, search_from)
     if match is None:
         return False
     reason = match.group("reason")
@@ -135,21 +154,31 @@ def find_violations(repo_root):
                 f"scripts/check-model-tiers.py if the repo layout changed."
             )
             continue
+        scanned_files = 0
         for path in sorted(base.glob("*.md")):
             if path.name in EXCLUDED_BASENAMES:
                 continue
+            scanned_files += 1
             rel = path.relative_to(repo_root).as_posix()
             text = path.read_text(encoding="utf-8", errors="replace")
             for line_no, line in enumerate(text.splitlines(), start=1):
-                if not MODEL_KEY_RE.search(line):
+                key_matches = list(MODEL_KEY_RE.finditer(line))
+                if not key_matches:
                     continue
-                if _has_justification(line):
+                if _has_justification(line, key_matches[-1].end()):
                     continue
                 if _is_allowlisted(rel, line):
                     continue
                 violations.append(
                     f"{rel}:{line_no} hardcodes a model tier: {line.strip()}"
                 )
+        if scanned_files == 0:
+            violations.append(
+                f"{directory}/ under {repo_root} yields no scanned *.md files "
+                f"— this guard would scan nothing there and pass. Update "
+                f"SCAN_DIRS in scripts/check-model-tiers.py if the repo "
+                f"layout changed."
+            )
     return violations
 
 
