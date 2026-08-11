@@ -39,6 +39,13 @@ jobs:
       - name: Check cross-file indexes (agents/phases/skills references)
         run: python3 scripts/check-indexes.py
 
+      # TRK-126: a hardcoded `model:` on an Agent dispatch silently overrides the
+      # operator's session-model choice downward. Judgment-heavy dispatches must
+      # inherit, so no tier may reappear in agents/ or phases/ without an inline
+      # `model-tier-ok: <reason>` justification.
+      - name: Check no hardcoded model tiers (agents/phases dispatch files)
+        run: python3 scripts/check-model-tiers.py
+
       - name: Deploy hooks (relative symlinks from the checkout into $HOME/.claude)
         # The dispatcher scripts (pretooluse-dispatcher.py, posttooluse-dispatcher.py,
         # prompt-dispatcher.py) always resolve handlers under $HOME/.claude/hooks —
