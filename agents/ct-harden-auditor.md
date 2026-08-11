@@ -1,7 +1,6 @@
 ---
 name: Coding Team Harden Auditor
 description: Audits recently changed code for security vulnerabilities, resilience gaps, and dependency risks (needs Bash for audit commands)
-model: sonnet
 tools:
   - mcp__codesight__query
   - Read

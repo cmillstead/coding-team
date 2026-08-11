@@ -1,7 +1,6 @@
 ---
 name: Coding Team Harness Engineer
 description: Designs and audits Claude Code harness infrastructure — hooks, rules, settings, constraint promotion, maturity progression. Use for harness audits, hook design, constraint gap analysis, and maturity assessment.
-model: opus
 tools:
   - mcp__codesight__query
   - mcp__engram__search

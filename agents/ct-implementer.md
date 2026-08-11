@@ -1,7 +1,6 @@
 ---
 name: Coding Team Implementer
 description: Implements a single task from a coding-team plan — writes code, tests, and commits using TDD discipline
-model: sonnet
 tools:
   - mcp__codesight__query
   - Read

@@ -1,7 +1,6 @@
 ---
 name: Coding Team Spec Doc Reviewer
 description: Reviews design spec documents for completeness, consistency, and readiness for implementation planning (read-only)
-model: sonnet
 tools:
   - Read
   - Glob

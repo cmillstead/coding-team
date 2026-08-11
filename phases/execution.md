@@ -106,7 +106,7 @@ For each task in plan:
        git diff --name-only BASE..HEAD | grep -iE "auth|payment|encrypt|session|token|cors|csp|secret|credential|permission"
        ```
        - If 1-2 matches: note in completion summary for user awareness.
-       - If 3+ matches OR any harden auditor finding is CRITICAL: dispatch `/scan-security` (`skills/scan-security`) as an additional review gate via Agent tool (model: sonnet). Pass the full diff and harden auditor findings.
+       - If 3+ matches OR any harden auditor finding is CRITICAL: dispatch `/scan-security` (`skills/scan-security`) as an additional review gate via Agent tool. Pass the full diff and harden auditor findings.
        - If 5+ matches OR 2+ CRITICAL harden findings: recommend `/scan-adversarial` to the user before proceeding.
        - If zero matches: skip and note in status: 'No security-sensitive files detected — skipped'
 
@@ -172,7 +172,7 @@ After all tasks pass and the full test suite is clean, dispatch the QA reviewer 
    git diff --stat $BASE..HEAD
    git diff --name-only $BASE..HEAD
    ```
-2. Dispatch the QA reviewer via Agent tool (model: sonnet, subagent_type: Explore — read-only):
+2. Dispatch the QA reviewer via Agent tool (subagent_type: Explore — read-only):
    - Pass: feature description (from the original plan), full diff summary, list of all modified files, and the list of tasks that were executed
    - Record the `agentId` returned by the dispatch — completion.md's Agent Teardown uses it to reap a lingering QA reviewer at session exit.
    - See `~/.claude/agents/ct-qa-reviewer.md` for the full prompt template

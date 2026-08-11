@@ -1,7 +1,6 @@
 ---
 name: Coding Team QA Reviewer
 description: Feature-level QA review after all tasks complete — integration, edge cases, dark features, test coverage gaps (read-only)
-model: sonnet
 tools:
   - mcp__codesight__query
   - Read
