@@ -27,7 +27,7 @@ Skip the scan (regardless of tier) when ANY of these hold:
    done | sort -u
    ```
 
-2. **Dispatch a doc-review agent via Agent tool (read-only Explore, model: sonnet):**
+2. **Dispatch a doc-review agent via Agent tool (read-only Explore):**
 
    Pass the agent: the pre-filtered doc files list AND the actual diff summary (`git diff $(git merge-base HEAD main) --stat` plus key changes).
 
