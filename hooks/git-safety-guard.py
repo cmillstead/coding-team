@@ -112,10 +112,13 @@ REPO_COMMIT_PREFIX_RES: dict[str, tuple[str, ...]] = {
 }
 
 
-# Any of these in the RAW command means a second command, a subshell, or a
-# substitution can run, so the directory the commit executes in is no longer
-# knowably this process's cwd.
-_SHELL_SEPARATORS = ("\n", "\r", "\0", ";", "&", "|", "`", "$(", "<(", ">(")
+# Any of these in the RAW command means a second command, a subshell, a
+# substitution, or a pre-execution expansion can run, so the directory the
+# commit executes in is no longer knowably this process's cwd. Bare `$` covers
+# the WHOLE dollar class -- `$(...)`, `${...}` and `$VAR` alike: bash's
+# `${GIT_DIR:=/other/.git}` assigns-and-exports during expansion, retargeting
+# the commit to a different repo (Codex P1, reproduced live).
+_SHELL_SEPARATORS = ("\n", "\r", "\0", ";", "&", "|", "`", "$", "<(", ">(")
 
 
 def _is_plain_local_git_commit(command: str) -> bool:
@@ -141,8 +144,11 @@ def _is_plain_local_git_commit(command: str) -> bool:
     Accepted cost, deliberately chosen by the user: `cd /repo && git commit`
     no longer takes the repo route. `~/.claude/command-hygiene.md` already
     forbids `cd` in agent commands, and a commit message containing `&`, `|`,
-    `;` or a backtick likewise falls back to strict. Denying is the safe
-    direction; route 1 (conventional prefixes) never inspects the command.
+    `;`, a backtick, or ANY dollar form (`$VAR`, `${...}`, `$(...)`) likewise
+    falls back to strict. Bare `$` is deliberately broader than the `${GIT_DIR
+    :=...}` exploit that motivated it: `$VAR` in a double-quoted message is
+    the same class of pre-execution mutation. Denying is the safe direction;
+    route 1 (conventional prefixes) never inspects the command.
     """
     if not isinstance(command, str) or not command.strip():
         return False

@@ -734,6 +734,34 @@ class TestRepoScopedCommitPrefixes:
                 assert mod.commit_prefix_allowed(
                     "S1: x", shape, repo_map=repo_map) is False, shape
 
+    def test_braced_expansion_denies_repo_route(self, tmp_path):
+        """Codex P1: `${GIT_DIR:=/other/.git}` inside the message escapes the whitelist.
+
+        The raw command contains no separator from the pre-fix set (no `;`,
+        no `$(` -- only `${`), so the old whitelist ACCEPTED it, while bash's
+        `:=` operator assigns-and-exports GIT_DIR during expansion and the
+        commit lands in a DIFFERENT repo than the one route 2 verified
+        (reproduced live: mapped repo got 0 commits, /other got 1). Bare `$`
+        in _SHELL_SEPARATORS rejects the whole dollar class -- `${...}`,
+        `$VAR`, and `$(...)` alike.
+
+        Non-vacuity: the cwd IS the mapped repo and the message matches the
+        stage regex, so with the pre-fix separator set this ALLOWS. Route 1 is
+        the control: a conventional prefix still allows regardless of command
+        shape, because route 1 never inspects the command.
+        """
+        mod = self._mod()
+        repo = tmp_path / "repo"
+        _init_feature_repo(repo)
+        repo_map = {str(repo): (self.STAGE_RE,)}
+        stage_msg = "S1: x${GIT_DIR:=/other/.git}"
+        feat_msg = "feat: x${GIT_DIR:=/other/.git}"
+        with self._in_dir(repo), _env_override("GIT_SAFETY_EXTRA_COMMIT_PREFIX_RE", None):
+            assert mod.commit_prefix_allowed(
+                stage_msg, f'git commit -m "{stage_msg}"', repo_map=repo_map) is False
+            assert mod.commit_prefix_allowed(
+                feat_msg, f'git commit -m "{feat_msg}"', repo_map=repo_map) is True
+
     def test_non_plain_command_still_allows_conventional_prefix(self, tmp_path):
         """The whitelist narrows route 2 ONLY.
 
@@ -744,6 +772,33 @@ class TestRepoScopedCommitPrefixes:
         with _env_override("GIT_SAFETY_EXTRA_COMMIT_PREFIX_RE", None):
             assert mod.commit_prefix_allowed(
                 "feat: x", f'cd {tmp_path} && git commit -m "feat: x"') is True
+
+    def test_dash_F_multiline_message_reaches_repo_route(self, tmp_path):
+        """`git commit -F <file>` is the ONLY multi-line path into route 2 (QA finding 3).
+
+        Heredocs and `$(cat ...)` shapes carry `\\n` / `$` in the RAW command,
+        so the whitelist denies them; `-F` keeps the newlines in the FILE and
+        the command itself stays a plain single-line `git commit`. This pins
+        that a multi-line message whose FIRST line matches the stage regex
+        takes route 2 end to end: extract_commit_message reads the file, and
+        commit_prefix_allowed allows in the mapped repo.
+
+        Gap-pinning, not RED-first: the behavior already holds. Verified
+        non-vacuous by mutation on a scratch copy of hooks/: with route 2
+        deleted from commit_prefix_allowed, the final assertion flips to False.
+        """
+        mod = self._mod()
+        repo = tmp_path / "repo"
+        _init_feature_repo(repo)
+        repo_map = {str(repo): (self.STAGE_RE,)}
+        msg_file = tmp_path / "commit-msg.txt"
+        multiline = "S1: bootstrap the loader\n\nBody line one.\nBody line two."
+        msg_file.write_text(multiline + "\n")
+        command = f"git commit -F {msg_file}"
+        extracted = mod.extract_commit_message(command)
+        assert extracted == multiline
+        with self._in_dir(repo), _env_override("GIT_SAFETY_EXTRA_COMMIT_PREFIX_RE", None):
+            assert mod.commit_prefix_allowed(extracted, command, repo_map=repo_map) is True
 
     # --- composition: the exact expression main() evaluates ---
 
@@ -809,6 +864,38 @@ class TestRepoScopedCommitPrefixes:
                 assert mod.commit_prefix_allowed(
                     "M0.1: add Makefile", self._commit("M0.1: add Makefile"),
                     repo_map={str(repo): bad}) is True, bad
+
+    def test_deleted_cwd_denies_repo_route_and_env_hatch_survives(self, tmp_path):
+        """Pins _verified_repo_route_root's try/except (QA finding 2).
+
+        A DELETED cwd makes os.getcwd() raise FileNotFoundError (an OSError)
+        inside _verified_repo_route_root. Without its try/except the exception
+        escapes commit_prefix_allowed entirely: route 2 crashes AND route 3
+        (the env hatch codesight-mcp depends on) never runs. With it, route 2
+        denies quietly and route 3 still allows -- mirror of
+        test_composition_env_route_survives_a_malformed_map, one level up.
+
+        No mocks: os.chdir into a fresh temp dir, then rmdir it out from under
+        the process. Verified to pin the guard: deleting the try/except flips
+        both assertions to raising FileNotFoundError (measured on a scratch
+        copy of hooks/).
+        """
+        mod = self._mod()
+        repo_map = {str(tmp_path): (self.STAGE_RE,)}
+        old_cwd = os.getcwd()
+        doomed = tempfile.mkdtemp(prefix="deleted-cwd-")
+        try:
+            os.chdir(doomed)
+            os.rmdir(doomed)
+            with _env_override("GIT_SAFETY_EXTRA_COMMIT_PREFIX_RE", None):
+                assert mod.commit_prefix_allowed(
+                    "S1: x", self._commit("S1: x"), repo_map=repo_map) is False
+            with _env_override("GIT_SAFETY_EXTRA_COMMIT_PREFIX_RE", r"^M\d+\.\d+: "):
+                assert mod.commit_prefix_allowed(
+                    "M0.1: add Makefile", self._commit("M0.1: add Makefile"),
+                    repo_map=repo_map) is True
+        finally:
+            os.chdir(old_cwd)
 
     def test_call_site_is_wired_to_the_composed_helper(self):
         """Dark-feature guard: a helper main() never calls has no effect.
