@@ -5,8 +5,10 @@ import hashlib
 import io
 import json
 import os
+import re
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -203,8 +205,11 @@ class TestCommitMessageFileFlag:
 
 
 class TestCommitPrefixEnvHatch:
-    """Tests for GIT_SAFETY_EXTRA_COMMIT_PREFIX_RE, the repo-scoped escape hatch
-    allowing additional commit-message prefixes via an operator-set regex."""
+    """Tests for GIT_SAFETY_EXTRA_COMMIT_PREFIX_RE, the PROCESS-GLOBAL escape
+    hatch allowing additional commit-message prefixes via an operator-set regex.
+    It is read from the environment, so it applies in every repo the process
+    touches; the genuinely repo-scoped route is REPO_COMMIT_PREFIX_RES (see
+    TestRepoScopedCommitPrefixes below)."""
 
     def test_env_regex_allows_matching_prefix(self, run_hook, make_event, tmp_state_dir, tmp_path):
         _init_feature_repo(tmp_path)
@@ -235,7 +240,7 @@ class TestCommitPrefixEnvHatch:
             os.chdir(old_cwd)
 
     def test_no_env_blocks_M_format(self, run_hook, make_event, tmp_state_dir, tmp_path):
-        """Repo-scoping proof: without the env var, the M-format is NOT loosened."""
+        """Strictness proof: without the env var, the M-format is NOT loosened."""
         _init_feature_repo(tmp_path)
         old_cwd = os.getcwd()
         os.chdir(tmp_path)
@@ -283,6 +288,584 @@ class TestCommitPrefixEnvHatch:
             assert "FORMAT ERROR" in result.parsed["reason"]
         finally:
             os.chdir(old_cwd)
+
+
+class TestRepoScopedCommitPrefixes:
+    """REPO_COMMIT_PREFIX_RES -- commit prefixes unlocked for ONE repo root.
+
+    Unlike GIT_SAFETY_EXTRA_COMMIT_PREFIX_RE (process-global), an entry here
+    applies only when the commit runs in that exact repo root, AND git actually
+    confirmed that root, AND the command is a plain local `git commit ...`.
+
+    Three conventions hold throughout this class:
+
+    1. Every test that calls commit_prefix_allowed wraps in
+       _env_override("GIT_SAFETY_EXTRA_COMMIT_PREFIX_RE", None) -- except the
+       two that set it deliberately. conftest.py's ambient scrub list does NOT
+       include that variable, so an operator export would otherwise leak in and
+       turn a "must reject" assertion into a false clear.
+    2. Tests of the INNER helper (_repo_prefix_ok) may use bare paths, because
+       it is pure path arithmetic. Tests of the ROUTE (commit_prefix_allowed)
+       must chdir into a real `git init` repo, because the route reads its root
+       from os.getcwd() via git. Asserting an ALLOW through the inner helper
+       alone proves nothing about production and is how the P1-1 fail-open was
+       originally encoded as a passing test.
+    3. Every route test that must DENY stands INSIDE the mapped repo. That is
+       what makes it non-vacuous: with the guard under test removed, the cwd
+       root matches the map and the assertion flips to ALLOW.
+    """
+
+    # The shipped map key. Deliberately NOT required to exist -- and, equally
+    # deliberately, no test asserts it is ALLOWED: on the ubuntu CI runner
+    # git.resolve_repo_root() returns None for it, so the repo route denies.
+    LOCAL_LORA = "/Users/cevin/src/local-lora-pipeline"
+    STAGE_RE = r"^S[0-9]+(\.[A-Za-z0-9]+)?:"
+    MILESTONE_RE = r"^M[0-9]+(\.[A-Za-z0-9]+)?:"
+    # re.compile raises OverflowError (NOT re.error) on this repetition count.
+    OVERFLOW_RE = r"a{999999999999999999999999999999}"
+
+    def _mod(self):
+        return _load_hook_module()
+
+    @staticmethod
+    def _commit(msg):
+        """The only command shape route 2 accepts: a plain, local git commit."""
+        return f'git commit -m "{msg}"'
+
+    @staticmethod
+    @contextlib.contextmanager
+    def _in_dir(path):
+        """chdir for the duration of the block; the route reads os.getcwd()."""
+        old_cwd = os.getcwd()
+        os.chdir(path)
+        try:
+            yield
+        finally:
+            os.chdir(old_cwd)
+
+    # --- lookup against a caller-supplied map (pure path arithmetic) ---
+
+    def test_mapped_repo_allows_stage_prefix(self, tmp_path):
+        mod = self._mod()
+        repo_map = {str(tmp_path): (self.STAGE_RE,)}
+        assert mod._repo_prefix_ok("S1: bootstrap", str(tmp_path), repo_map=repo_map) is True
+
+    def test_mapped_repo_allows_dotted_milestone_prefix(self, tmp_path):
+        mod = self._mod()
+        repo_map = {str(tmp_path): (self.MILESTONE_RE,)}
+        assert mod._repo_prefix_ok("M2.3: land loader", str(tmp_path), repo_map=repo_map) is True
+
+    def test_unmapped_repo_rejects_stage_prefix(self, tmp_path):
+        mod = self._mod()
+        mapped = tmp_path / "mapped"
+        other = tmp_path / "other"
+        repo_map = {str(mapped): (self.STAGE_RE,)}
+        assert mod._repo_prefix_ok("S1: bootstrap", str(other), repo_map=repo_map) is False
+
+    def test_sibling_substring_path_does_not_match(self, tmp_path):
+        """Case study #35: path matching is structural, never substring/prefix.
+
+        str(<tmp>/repo-evil).startswith(str(<tmp>/repo)) is True, so a
+        startswith implementation would unlock the sibling. Exact resolved-Path
+        equality must not. Mutation-sensitive: Task 3 mutation M1.
+        """
+        mod = self._mod()
+        mapped = tmp_path / "repo"
+        sibling = tmp_path / "repo-evil"
+        repo_map = {str(mapped): (self.STAGE_RE,)}
+        assert mod._repo_prefix_ok("S1: x", str(sibling), repo_map=repo_map) is False
+
+    # --- real repo roots, resolved by real git from the real cwd ---
+
+    def test_ordinary_subdirectory_inherits_via_resolver(self, tmp_path):
+        """An ordinary subdirectory of the mapped repo IS the mapped repo.
+
+        `git rev-parse --show-toplevel` normalizes any subdirectory up to the
+        repo root, so committing from <repo>/src/deep must inherit the repo's
+        prefixes. Measured: it inherits.
+        """
+        mod = self._mod()
+        repo = tmp_path / "repo"
+        _init_feature_repo(repo)
+        sub = repo / "src" / "deep"
+        sub.mkdir(parents=True)
+        repo_map = {str(repo): (self.STAGE_RE,)}
+        with self._in_dir(sub), _env_override("GIT_SAFETY_EXTRA_COMMIT_PREFIX_RE", None):
+            assert mod.commit_prefix_allowed(
+                "S1: x", self._commit("S1: x"), repo_map=repo_map) is True
+
+    def test_nested_repo_does_not_inherit(self, tmp_path):
+        """A GENUINE nested repo (submodule, vendored checkout) is a different repo.
+
+        `git init` inside the mapped repo, so rev-parse --show-toplevel returns
+        the NESTED root, not the mapped one. Contrast with the subdirectory
+        test above.
+        """
+        mod = self._mod()
+        repo = tmp_path / "repo"
+        _init_feature_repo(repo)
+        nested = repo / "vendor" / "inner"
+        nested.mkdir(parents=True)
+        _init_feature_repo(nested)
+        repo_map = {str(repo): (self.STAGE_RE,)}
+        with self._in_dir(nested), _env_override("GIT_SAFETY_EXTRA_COMMIT_PREFIX_RE", None):
+            assert mod.commit_prefix_allowed(
+                "S1: x", self._commit("S1: x"), repo_map=repo_map) is False
+
+    def test_non_git_cwd_denies_repo_route(self, tmp_path):
+        """P1-1: an UNVERIFIED directory must never reach allow.
+
+        The cwd here is a real directory that is not inside any git repo, so
+        git.resolve_repo_root() returns None. A system temp dir is used rather
+        than tmp_path because conftest roots tmp_path INSIDE this checkout,
+        where rev-parse would happily resolve to the checkout's own root.
+
+        The first assertion is the non-vacuity proof: the inner helper DOES
+        match this path, so the deny can only come from the verification gate.
+        Mutation-sensitive: Task 3 mutation M4.
+        """
+        mod = self._mod()
+        with tempfile.TemporaryDirectory() as outside:
+            resolved = str(Path(outside).resolve())
+            repo_map = {resolved: (self.STAGE_RE,)}
+            assert mod._repo_prefix_ok("S1: x", resolved, repo_map=repo_map) is True
+            with self._in_dir(outside), _env_override(
+                "GIT_SAFETY_EXTRA_COMMIT_PREFIX_RE", None
+            ):
+                assert mod.commit_prefix_allowed(
+                    "S1: x", self._commit("S1: x"), repo_map=repo_map) is False
+
+    # --- malformed table entries: every shape denies, none crashes ---
+
+    def test_malformed_regex_after_matching_one_denies(self, tmp_path):
+        """A malformed regex positioned AFTER a matching one must still deny.
+
+        `any(re.match(p, msg) for p in patterns)` short-circuits to True before
+        the bad pattern is ever compiled -- measured: with (STAGE_RE, "["),
+        the lazy form returns True and raises nothing, so the malformed entry
+        is invisible. The implementation compiles ALL patterns first, so a
+        malformed pattern ANYWHERE in the tuple denies the whole entry.
+        """
+        mod = self._mod()
+        repo_map = {str(tmp_path): (self.STAGE_RE, "[")}
+        assert mod._repo_prefix_ok("S1: x", str(tmp_path), repo_map=repo_map) is False
+
+    def test_malformed_entry_elsewhere_in_table_denies(self, tmp_path):
+        """A malformed entry under a DIFFERENT key denies the whole table.
+
+        Validating only the selected entry is not enough. Two keys can spell
+        the same root ('/repo' and '/repo/'), and a later valid entry would
+        then replace -- and hide -- an earlier malformed one, which is exactly
+        the reported defect. Both shapes are asserted: an unrelated malformed
+        key, and the reported '/repo' + '/repo/' pair.
+
+        Non-vacuity: the matching entry is perfectly well formed, so without
+        validate-every-entry both assertions would ALLOW.
+        Mutation-sensitive: Task 3 mutation M7.
+        """
+        mod = self._mod()
+        good = tmp_path / "good"
+        bad = tmp_path / "bad"
+        assert mod._repo_prefix_ok(
+            "S1: x", str(good),
+            repo_map={str(good): (self.STAGE_RE,), str(bad): (self.STAGE_RE, "[")}) is False
+        assert mod._repo_prefix_ok(
+            "S1: x", str(good),
+            repo_map={str(good): (self.STAGE_RE, "["), str(good) + "/": (self.STAGE_RE,)}) is False
+
+    def test_duplicate_resolved_keys_deny(self, tmp_path):
+        """Two keys resolving to ONE root reject the whole table.
+
+        Independent of malformation: both entries below are well formed, but
+        they disagree, and picking either answer is arbitrary. Non-vacuity: the
+        message matches the SECOND entry only, so without the collision check
+        the later key would win the lookup and ALLOW.
+        Mutation-sensitive: Task 3 mutation M8.
+        """
+        mod = self._mod()
+        repo = tmp_path / "repo"
+        assert mod._repo_prefix_ok(
+            "ZZZ: x", str(repo),
+            repo_map={str(repo): (self.STAGE_RE,), str(repo) + "/": (r"^ZZZ:",)}) is False
+
+    def test_non_tuple_values_deny(self, tmp_path):
+        """str / list / dict values are all iterable, and all allow-all.
+
+        - str: a DROPPED TRAILING COMMA (`("^S1:")` -> `"^S1:"`); iterating it
+          yields CHARACTERS and `re.match("^", <anything>)` matches.
+        - list ["^"] and dict {"^": ...}: measured, both return True for an
+          arbitrary message.
+
+        None and 7 are included as CRASH proofs, not allow proofs: without the
+        tuple guard they raise TypeError rather than allowing. They matter
+        because an exception escaping route 2 also kills route 3 -- see
+        test_composition_env_route_survives_a_malformed_map.
+
+        Every assertion uses an UNRELATED message, so a True result can only
+        mean allow-all. Mutation-sensitive: Task 3 mutation M3.
+        """
+        mod = self._mod()
+        for bad in (r"^S1:", ["^"], {"^": 1}, None, 7):
+            assert mod._repo_prefix_ok(
+                "totally unrelated message", str(tmp_path),
+                repo_map={str(tmp_path): bad}) is False, bad
+
+    def test_degenerate_patterns_deny(self, tmp_path):
+        """Empty patterns and pre-compiled patterns deny.
+
+        Measured: `re.match("", "anything")` is truthy, so a single empty
+        pattern turns a mapped repo into ALLOW-ALL. Measured: `re.compile()`
+        returns an already-compiled Pattern unchanged, so a hand-"optimized"
+        (re.compile("^"),) entry would also match everything. Both halves of
+        `isinstance(pattern, str) and pattern` are therefore load-bearing --
+        remove either and one of these cases ALLOWS.
+
+        Deliberately NOT asserted here: (7,), (None,) and (). An earlier draft
+        claimed those proved the element guard; they do not. 7 and None raise
+        TypeError inside re.compile and () yields any([]) -- all three deny with
+        the guard removed, so they were vacuous. The empty-tuple guard was
+        deleted rather than retested.
+
+        Also not covered by design: a well-formed but deliberately permissive
+        regex such as ("^",) is ALLOWED. These guards catch structural
+        malformation (typos, dropped commas, wrong types), not an author who
+        writes a permissive regex on purpose.
+        Mutation-sensitive: Task 3 mutation M12.
+        """
+        mod = self._mod()
+        for bad in (("",), (self.STAGE_RE, ""), (re.compile("^"),)):
+            assert mod._repo_prefix_ok(
+                "totally unrelated message", str(tmp_path),
+                repo_map={str(tmp_path): bad}) is False, bad
+
+    def test_malformed_map_keys_deny(self, tmp_path):
+        """Keys must resolve ABSOLUTE, and the map itself must be a dict.
+
+        Each bad key sits ALONGSIDE a MATCHING good key -- that is what makes
+        the assertion non-vacuous. Measured: Path("") is '.' and
+        Path("rel").resolve() is cwd/rel, so without the is_absolute guard
+        neither would collide or fail to compile, the good key would still
+        match, and the whole table would ALLOW. An earlier draft asserted these
+        keys STANDALONE, which proved nothing: they never matched the target
+        either way.
+
+        The int key is a CRASH proof rather than an allow proof: Path(7) raises
+        TypeError, which the except tuple turns into a deny. There is no
+        isinstance() guard on keys -- it was deleted as redundant.
+
+        A non-dict map IS a genuine allow-class guard of its own:
+        repo_map.items() on a str raises AttributeError, which is NOT in the
+        except tuple, so without the isinstance check the exception escapes
+        route 2 and route 3 never runs.
+        Mutation-sensitive: Task 3 mutations M9 (is_absolute), M10 (dict).
+        """
+        mod = self._mod()
+        for bad_key in ("", "relative/path", 7):
+            assert mod._repo_prefix_ok(
+                "S1: x", str(tmp_path),
+                repo_map={str(tmp_path): (self.STAGE_RE,),
+                          bad_key: (self.STAGE_RE,)}) is False, bad_key
+        assert mod._repo_prefix_ok("S1: x", str(tmp_path), repo_map="not a map") is False
+
+    def test_pathological_target_root_denies(self, tmp_path):
+        """Falsy, unresolvable, and raising target roots all deny, none crash.
+
+        Non-vacuity: the empty-string case is mapped against the REAL cwd, so
+        without the falsy guard Path("").resolve() would match it and return
+        True. (None is covered by the same falsy guard; it is not a separate
+        claim.)
+
+        The symlink loop is the only no-mock way to reach the except clause:
+        measured, Path(<loop>).resolve() raises RuntimeError on 3.11 AND 3.12
+        (the CI matrix). The pytest.raises precondition is deliberate -- if a
+        future interpreter stops raising, this test fails and tells you the
+        coverage claim expired, rather than silently going vacuous.
+
+        OSError is NOT exercised: resolve(strict=False) does not raise it for
+        over-long or very deep paths (measured). It stays in the except tuple
+        as defence-in-depth, and this plan does not claim coverage for it.
+        Mutation-sensitive: Task 3 mutations M6 (except tuple), M11 (falsy).
+        """
+        mod = self._mod()
+        assert mod._repo_prefix_ok(
+            "S1: x", None, repo_map={str(tmp_path): (self.STAGE_RE,)}) is False
+        assert mod._repo_prefix_ok(
+            "S1: x", "", repo_map={str(Path.cwd()): (self.STAGE_RE,)}) is False
+        assert mod._repo_prefix_ok(
+            "S1: x", "a\x00b", repo_map={str(tmp_path): (self.STAGE_RE,)}) is False
+
+        loop_a = tmp_path / "loop-a"
+        loop_b = tmp_path / "loop-b"
+        loop_a.symlink_to(loop_b)
+        loop_b.symlink_to(loop_a)
+        with pytest.raises((RuntimeError, OSError)):
+            loop_a.resolve()  # precondition: this interpreter still raises
+        assert mod._repo_prefix_ok(
+            "S1: x", str(loop_a), repo_map={str(tmp_path): (self.STAGE_RE,)}) is False
+
+    # --- the SHIPPED constant: structural pins, plus real-repo behavior ---
+
+    def test_shipped_map_key_set_is_pinned(self):
+        """Key-SET pin, not a membership check.
+
+        A per-entry assertion catches a removed or renamed key but never an
+        ADDED one, and this map is a safety allowlist -- adding a second repo
+        must fail a test. Pure structure: asserts nothing about matching, so it
+        is identical on macOS and on the ubuntu runner.
+        """
+        mod = self._mod()
+        assert sorted(mod.REPO_COMMIT_PREFIX_RES) == [self.LOCAL_LORA]
+
+    def test_shipped_patterns_are_exactly_the_expected_two(self):
+        """Pins the exact regex LANGUAGE and rejects additions.
+
+        Tuple equality (not `in`, not a length check) pins the patterns
+        verbatim and in order, so loosening `[0-9]+` to `.*`, or appending a
+        third pattern, fails here.
+        """
+        mod = self._mod()
+        assert mod.REPO_COMMIT_PREFIX_RES[self.LOCAL_LORA] == (
+            self.STAGE_RE, self.MILESTONE_RE)
+
+    def test_shipped_patterns_behave_correctly_in_a_real_repo(self, tmp_path):
+        """The SHIPPED regexes, run through the real resolver in a real repo.
+
+        The shipped tuple is READ from the constant and installed under a
+        freshly `git init`-ed repo's key. That is injection through the
+        sanctioned repo_map parameter, not patching: the constant is never
+        mutated.
+        """
+        mod = self._mod()
+        repo = tmp_path / "repo"
+        _init_feature_repo(repo)
+        repo_map = {str(repo): mod.REPO_COMMIT_PREFIX_RES[self.LOCAL_LORA]}
+        with self._in_dir(repo), _env_override("GIT_SAFETY_EXTRA_COMMIT_PREFIX_RE", None):
+            for msg in ("S1: scaffold", "S2.3: tokenizer", "S10.a: eval",
+                        "M1: milestone one", "M2.3: loader", "M11.b: ship"):
+                assert mod.commit_prefix_allowed(
+                    msg, self._commit(msg), repo_map=repo_map) is True, msg
+            for msg in ("Something: not a stage", "SX: not numeric",
+                        "S1 missing colon", "M: no number", "s1: lowercase"):
+                assert mod.commit_prefix_allowed(
+                    msg, self._commit(msg), repo_map=repo_map) is False, msg
+
+    def test_shipped_map_rejects_those_formats_elsewhere(self, tmp_path):
+        """The DEFAULT map (no injection) does not match an unrelated repo."""
+        mod = self._mod()
+        repo = tmp_path / "repo"
+        _init_feature_repo(repo)
+        with self._in_dir(repo), _env_override("GIT_SAFETY_EXTRA_COMMIT_PREFIX_RE", None):
+            for msg in ("S1: scaffold", "M2.3: loader"):
+                assert mod.commit_prefix_allowed(msg, self._commit(msg)) is False, msg
+
+    # --- the command whitelist: only a plain local commit takes route 2 ---
+
+    def test_plain_git_commit_in_mapped_repo_allows(self, tmp_path):
+        """Positive control for the whitelist, and for every deny below it.
+
+        Same cwd, same map, same message as the deny tests -- only the command
+        shape differs. Without this, a deny test could be passing for the wrong
+        reason. The second assertion pins that extra whitespace is not
+        structure: shlex tokenizes it away.
+        """
+        mod = self._mod()
+        repo = tmp_path / "repo"
+        _init_feature_repo(repo)
+        repo_map = {str(repo): (self.STAGE_RE,)}
+        with self._in_dir(repo), _env_override("GIT_SAFETY_EXTRA_COMMIT_PREFIX_RE", None):
+            assert mod.commit_prefix_allowed(
+                "S1: x", self._commit("S1: x"), repo_map=repo_map) is True
+            assert mod.commit_prefix_allowed(
+                "S1: x", '  git   commit  -m "S1: x"', repo_map=repo_map) is True
+
+    def test_non_plain_command_shapes_deny_repo_route(self, tmp_path):
+        """Every non-plain shape denies route 2 -- verified, not assumed.
+
+        The cwd IS the mapped repo throughout, so with the whitelist removed
+        every one of these ALLOWS (the root would come from this cwd while the
+        shell commits somewhere else entirely). That is the non-vacuity proof
+        and the point of the narrowing. Mutation-sensitive: Task 3 mutation M5.
+        """
+        mod = self._mod()
+        repo = tmp_path / "repo"
+        other = tmp_path / "other"
+        _init_feature_repo(repo)
+        _init_feature_repo(other)
+        repo_map = {str(repo): (self.STAGE_RE,)}
+        shapes = [
+            f'cd {other} && git commit -m "S1: x"',
+            f'pushd {other} && git commit -m "S1: x"',
+            f'env --chdir={other} git commit -m "S1: x"',
+            f"""sh -c "cd {other}; git commit -m 'S1: x'" """,
+            f'git -C {other} commit -m "S1: x"',
+            f'git commit -m "S1: x" && cd {other}',
+            f'git commit -m "S1: x" ; cd {other}',
+        ]
+        with self._in_dir(repo), _env_override("GIT_SAFETY_EXTRA_COMMIT_PREFIX_RE", None):
+            for shape in shapes:
+                assert mod.commit_prefix_allowed(
+                    "S1: x", shape, repo_map=repo_map) is False, shape
+
+    def test_obfuscated_cd_forms_deny_repo_route(self, tmp_path):
+        """The shapes that defeated the earlier `\\bcd\\b` blacklist.
+
+        A backslash-escaped `c\\d`, a quote-split `'c'd`, a newline-chained
+        second statement, and a leading VAR=value assignment: none of them
+        produces a bare `cd` token, and the round-2 review confirmed the first
+        two run the cd builtin in zsh. The whitelist kills the class rather
+        than the instances -- note that each is rejected here by STRUCTURE
+        (a separator, or a non-`git` first token), not by recognizing `cd`.
+        Mutation-sensitive: Task 3 mutation M5.
+        """
+        mod = self._mod()
+        repo = tmp_path / "repo"
+        other = tmp_path / "other"
+        _init_feature_repo(repo)
+        _init_feature_repo(other)
+        repo_map = {str(repo): (self.STAGE_RE,)}
+        shapes = [
+            f'c\\d {other} && git commit -m "S1: x"',
+            f"'c'd {other} && git commit -m \"S1: x\"",
+            f'cd {other}\ngit commit -m "S1: x"',
+            f'GIT_DIR={other}/.git git commit -m "S1: x"',
+        ]
+        with self._in_dir(repo), _env_override("GIT_SAFETY_EXTRA_COMMIT_PREFIX_RE", None):
+            for shape in shapes:
+                assert mod.commit_prefix_allowed(
+                    "S1: x", shape, repo_map=repo_map) is False, shape
+
+    def test_non_plain_command_still_allows_conventional_prefix(self, tmp_path):
+        """The whitelist narrows route 2 ONLY.
+
+        A conventional prefix is allowed in every repo regardless of command
+        shape -- route 1 returns before the command is ever inspected.
+        """
+        mod = self._mod()
+        with _env_override("GIT_SAFETY_EXTRA_COMMIT_PREFIX_RE", None):
+            assert mod.commit_prefix_allowed(
+                "feat: x", f'cd {tmp_path} && git commit -m "feat: x"') is True
+
+    # --- composition: the exact expression main() evaluates ---
+
+    def test_composition_conventional_prefix_allowed_anywhere(self, tmp_path):
+        mod = self._mod()
+        repo = tmp_path / "repo"
+        _init_feature_repo(repo)
+        with self._in_dir(repo), _env_override("GIT_SAFETY_EXTRA_COMMIT_PREFIX_RE", None):
+            assert mod.commit_prefix_allowed("feat: x", self._commit("feat: x")) is True
+            assert mod.commit_prefix_allowed("chore: x", self._commit("chore: x")) is True
+
+    def test_composition_repo_route_allows_only_in_mapped_repo(self, tmp_path):
+        mod = self._mod()
+        mapped = tmp_path / "mapped"
+        other = tmp_path / "other"
+        _init_feature_repo(mapped)
+        _init_feature_repo(other)
+        repo_map = {str(mapped): (self.STAGE_RE, self.MILESTONE_RE)}
+        with _env_override("GIT_SAFETY_EXTRA_COMMIT_PREFIX_RE", None):
+            with self._in_dir(mapped):
+                assert mod.commit_prefix_allowed(
+                    "S1: x", self._commit("S1: x"), repo_map=repo_map) is True
+                assert mod.commit_prefix_allowed(
+                    "M2.3: x", self._commit("M2.3: x"), repo_map=repo_map) is True
+            with self._in_dir(other):
+                assert mod.commit_prefix_allowed(
+                    "S1: x", self._commit("S1: x"), repo_map=repo_map) is False
+
+    def test_composition_env_route_survives(self, tmp_path):
+        """R10 regression: codesight-mcp's process-global hatch still allows."""
+        mod = self._mod()
+        repo = tmp_path / "repo"
+        _init_feature_repo(repo)
+        with self._in_dir(repo), _env_override(
+            "GIT_SAFETY_EXTRA_COMMIT_PREFIX_RE", r"^M\d+\.\d+: "
+        ):
+            assert mod.commit_prefix_allowed(
+                "M0.1: add Makefile", self._commit("M0.1: add Makefile")) is True
+
+    def test_composition_env_route_survives_a_malformed_map(self, tmp_path):
+        """Route 2 must never prevent route 3 from being evaluated.
+
+        Route 2 runs BEFORE route 3, so an exception escaping a malformed table
+        entry would silently disable the env hatch codesight-mcp depends on --
+        a crash masquerading as a config problem.
+
+        Two entry shapes, one per escape mechanism:
+          - None value: raises TypeError if the tuple guard is removed.
+          - OVERFLOW_RE: re.compile raises OverflowError, which is NOT an
+            re.error and was NOT in the original except tuple. Measured on 3.11
+            and 3.12: re.compile(r"a{999999999999999999999999999999}") ->
+            OverflowError, and isinstance(e, re.error) is False.
+        Both must leave route 3 free to allow. Mutation-sensitive: Task 3
+        mutations M6 and M6b.
+        """
+        mod = self._mod()
+        repo = tmp_path / "repo"
+        _init_feature_repo(repo)
+        with self._in_dir(repo), _env_override(
+            "GIT_SAFETY_EXTRA_COMMIT_PREFIX_RE", r"^M\d+\.\d+: "
+        ):
+            for bad in (None, (self.OVERFLOW_RE,)):
+                assert mod.commit_prefix_allowed(
+                    "M0.1: add Makefile", self._commit("M0.1: add Makefile"),
+                    repo_map={str(repo): bad}) is True, bad
+
+    def test_call_site_is_wired_to_the_composed_helper(self):
+        """Dark-feature guard: a helper main() never calls has no effect.
+
+        A reachability assertion on main()'s source, not a behavior test -- the
+        only check that fails if the line-1124 rewire is forgotten, since every
+        other test calls the helpers directly.
+
+        Substring containment is NOT enough: if the new line were ADDED while
+        the old expression stayed BELOW it, the old assignment would win, the
+        map would be dark, and a containment-only assert would still pass. So
+        this parses main() and requires EXACTLY ONE assignment to has_prefix,
+        whose value is exactly the expected call -- a second assignment, an
+        assignment of anything else, or a different argument list all fail.
+        Mutation-sensitive: Task 3 mutation M2.
+        """
+        import ast
+        import inspect
+        mod = self._mod()
+        tree = ast.parse(inspect.getsource(mod.main))
+        assigns = [
+            node for node in ast.walk(tree)
+            if isinstance(node, ast.Assign)
+            and any(isinstance(t, ast.Name) and t.id == "has_prefix" for t in node.targets)
+        ]
+        assert len(assigns) == 1, f"expected exactly 1 has_prefix assignment, got {len(assigns)}"
+        call = assigns[0].value
+        assert isinstance(call, ast.Call), f"has_prefix must be a call, got {type(call).__name__}"
+        assert isinstance(call.func, ast.Name) and call.func.id == "commit_prefix_allowed"
+        assert [a.id for a in call.args if isinstance(a, ast.Name)] == ["msg_text", "command"]
+        assert len(call.args) == 2 and not call.keywords
+
+    # --- end to end through the real hook subprocess ---
+
+    def test_stage_prefix_blocked_in_unmapped_repo_via_hook(
+        self, run_hook, make_event, tmp_state_dir, tmp_path
+    ):
+        """Repo-scoping proof at the real entry point: an S-prefix commit in a
+        repo that is NOT in the map is still blocked.
+
+        SCOPE-REGRESSION GUARD, not a RED-first test. It touches no new symbol
+        and asserts behavior that is already true today (`S1:` is not a
+        conventional prefix, so the pre-change hook blocks it too) -- it is
+        GREEN before AND after, and that is its job: it proves the new allow
+        route did not leak out of the mapped repo. It is the one test in this
+        class exempt from the Step 5 all-must-fail rule.
+        """
+        _init_feature_repo(tmp_path)
+        _seed_verification_state(tmp_state_dir)
+        with self._in_dir(tmp_path):
+            event = make_event("Bash", command='git commit -m "S1: unmapped repo"')
+            with _env_override("GIT_SAFETY_EXTRA_COMMIT_PREFIX_RE", None):
+                result = run_hook("git-safety-guard.py", event)
+            assert result.returncode == 0, f"hook must exit 0, got {result.returncode}; stderr={result.stderr!r}"
+            assert result.parsed is not None
+            assert result.parsed["decision"] == "block"
+            assert "FORMAT ERROR" in result.parsed["reason"]
 
 
 class TestCommitMessageUnparseable:

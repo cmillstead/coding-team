@@ -73,9 +73,17 @@ EXTRA_COMMIT_PREFIX_RE_ENV = "GIT_SAFETY_EXTRA_COMMIT_PREFIX_RE"
 
 
 def _extra_prefix_ok(msg_text: str) -> bool:
-    """Repo-scoped escape hatch: an operator-set regex of ADDITIONAL allowed
+    """PROCESS-GLOBAL escape hatch: an operator-set regex of ADDITIONAL allowed
     commit-message prefixes (e.g. codesight-mcp's R10 '^M\\d+\\.\\d+:'). Unset or
-    invalid regex -> False (strict conventional prefixes still enforced)."""
+    invalid regex -> False (strict conventional prefixes still enforced).
+
+    It is read from the environment, so it applies in EVERY repo this process
+    touches -- it is NOT repo-scoped, despite what this docstring claimed
+    before. For an allowance limited to one repository use
+    REPO_COMMIT_PREFIX_RES below.
+
+    The value is used VERBATIM: never .strip() it. A trailing space in the
+    operator's regex is significant (test_env_regex_trailing_space_is_significant)."""
     pat = os.environ.get(EXTRA_COMMIT_PREFIX_RE_ENV, "")
     if not pat:
         return False
@@ -83,6 +91,240 @@ def _extra_prefix_ok(msg_text: str) -> bool:
         return bool(re.match(pat, msg_text))
     except re.error:
         return False
+
+
+# ---------------------------------------------------------------------------
+# Repo-scoped commit prefixes
+# ---------------------------------------------------------------------------
+# Keys are ABSOLUTE repo roots, spelled exactly as `git rev-parse
+# --show-toplevel` prints them. Values are regexes matched against the commit
+# message with re.match. This is the GENUINELY repo-scoped route: an entry
+# unlocks its prefixes only for a plain commit executed INSIDE that repo,
+# unlike GIT_SAFETY_EXTRA_COMMIT_PREFIX_RE above, which is process-global.
+REPO_COMMIT_PREFIX_RES: dict[str, tuple[str, ...]] = {
+    # local-lora-pipeline keys its commits to a stage/milestone plan:
+    #   S<stage>[.<item>]:      "S1: ...", "S2.3: ...", "S10.a: ..."
+    #   M<milestone>[.<item>]:  "M1: ...", "M2.3: ..."
+    "/Users/cevin/src/local-lora-pipeline": (
+        r"^S[0-9]+(\.[A-Za-z0-9]+)?:",
+        r"^M[0-9]+(\.[A-Za-z0-9]+)?:",
+    ),
+}
+
+
+# Any of these in the RAW command means a second command, a subshell, or a
+# substitution can run, so the directory the commit executes in is no longer
+# knowably this process's cwd.
+_SHELL_SEPARATORS = ("\n", "\r", "\0", ";", "&", "|", "`", "$(", "<(", ">(")
+
+
+def _is_plain_local_git_commit(command: str) -> bool:
+    """True iff *command* is a bare `git commit ...` run in THIS process's cwd.
+
+    A strict WHITELIST. It replaces an earlier `\\bcd\\b` token blacklist that
+    was repeatedly bypassable: `pushd /B && git commit`, `c\\d /B && ...`,
+    `'c'd /B && ...` and `env --chdir=/B git commit ...` all change directory
+    without ever producing a bare `cd` token. Each new bypass shape needed
+    another blacklist entry; a whitelist retires the whole class at once.
+
+    Two conditions, both required:
+      1. The raw string contains none of _SHELL_SEPARATORS, so nothing can run
+         before or beside the commit.
+      2. shlex tokenizes it and the first two tokens are exactly `git`,
+         `commit` -- which rejects every wrapper (`env`, `sudo`, `sh -c`,
+         `command`, `xargs`), every VAR=value prefix, and `git -C <path>`
+         / `git --git-dir=...` (their second token is not `commit`).
+
+    Anything else returns False, which denies route 2 and leaves the strict
+    conventional prefixes and the env hatch in force.
+
+    Accepted cost, deliberately chosen by the user: `cd /repo && git commit`
+    no longer takes the repo route. `~/.claude/command-hygiene.md` already
+    forbids `cd` in agent commands, and a commit message containing `&`, `|`,
+    `;` or a backtick likewise falls back to strict. Denying is the safe
+    direction; route 1 (conventional prefixes) never inspects the command.
+    """
+    if not isinstance(command, str) or not command.strip():
+        return False
+    if any(sep in command for sep in _SHELL_SEPARATORS):
+        return False
+    try:
+        tokens = shlex.split(command)
+    except ValueError:
+        return False
+    return len(tokens) >= 2 and tokens[0] == "git" and tokens[1] == "commit"
+
+
+def _verified_repo_route_root() -> str | None:
+    """This process's repo root, ONLY when git actually confirmed it.
+
+    Deliberately NOT resolve_commit_target_root(): that function returns the
+    candidate DIRECTORY when git resolution fails (its documented fallback),
+    which is correct for deciding whether to REQUIRE verification but wrong for
+    an ALLOW decision. Path.resolve(strict=False) normalizes a non-existent
+    path without complaint, so an unresolved fallback would compare equal to a
+    map key and take the allow route on a machine where the repo does not exist
+    at all -- including CI.
+
+    No fallback: git resolution failing returns None, and None denies.
+    resolve_commit_target_root is left byte-identical so its call sites at
+    :1011, :1023 and :1033 are unaffected.
+
+    Takes no command: route 2 only ever runs for a command that
+    _is_plain_local_git_commit has already accepted, and such a command commits
+    in this process's cwd by construction.
+    """
+    try:
+        return git.resolve_repo_root(os.getcwd())
+    except (OSError, ValueError, TypeError, RuntimeError):
+        return None
+
+
+def _repo_prefix_ok(
+    msg_text: str,
+    target_root: str | None,
+    repo_map: dict[str, tuple[str, ...]] | None = None,
+) -> bool:
+    """True iff target_root is a mapped repo AND msg_text matches one of its regexes.
+
+    Callers must pass a VERIFIED root (see _verified_repo_route_root). This
+    function is pure path arithmetic and cannot tell a real repo from a
+    plausible string.
+
+    Matching is EXACT equality on resolved Paths, never a substring or prefix
+    test: '/x/repo-evil' must not inherit '/x/repo' (case study #35; the same
+    rule _lib/active_plan.py states for the instruction allowlist). Note what
+    this does NOT mean: an ordinary SUBDIRECTORY of the mapped repo does
+    inherit, because git normalizes it up to the same root before it ever
+    reaches here. Only a genuinely different root -- a nested repo or
+    submodule -- stays strict.
+
+    Fails CLOSED on every abnormal input, and never raises: an unknown repo, a
+    falsy or unresolvable target, a malformed key, a malformed value, a
+    malformed regex, or two keys that resolve to the SAME root all return
+    False, leaving the strict conventional prefixes in force. Never raising is
+    a hard requirement, not politeness: route 2 runs before route 3, so an
+    escaping exception would silently disable the env hatch codesight-mcp
+    depends on.
+
+    THE VALIDATION ORDER IS LOAD-BEARING. Every guard below has a mutation in
+    Task 3 that flips a named test; do not add a guard without one, and do not
+    delete one without checking Task 3 first:
+      - EVERY entry is validated and compiled before ANY is selected, and all
+        patterns of an entry are compiled before any is matched. Both exist
+        because `any(...)` short-circuits: with (good_pattern, "["), the lazy
+        form returns True and never raises, so the malformed pattern is
+        invisible. Validating only the selected entry is not enough either --
+        two keys can resolve to the same root, and the later one would
+        otherwise replace (and hide) a malformed earlier one. (M7)
+      - Two keys resolving to the same root reject the WHOLE table. A table
+        that says two different things about one repo is not trustworthy
+        entry-by-entry, and picking either answer is arbitrary. (M8)
+      - The value must be a real `tuple`. A dropped trailing comma yields a
+        str, whose CHARACTERS then compile ('^' matches everything); a list or
+        dict is likewise iterable, so ["^"] or {"^": ...} would allow every
+        message. (M3)
+      - Every element must be a NON-EMPTY str: re.match("", anything) is
+        truthy, and re.compile() accepts an already-compiled Pattern unchanged,
+        so a hand-"optimized" (re.compile("^"),) would allow everything. (M12)
+      - Every key must resolve ABSOLUTE: Path("") is '.' and Path("rel") is
+        relative, either of which resolves against the hook's cwd and can
+        match an unintended repo. (M9)
+      - repo_map must be a dict: .items() on a str raises AttributeError, which
+        is NOT in the except tuple and would escape route 2 entirely. (M10)
+      - OverflowError is in the except tuple alongside OSError, ValueError,
+        TypeError, RuntimeError and re.error. It is not theoretical:
+        re.compile(r"a{999999999999999999999999999999}") raises OverflowError,
+        which is NOT an re.error, so without it the exception escapes route 2
+        and route 3 never runs. RuntimeError is likewise real -- a symlink loop
+        makes Path.resolve() raise it on both CI interpreters. (M6, M6b)
+
+    Guards that were REMOVED because the natural behavior already denies, and
+    no input exists that would ALLOW without them: an empty-tuple check
+    (any([]) is False), isinstance() on target_root, isinstance() on map keys,
+    isinstance() on msg_text. Do not re-add them; a guard nothing can prove is
+    a guard nobody is checking.
+
+    Args:
+        msg_text:    The extracted commit message.
+        target_root: Verified repo root, or None/"" -> deny.
+        repo_map:    Table to consult; defaults to REPO_COMMIT_PREFIX_RES.
+                     Tests pass their own real table -- no patching required.
+    """
+    if repo_map is None:
+        repo_map = REPO_COMMIT_PREFIX_RES
+    try:
+        if not target_root:
+            return False
+        if not isinstance(repo_map, dict):
+            return False
+        root = Path(target_root).expanduser().resolve()
+
+        # Pass 1: validate and compile EVERY entry. No early exit on a match --
+        # a malformed entry anywhere in the table denies the whole table, and a
+        # second key resolving to an already-seen root denies it too.
+        compiled_by_root: dict[Path, list] = {}
+        for mapped_root, patterns in repo_map.items():
+            mapped = Path(mapped_root).expanduser()
+            if not mapped.is_absolute():
+                return False
+            if not isinstance(patterns, tuple):
+                return False
+            compiled = []
+            for pattern in patterns:
+                if not isinstance(pattern, str) or not pattern:
+                    return False
+                compiled.append(re.compile(pattern))
+            resolved = mapped.resolve()
+            if resolved in compiled_by_root:
+                return False
+            compiled_by_root[resolved] = compiled
+
+        # Pass 2: select, then match. An empty tuple compiles to [] and
+        # any([]) is False, so it denies without a guard of its own.
+        selected = compiled_by_root.get(root)
+        if selected is None:
+            return False
+        return any(rx.match(msg_text) for rx in selected)
+    except (OSError, ValueError, TypeError, RuntimeError, OverflowError, re.error):
+        return False
+
+
+def commit_prefix_allowed(
+    msg_text: str,
+    command: str,
+    repo_map: dict[str, tuple[str, ...]] | None = None,
+) -> bool:
+    """True iff the commit message carries an allowed prefix.
+
+    Three independent routes, ORed. The order below is documentation, not
+    precedence -- any one of them allows:
+      1. COMMIT_PREFIXES          -- conventional prefixes, every repo, always.
+      2. REPO_COMMIT_PREFIX_RES   -- repo-scoped; requires a PLAIN local commit
+                                     and a git-VERIFIED cwd repo root.
+      3. GIT_SAFETY_EXTRA_COMMIT_PREFIX_RE -- process-global operator override.
+
+    Route 3 is retained unchanged because callers depend on it (codesight-mcp,
+    RISK_REGISTER R10). Route 2 exists because route 3 cannot be limited to a
+    single repository. Route 2 must never raise, or route 3 stops running.
+
+    Takes the raw `command` only to decide whether route 2 is eligible at all:
+    the repo root comes from this process's cwd, which is trustworthy ONLY for
+    a command that runs no `cd`, no wrapper and no second statement. Route 2's
+    `git rev-parse` subprocess runs only for a message that already failed
+    route 1 and a command that passed the whitelist.
+
+    repo_map is a real-object injection point for tests (no patching); leave it
+    None everywhere in production.
+    """
+    if any(msg_text.startswith(prefix) for prefix in COMMIT_PREFIXES):
+        return True
+    if _is_plain_local_git_commit(command) and _repo_prefix_ok(
+        msg_text, _verified_repo_route_root(), repo_map=repo_map
+    ):
+        return True
+    return _extra_prefix_ok(msg_text)
+
 
 PROJECT_MARKERS = [
     "package.json", "tsconfig.json", "deno.json",
@@ -1121,7 +1363,7 @@ def main():
                 )
                 return
 
-            has_prefix = any(msg_text.startswith(prefix) for prefix in COMMIT_PREFIXES) or _extra_prefix_ok(msg_text)
+            has_prefix = commit_prefix_allowed(msg_text, command)
             if not has_prefix:
                 first_word = msg_text.split()[0] if msg_text.strip() else "(empty)"
                 prefixes_str = ", ".join(COMMIT_PREFIXES)
