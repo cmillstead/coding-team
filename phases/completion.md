@@ -78,6 +78,8 @@ When CI fails, read `phases/ci-fix-protocol.md` and follow its instructions. Key
 - **Effective Trivial:** SKIP the completion summary. The matrix specifies "SKIP at Trivial" — do not produce a summary file.
 - **Effective Small/Medium/Large:** Produce the summary below.
 
+Read ~/.claude/reference/user-facing-translation.md before writing this report to the user.
+
 After all tasks, produce a summary that includes audit findings across all rounds:
 
 ```
