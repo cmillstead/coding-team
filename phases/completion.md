@@ -10,6 +10,8 @@ Known rationalization: "We already reviewed everything in the audit loop" — au
 
 After all tasks are executed and verified:
 
+Read ~/.claude/reference/user-facing-translation.md before writing this report to the user.
+
 **Effective-tier check:** All Phase-6 gates evaluate the **EFFECTIVE tier** — the single end-of-execution recompute established before the QA reviewer (= max(planned, actual-diff), promote-only, per `phases/task-weight.md`). Phase 6 CONSUMES that tier; it does NOT recompute independently. Exception: if Phase 6 is entered standalone with no effective tier available, compute it the same way — SIZE = diff counts, RISK = re-apply the `phases/task-weight.md` semantic risk-signal checklist to what the diff DOES (NOT a grep).
 
 1. **Run full test suite:**

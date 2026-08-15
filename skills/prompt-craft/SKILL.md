@@ -138,6 +138,9 @@ Read the file completely, then evaluate. For standard block templates, see `skil
 - [ ] Full context provided? Output format specified? Failure handling?
 
 ### Report format
+
+Read ~/.claude/reference/user-facing-translation.md before writing this report to the user.
+
 ```
 AUDIT: [skill/prompt name]
 PASS: [what's working well]

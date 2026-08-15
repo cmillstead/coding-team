@@ -71,6 +71,8 @@ Only flag deps where health is genuinely concerning — don't create noise for s
 
 ### 5. Report
 
+Read ~/.claude/reference/user-facing-translation.md before writing this report to the user.
+
 ```markdown
 ## Dependency Audit — [project name]
 

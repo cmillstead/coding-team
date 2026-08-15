@@ -43,6 +43,8 @@ N-file/N-line diff. Confirm by citing specific code sections you reviewed."
 
 ## Audit Triage
 
+Read ~/.claude/reference/user-facing-translation.md before writing any of the user-facing reports in this section.
+
 After collecting findings from all auditors:
 
 **Refactor gate:** For any finding categorized as "refactor" (not a bug or security issue), apply this bar: *"Would a senior engineer say this is clearly wrong, not just imperfect?"* Reject style preferences and marginal improvements.

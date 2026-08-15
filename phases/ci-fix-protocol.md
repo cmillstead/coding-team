@@ -37,6 +37,8 @@ Read the COMPLETE output. Do NOT skim or summarize.
 | Env/config | "not found" (for env vars), "version", "unsupported engine" | Check CI config vs local env, report difference to user |
 | Unknown | None of the above match | Paste the FULL log output to the user and ask for guidance. Do NOT guess. |
 
+Read ~/.claude/reference/user-facing-translation.md before writing this report to the user.
+
 **Non-code failures (infra/billing/permissions/unknown):** Present to user immediately:
 
 > CI failed with a non-code error. This is not fixable by changing code.

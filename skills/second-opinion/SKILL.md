@@ -15,6 +15,8 @@ When invoked standalone:
 
 When invoked from /coding-team pipeline: the lead specifies mode and target.
 
+Read ~/.claude/reference/user-facing-translation.md before presenting results in ANY mode — review, challenge, or consult.
+
 For all command examples, iterative revision protocol, and pipeline integration details, see `skills/second-opinion/reference.md`.
 
 ---
@@ -160,8 +162,6 @@ Adversarial mode — see reference.md → Mode 2: Challenge.
 ## Mode 3: Consult (open-ended)
 
 Open-ended consultation — see reference.md → Mode 3: Consult.
-
----
 
 ## Model Selection
 

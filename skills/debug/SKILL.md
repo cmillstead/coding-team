@@ -133,6 +133,8 @@ The agent that confirms its hypothesis (or the strongest evidence) informs Phase
 
 ## Phase 5: Report
 
+Read ~/.claude/reference/user-facing-translation.md before writing this report to the user.
+
 Every debug session produces a structured report:
 
 ```

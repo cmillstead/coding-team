@@ -67,6 +67,8 @@ Every finding MUST include:
 
 ### 4. Report
 
+Read ~/.claude/reference/user-facing-translation.md before writing this report to the user.
+
 ```markdown
 ## Accessibility Audit
 
