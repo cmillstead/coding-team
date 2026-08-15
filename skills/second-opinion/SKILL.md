@@ -15,6 +15,8 @@ When invoked standalone:
 
 When invoked from /coding-team pipeline: the lead specifies mode and target.
 
+Read ~/.claude/reference/user-facing-translation.md before presenting results in ANY mode — review, challenge, or consult.
+
 For all command examples, iterative revision protocol, and pipeline integration details, see `skills/second-opinion/reference.md`.
 
 ---
@@ -129,8 +131,6 @@ After Codex returns, before presenting results:
 4. Report: `Validation: all findings reference files in $(basename $REPO_ROOT)` or `WARNING: Codex reviewed wrong repo — N findings reference paths outside this repo`
 
 ### Present results
-
-Read ~/.claude/reference/user-facing-translation.md before writing this report to the user.
 
 ```
 ## Codex Review
