@@ -130,6 +130,8 @@ After Codex returns, before presenting results:
 
 ### Present results
 
+Read ~/.claude/reference/user-facing-translation.md before writing this report to the user.
+
 ```
 ## Codex Review
 **Verdict:** PASS | FAIL | APPROVED | REVISE
@@ -160,8 +162,6 @@ Adversarial mode — see reference.md → Mode 2: Challenge.
 ## Mode 3: Consult (open-ended)
 
 Open-ended consultation — see reference.md → Mode 3: Consult.
-
----
 
 ## Model Selection
 
