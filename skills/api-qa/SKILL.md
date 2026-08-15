@@ -62,6 +62,8 @@ Test against the project's own SLAs (check README, ARCHITECTURE.md, or config fo
 
 ### 6. Report
 
+Read ~/.claude/reference/user-facing-translation.md before writing this report to the user.
+
 ```markdown
 ## API Test Report
 

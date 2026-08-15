@@ -58,7 +58,11 @@ Before troubleshooting, assign:
 
 ## Post-Mortem Protocol
 
-Run within 48 hours while memory is fresh. Structure:
+Run within 48 hours while memory is fresh.
+
+Read ~/.claude/reference/user-facing-translation.md before writing this report to the user.
+
+Structure:
 
 ```markdown
 # Post-Mortem: [Incident Title]
