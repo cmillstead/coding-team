@@ -33,6 +33,110 @@ GIT_GLOBAL_FLAGS = frozenset({
 # Tokens that end one command in a shell chain and begin the next.
 _SHELL_SEPARATORS = frozenset({"&&", "||", ";", "|", "&"})
 
+# Shell keywords / grouping tokens that open a new simple-command position, so a
+# `git` token immediately after one is a real invocation (`do git push`,
+# `then git commit`, `{ git commit; }`, `( git commit )`, `! git commit`).
+_HEAD_STARTERS = frozenset({"do", "then", "else", "{", "(", "!"})
+
+# Command wrappers that exec their trailing argv as a new command, so the `git`
+# token that follows one (possibly past assignments/options) still runs git
+# (`sudo git push`, `time git commit`, `xargs git commit`, `sudo -u bob git
+# commit`, `nice -n 10 git commit`). Deliberately a closed allowlist: an unknown
+# wrapper is NOT assumed to exec git. A git token past a wrapper's OWN options is
+# recognised via the SEGMENT-HEAD clause in _git_token_is_head — the segment head
+# being a wrapper is what separates `sudo -u bob git commit` (git is real) from
+# `grep -e git commit` (git is an argument); the immediate predecessor is a
+# dash-option in both and cannot tell them apart.
+_EXEC_WRAPPERS = frozenset({
+    "env", "sudo", "time", "command", "exec", "nohup",
+    "nice", "ionice", "stdbuf", "xargs", "timeout", "builtin",
+})
+
+# Leading `NAME=value` environment assignment, e.g. `FOO=1 git commit`.
+_ASSIGN_RE = re.compile(r"^[A-Za-z_]\w*=")
+
+# Shell builtins/commands that change the process working directory.
+_DIR_CHANGE_COMMANDS = frozenset({"cd", "pushd", "popd", "chdir"})
+
+# Wrappers that can carry a directory-change OPTION (--chdir / -C) before their
+# argv, e.g. `env --chdir=/B git commit`. Detected separately from a plain `cd`
+# because the safety guard can never confirm which directory they land in.
+_CHDIR_WRAPPERS = frozenset({"env", "command"})
+
+
+def _git_token_is_head(prev: str | None, segment_head: str | None = None) -> bool:
+    """True iff a git token preceded by *prev* is in command-head position.
+
+    Over-detects on ambiguity (security-safe): only DEMOTES a git token to an
+    argument when the preceding token is a plain command/argument word
+    (`echo git commit`, `grep git commit f`). Every ambiguous predecessor is
+    treated as head so a real git invocation still reaches the gates.
+
+    A git token is head-position iff EITHER a boundary condition on *prev* holds
+    (start-of-segment, a separator, a glued separator, a head-starter keyword, an
+    exec-wrapper, a `VAR=val` assignment, or git-after-git), OR *segment_head* —
+    the command word that starts this pipeline/compound segment — is a known
+    exec-wrapper. The segment-head clause is the distinguishing fact: `sudo -u bob
+    git commit`, `nice -n 10 git commit` and `env --chdir=/B git commit` all run a
+    REAL git past the wrapper's OWN options, while `grep -e git commit f` has git
+    sitting in a text tool's argument list. The immediate predecessor is a
+    dash-option (`-e`, `--chdir=/B`) or an option value (`bob`, `10`) in BOTH, so
+    it cannot tell them apart — the segment head can (`sudo`/`nice`/`env` are
+    wrappers, `grep` is not).
+    """
+    if prev is None:
+        return True
+    if prev in _SHELL_SEPARATORS:
+        return True
+    if prev and prev[-1] in ";&|":
+        # Glued separator that survived tokenisation: `git add f; git commit`
+        # renders as [..., 'f;', 'git', ...], so the ';' rides on the prev token.
+        return True
+    if prev in _HEAD_STARTERS:
+        return True
+    if prev in _EXEC_WRAPPERS:
+        return True
+    if _ASSIGN_RE.match(prev):
+        return True
+    if _is_git_token(prev):
+        # Defensive: `git ... git commit` without a separator (unusual) — still
+        # treat the second git as head so its subcommand is seen.
+        return True
+    if segment_head is not None and segment_head in _EXEC_WRAPPERS:
+        # The command that starts this segment execs its trailing argv, so a git
+        # token past the wrapper's own options/assignments is a REAL invocation
+        # (`sudo -u bob git commit`, `nice -n 10 git commit`). This is what a
+        # blunt `prev.startswith("-")` clause could not do without also
+        # false-matching `grep -e git commit` (segment head `grep`, git is an
+        # argument) — a TRK-048 regression.
+        return True
+    return False
+
+
+def _segment_heads(tokens: list[str]) -> list[str | None]:
+    """Return, per token position, the command word that starts its shell segment.
+
+    The segment head is the FIRST non-assignment token after the most recent
+    shell separator (start-of-command counts as a separator); leading `VAR=val`
+    assignment tokens are skipped, so `FOO=1 sudo git commit` has head `sudo`.
+    _parse_invocations uses this to tell a git token run past a wrapper's own
+    options (a real invocation) from a git token in a text tool's argument list.
+    """
+    heads: list[str | None] = []
+    current_head: str | None = None
+    awaiting_head = True
+    for token in tokens:
+        if awaiting_head and not _ASSIGN_RE.match(token):
+            current_head = token
+            awaiting_head = False
+        heads.append(current_head)
+        if token in _SHELL_SEPARATORS or (token and token[-1] in ";&|"):
+            # A separator (or a glued `f;`) ends this segment; the next token
+            # starts a fresh one whose head we have not seen yet.
+            current_head = None
+            awaiting_head = True
+    return heads
+
 
 def _is_git_token(token: str) -> bool:
     """True iff *token* invokes git itself (`git`, `/usr/bin/git`).
@@ -50,6 +154,106 @@ def _is_git_token(token: str) -> bool:
     return token == "git" or token.endswith("/git")
 
 
+# Shell separator characters that combine into `;`, `|`, `&`, `&&`, `||`. A run
+# of these outside quotes is a statement boundary that shlex leaves GLUED to an
+# adjacent word when no whitespace surrounds it.
+_GLUED_SEP_CHARS = frozenset(";|&")
+
+# Closing grouping tokens. shlex glues a trailing `)`/`}` onto the preceding word
+# (`git commit)` -> subcommand 'commit)'), which HIDES the subcommand from the
+# gates. Splitting the CLOSING grouper surfaces the subcommand so it is detected;
+# the OPENING `(`/`{`/`$(` is deliberately NOT split, so a `$(git ...)` command
+# substitution stays glued as `$(git` and is not mistaken for a real invocation
+# (the TRK-048 head-anchoring contract).
+_CLOSING_GROUP_CHARS = frozenset(")}")
+
+
+def _split_glued_separators(command: str) -> str:
+    """Insert whitespace around UNQUOTED shell separators/closing groupers.
+
+    shlex leaves a separator glued to an adjacent word when no whitespace
+    surrounds it (`git add f&&git commit` -> ['add', 'f&&git', 'commit'],
+    `git commit; echo` -> ['commit;', 'echo'], `(cd /r && git commit)` ->
+    [..., 'commit)']), which hides the second command from the git parser and the
+    cd-path resolver. This pass rewrites such runs of `;`, `|`, `&` (covering
+    `;`, `|`, `&`, `&&`, `||`) and each closing `)`/`}` with surrounding
+    whitespace, so `shlex.split` then yields them as standalone tokens.
+
+    Quote- and escape-aware: a separator inside single/double quotes (or one that
+    is backslash-escaped) is left untouched, so a quoted commit message such as
+    -m "a;b && c" keeps its `;`/`&&` as literal message text, not a split, and a
+    conventional-commit scope like -m "fix(x): y" keeps its parens intact.
+
+    Never raises: returns the original command on any unexpected input, so the
+    hook that imports this module cannot be block-closed by a tokeniser bug.
+    """
+    try:
+        if not isinstance(command, str):
+            return command
+        out: list[str] = []
+        in_single = False
+        in_double = False
+        index = 0
+        length = len(command)
+        while index < length:
+            char = command[index]
+            if in_single:
+                out.append(char)
+                if char == "'":
+                    in_single = False
+                index += 1
+                continue
+            if in_double:
+                if char == "\\" and index + 1 < length:
+                    out.append(char)
+                    out.append(command[index + 1])
+                    index += 2
+                    continue
+                out.append(char)
+                if char == '"':
+                    in_double = False
+                index += 1
+                continue
+            # Unquoted (normal) state.
+            if char == "\\" and index + 1 < length:
+                # Escaped char — emit both verbatim so an escaped `;`/`&` is not
+                # treated as a separator and a shlex escape (`c\d`) is preserved.
+                out.append(char)
+                out.append(command[index + 1])
+                index += 2
+                continue
+            if char == "'":
+                in_single = True
+                out.append(char)
+                index += 1
+                continue
+            if char == '"':
+                in_double = True
+                out.append(char)
+                index += 1
+                continue
+            if char in _GLUED_SEP_CHARS:
+                run_end = index
+                while run_end < length and command[run_end] in _GLUED_SEP_CHARS:
+                    run_end += 1
+                out.append(" ")
+                out.append(command[index:run_end])
+                out.append(" ")
+                index = run_end
+                continue
+            if char in _CLOSING_GROUP_CHARS:
+                out.append(" ")
+                out.append(char)
+                out.append(" ")
+                index += 1
+                continue
+            out.append(char)
+            index += 1
+        return "".join(out)
+    except Exception:  # noqa: BLE001 — tokeniser fail-safe: this module is imported by a hook that blocks closed on an uncaught exception. Returning the raw command degrades to the pre-existing (glued) tokenisation, never a crash.
+        return command
+
+
 def _tokenize(command: str) -> list[str]:
     """Split *command* into shell tokens, degrading to a whitespace split.
 
@@ -57,15 +261,21 @@ def _tokenize(command: str) -> list[str]:
     hook that blocks closed on an exception, so a malformed command must still
     produce tokens rather than propagate.
 
+    Glued shell separators (`f&&git`, `commit;`) and closing groupers (`commit)`)
+    are normalised via _split_glued_separators FIRST — quote-aware, so a
+    separator inside a quoted message is left intact — so the downstream head
+    anchoring, subcommand matching and cd-path resolution all see clean tokens.
+
     The isinstance check is not decoration: `shlex.split(None)` does not raise,
     it READS STDIN, which would hang the PreToolUse hook and freeze the session.
     """
     if not isinstance(command, str):
         return []
+    normalized = _split_glued_separators(command)
     try:
-        return shlex.split(command)
+        return shlex.split(normalized)
     except ValueError:
-        return command.split()
+        return normalized.split()
 
 
 def _parse_invocations(tokens: list[str]) -> list[dict]:
@@ -74,6 +284,11 @@ def _parse_invocations(tokens: list[str]) -> list[dict]:
     Each record is ``{"globals": [(option, value)], "subcommand": str | None,
     "args": [str]}``. Both git_invocations and git_global_target_dir read these
     records, so the option grammar is written once rather than twice.
+
+    A `git` token only starts a record when it is in command-HEAD position
+    (see _git_token_is_head): a git token in argument position — `echo git
+    commit`, `grep git commit f`, `ls # git commit` — is skipped, so a textual
+    mention of a git command never trips the gates (TRK-048 / TRK-139).
 
     The arg scan ends at a git-looking token as well as at a shell separator,
     because a separator does not always survive tokenisation: shlex renders
@@ -86,10 +301,22 @@ def _parse_invocations(tokens: list[str]) -> list[dict]:
     records = []
     index = 0
     total = len(tokens)
+    heads = _segment_heads(tokens)
     while index < total:
         if not _is_git_token(tokens[index]):
             index += 1
             continue
+        prev = tokens[index - 1] if index > 0 else None
+        if not _git_token_is_head(prev, heads[index]):
+            # A git token in argument position (`echo git commit`, `grep git
+            # commit f`, `grep -e git commit f`, `ls # git commit`) is NOT an
+            # invocation — skip it so the gates never fire on a mere textual
+            # mention (TRK-048 / TRK-139). The segment head (`grep`/`echo`) is
+            # not an exec-wrapper, so the dash-option predecessor `-e` does not
+            # promote git to head.
+            index += 1
+            continue
+        head_index = index  # token position of this invocation's `git` (TRK-139 Fix C)
         index += 1
 
         globals_seen: list[tuple[str, str | None]] = []
@@ -133,7 +360,8 @@ def _parse_invocations(tokens: list[str]) -> list[dict]:
             index += 1
 
         records.append(
-            {"globals": globals_seen, "subcommand": subcommand, "args": args}
+            {"globals": globals_seen, "subcommand": subcommand, "args": args,
+             "head_index": head_index}
         )
     return records
 
@@ -269,6 +497,234 @@ def resolve_command_target_dir(command: str) -> str:
         # Path() rejects NUL bytes and expanduser() fails with no resolvable
         # home; either way, fall back to the pre-existing cd/cwd result.
         return str(base_path)
+
+
+def _carries_chdir_option(token: str) -> bool:
+    """True iff *token* is a directory-change option (`--chdir[=...]` / `-C`)."""
+    return token == "--chdir" or token.startswith("--chdir=") or token == "-C"
+
+
+def _find_dir_change_ops(tokens: list[str]) -> list[dict]:
+    """Return one record per directory-change op in *tokens*.
+
+    A record is ``{"kind": str, "path": str | None, "leading": bool,
+    "index": int}``. The kinds are the plain builtins (`cd`/`pushd`/`popd`/
+    `chdir`) and ``"wrapper-chdir"`` for an env/command wrapper carrying
+    `--chdir`/`-C`. ``index`` is the op's token position, which
+    resolve_branch_check_target uses to ignore a dir-change that lands AFTER the
+    last gated git op (TRK-139 Fix C). Only HEAD-position tokens are considered
+    (reusing _git_token_is_head's boundary logic), so a directory name that
+    merely appears as an argument is not mistaken for a `cd`.
+    """
+    ops: list[dict] = []
+    total = len(tokens)
+    for index, token in enumerate(tokens):
+        prev = tokens[index - 1] if index > 0 else None
+        if not _git_token_is_head(prev):
+            continue
+        if token in _DIR_CHANGE_COMMANDS:
+            path = None
+            if index + 1 < total:
+                nxt = tokens[index + 1]
+                if nxt not in _SHELL_SEPARATORS and not (nxt and nxt[-1] in ";&|"):
+                    path = nxt
+            ops.append({"kind": token, "path": path, "leading": index == 0,
+                        "index": index})
+        elif token in _CHDIR_WRAPPERS:
+            # Scan the wrapper's own tokens (assignments/options) up to its wrapped
+            # command or the next separator; a --chdir/-C among them is a chdir op.
+            scan = index + 1
+            while scan < total:
+                inner = tokens[scan]
+                if inner in _SHELL_SEPARATORS or (inner and inner[-1] in ";&|"):
+                    break
+                if _carries_chdir_option(inner):
+                    ops.append({"kind": "wrapper-chdir", "path": None,
+                                "leading": index == 0, "index": index})
+                    break
+                if not inner.startswith("-") and not _ASSIGN_RE.match(inner):
+                    break  # reached the wrapped command word
+                scan += 1
+    return ops
+
+
+def _is_clean_absolute(path: str) -> bool:
+    """True iff *path* is absolute and free of a NUL byte (safe to shell out)."""
+    if "\x00" in path:
+        return False
+    return Path(path).is_absolute()
+
+
+def _apply_relative_global(base: str, global_dir: str | None) -> str:
+    """Apply a RELATIVE global target to *base*, or return *base* if there is none.
+
+    An absolute global_dir is returned as-is (defensive; rule 1 handles absolute
+    globals before this is reached).
+    """
+    if global_dir is None:
+        return base
+    global_path = Path(global_dir)
+    if global_path.is_absolute():
+        return str(global_path)
+    return str(Path(base) / global_path)
+
+
+def _resolve_or_candidate(directory: str) -> str:
+    """Canonicalise *directory* and resolve it to its git repo root, else return it.
+
+    ``Path.resolve()`` runs BEFORE resolve_repo_root shells out, so an embedded
+    NUL (ValueError) or a symlink loop (RuntimeError/OSError) is raised here and
+    caught by resolve_branch_check_target's except clause rather than reaching
+    subprocess, which does not catch a NUL in argv. A directory that is not inside
+    a git repo is a concrete, unambiguous target — returned unchanged so the
+    branch check runs against it directly.
+    """
+    canonical = str(Path(directory).resolve())
+    root = resolve_repo_root(canonical)
+    return root if root is not None else canonical
+
+
+# Shell grouping / substitution characters. Their presence OUTSIDE quotes means
+# the commit/push/merge can run in a subshell or a substitution whose cwd the
+# safety guard can never confirm, so the branch gate must fail-safe block.
+# `$(` is covered by `(`; `${...}` by `{`.
+_GROUPING_SUBSTITUTION_CHARS = frozenset("(){}`")
+
+
+def _has_unquoted_grouping_or_substitution(command: str) -> bool:
+    """True iff *command* has a shell grouping/substitution char OUTSIDE quotes.
+
+    Flags `(`, `)`, `{`, `}` and a backtick (so subshells `( ... )`, brace groups
+    `{ ...; }`, command substitutions `$( ... )` / backticks, and `${...}`
+    expansions all trip). This is the fail-safe trigger for resolve_branch_check_
+    target: any such construct means the commit's cwd/repo is unknowable.
+
+    QUOTE-AWARE by design, via a char-by-char state machine that tracks single-
+    and double-quote spans and backslash escapes. This is the whole point: a
+    conventional-commit message such as -m "fix(parser): tidy (again)" has
+    literal parens INSIDE quotes and must NOT be flagged. A naive substring scan
+    (`"(" in command`) would false-block every scoped conventional-commit
+    message, which is why compound_allow.is_multi_statement (a broader,
+    quote-stripping detector) is NOT reused here.
+
+    Never raises: returns False on any unexpected input. A pathological input
+    that somehow escapes this scan still reaches resolve_branch_check_target's
+    own try/except, which fails safe to (None, True).
+    """
+    try:
+        if not isinstance(command, str):
+            return False
+        in_single = False
+        in_double = False
+        index = 0
+        length = len(command)
+        while index < length:
+            char = command[index]
+            if in_single:
+                if char == "'":
+                    in_single = False
+                index += 1
+                continue
+            if in_double:
+                if char == "\\" and index + 1 < length:
+                    index += 2
+                    continue
+                if char == '"':
+                    in_double = False
+                index += 1
+                continue
+            # Unquoted (normal) state.
+            if char == "\\" and index + 1 < length:
+                index += 2
+                continue
+            if char == "'":
+                in_single = True
+            elif char == '"':
+                in_double = True
+            elif char in _GROUPING_SUBSTITUTION_CHARS:
+                return True
+            index += 1
+        return False
+    except Exception:  # noqa: BLE001 — fail-safe: a scan bug degrades to "no grouping detected"; the downstream resolver rules are themselves fail-safe on ambiguity.
+        return False
+
+
+def resolve_branch_check_target(command: str) -> tuple[str | None, bool]:
+    """Return (repo_root_or_candidate, ambiguous) for the branch gate. NEVER raises.
+
+    ``ambiguous=True`` (paired with a None target) tells the caller to fail-safe
+    block: the safety guard cannot confirm which repo/branch a commit/push/merge
+    in *command* targets. Clean resolution is a WHITELIST of three shapes, checked
+    in order; every other shape is ambiguous.
+
+    1. An ABSOLUTE git global target (`git -C /abs`, `--git-dir=/abs/.git`, ...)
+       is cwd-independent and dominates any cd/pushd — target = that path.
+    2. NO directory-change op present — base = the hook process cwd; a relative
+       global target applies to it.
+    3. EXACTLY ONE directory-change op, a LEADING `cd` with an ABSOLUTE path —
+       base = that path; a relative global target applies to it. (Multiple git
+       invocations in the chain do NOT make the cwd ambiguous.)
+
+    Ambiguous otherwise: >1 dir-change op; a non-leading `cd`; any
+    pushd/popd/chdir; an env/command wrapper carrying --chdir/-C; a single
+    relative `cd`.
+
+    Fail direction is ambiguous → block: the whole body is wrapped so any
+    OSError/ValueError/RuntimeError (Path() raises ValueError on an embedded NUL,
+    RuntimeError on a symlink-loop resolve()) returns (None, True) rather than
+    propagating to git-safety-guard's block-closed top-level handler.
+    """
+    try:
+        # Fix A (TRK-137 class): an UNQUOTED shell grouping/substitution
+        # construct — a subshell `( ... )`, a brace group `{ ...; }`, a command
+        # substitution `$( ... )` / backticks, or a `${...}` expansion — means the
+        # commit can run in a subshell whose cwd shlex cannot expose to
+        # _find_dir_change_ops. Fail-safe block BEFORE the clean-resolution rules;
+        # quote-aware so a scoped conventional-commit message keeps resolving.
+        if _has_unquoted_grouping_or_substitution(command):
+            return (None, True)
+
+        tokens = _tokenize(command)
+        ops = _find_dir_change_ops(tokens)
+        global_dir = git_global_target_dir(command)
+
+        # Fix C (TRK-139 own regression): a dir-change op positioned AFTER the
+        # last gated git op (commit/push/merge) cannot affect that op's cwd, so it
+        # does not contribute to ambiguity. `git commit && cd /tmp` resolves the
+        # cwd cleanly; `cd /A && cd /B && git commit` (both cds precede the
+        # commit) stays ambiguous.
+        records = _parse_invocations(tokens)
+        gated_indices = [
+            record["head_index"] for record in records
+            if record.get("subcommand") in ("commit", "push", "merge")
+        ]
+        if gated_indices:
+            last_gated_index = max(gated_indices)
+            ops = [op for op in ops if op["index"] < last_gated_index]
+
+        # Rule 1: an absolute global target dominates any cd/pushd.
+        if global_dir is not None and _is_clean_absolute(global_dir):
+            return (_resolve_or_candidate(global_dir), False)
+
+        if not ops:
+            # Rule 2: base = process cwd; a relative global target applies to it.
+            candidate = _apply_relative_global(os.getcwd(), global_dir)
+            return (_resolve_or_candidate(candidate), False)
+
+        # At least one directory-change op is present.
+        if len(ops) != 1:
+            return (None, True)  # >1 chdir op — cannot confirm the landing dir
+        op = ops[0]
+        if op["kind"] != "cd" or not op["leading"]:
+            return (None, True)  # pushd/popd/chdir/wrapper-chdir, or a non-leading cd
+        cd_path = op["path"]
+        if cd_path is None or not _is_clean_absolute(cd_path):
+            return (None, True)  # a relative (or missing) cd target is ambiguous
+        # Rule 3: single leading absolute cd; a relative global target applies to it.
+        candidate = _apply_relative_global(cd_path, global_dir)
+        return (_resolve_or_candidate(candidate), False)
+    except (OSError, ValueError, RuntimeError):
+        return (None, True)
 
 
 def extract_git_command(command: str) -> str | None:

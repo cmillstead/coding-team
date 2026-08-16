@@ -554,6 +554,56 @@ class TestGitSubcommandDetection:
         assert result.returncode == 0, result.stderr
         assert result.stdout.strip() == "True False"
 
+    def test_glued_semicolon_no_space_detects_commit(self):
+        """`git commit; echo ok` — the glued `;` must not hide the commit (Fix B).
+
+        Before the tokeniser split unquoted separators, shlex yielded
+        [..., 'commit;', 'echo', ...] so the subcommand parsed as 'commit;' and
+        has_git_subcommand(..., 'commit') was FALSE — a silently ungated commit.
+        Mutation lever: drop the _split_glued_separators call in _tokenize and
+        this goes RED.
+        """
+        command = "git commit; echo ok"
+        result = run_python(
+            'from _lib.git import has_git_subcommand; '
+            f'print(has_git_subcommand({command!r}, "commit"))',
+        )
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.strip() == "True"
+
+    def test_glued_ampamp_detects_both_subcommands(self):
+        """`git add f&&git commit` — a glued `&&` must not fuse `f&&git` (Fix B).
+
+        Old tokenising yielded [..., 'f&&git', 'commit'], so the second commit
+        was absorbed and never gated. After splitting the glued `&&` BOTH the add
+        and the commit are surfaced.
+        """
+        command = "git add f&&git commit"
+        result = run_python(
+            'from _lib.git import git_subcommands; '
+            f'print(sorted(git_subcommands({command!r})))',
+        )
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.strip() == "['add', 'commit']"
+
+    def test_quoted_separator_is_not_split(self):
+        """`git commit -m "a;b && c"` — separators INSIDE quotes stay literal (Fix B guard).
+
+        The glued-separator normalisation MUST be quote-aware: a `;`/`&&` inside a
+        quoted commit message is message text, not a statement boundary. A naive
+        post-shlex split (or a raw substring split) would shred the message into
+        several tokens. Mutation lever (verified BOTH directions): make
+        _split_glued_separators quote-UNAWARE and this goes RED.
+        """
+        command = 'git commit -m "a;b && c"'
+        result = run_python(
+            "import json\n"
+            "from _lib.git import _tokenize\n"
+            f"print(json.dumps(_tokenize({command!r})))\n"
+        )
+        assert result.returncode == 0, result.stderr
+        assert json.loads(result.stdout) == ["git", "commit", "-m", "a;b && c"]
+
 
 # ---------------------------------------------------------------------------
 # git_global_target_dir
@@ -660,3 +710,283 @@ class TestResolveCommandTargetDirGitOptions:
         result = self._resolve("git commit -m x", base)
         assert result.returncode == 0, result.stderr
         assert result.stdout.strip() == str(Path(base).resolve())
+
+
+# ---------------------------------------------------------------------------
+# _git_token_is_head — head-anchored git detection (TRK-048 / TRK-139)
+# ---------------------------------------------------------------------------
+
+class TestHeadAnchoredGitDetection:
+    """A `git` token in argument position is not an invocation (TRK-048 / TRK-139)."""
+
+    @staticmethod
+    def _invocations(command: str):
+        result = run_python(
+            "import json\n"
+            "from _lib.git import git_invocations\n"
+            f"print(json.dumps(git_invocations({command!r})))\n"
+        )
+        assert result.returncode == 0, result.stderr
+        return json.loads(result.stdout)
+
+    @pytest.mark.parametrize("command", [
+        "echo git commit -m x",
+        "grep git commit file",
+        "ls # git commit here",
+        "printf git push",
+        "for s in $(git ls-remote --heads o); do echo $s; done",
+        'track add "note: git commit -m foo"',
+        "python3 -c \"re.search('git commit', x)\"",
+    ])
+    def test_git_in_argument_position_is_not_an_invocation(self, command):
+        """echo/grep/comment/quoted mentions of a git command must parse to []."""
+        assert self._invocations(command) == []
+
+    def test_real_leading_commit_still_parsed(self):
+        assert self._invocations("git commit -m x") == [["commit", ["-m", "x"]]]
+
+    def test_glued_separator_keeps_second_commit(self):
+        """`git add f; git commit -m x` → BOTH invocations.
+
+        Tokenises as [..., 'f;', 'git', 'commit', ...]; the ';' rides on the
+        prev token, so the second `git` is head-position via the `prev[-1] in
+        ';&|'` clause. Mutation lever: delete that clause and the commit vanishes.
+        """
+        subs = [inv[0] for inv in self._invocations("git add f; git commit -m x")]
+        assert subs == ["add", "commit"]
+
+    def test_env_chdir_wrapper_commit_is_detected(self):
+        """`env --chdir=/B git commit` runs a real commit → must be seen.
+
+        The git token follows a dash-option (`--chdir=/B`); over-detecting it as
+        head is what lets the branch gate reach it and reject the ambiguous cwd.
+        """
+        assert self._invocations("env --chdir=/B git commit") == [["commit", []]]
+
+    def test_env_assignment_wrapper_commit_is_detected(self):
+        assert self._invocations("env FOO=1 git commit") == [["commit", []]]
+
+    @pytest.mark.parametrize("command", [
+        "grep -e git commit file",
+        "grep --color git commit f",
+    ])
+    def test_text_tool_dash_option_arg_is_not_an_invocation(self, command):
+        """`grep -e git commit f` — git is grep's ARGUMENT, not a command.
+
+        Regression guard for the blunt `prev.startswith('-')` head rule, which
+        promoted the git token merely because its predecessor `-e`/`--color` is a
+        dash-option, re-opening the TRK-048 false block (grep matching text that
+        contains a git command). The SEGMENT HEAD here is `grep` — not an
+        exec-wrapper — so git stays an argument and parses to no invocation.
+
+        Mutation lever (verified BOTH directions): restore
+        `if prev.startswith('-'): return True` in _git_token_is_head and this
+        goes RED (git_invocations detects a phantom commit).
+        """
+        assert self._invocations(command) == []
+
+    def test_sudo_wrapper_with_option_commit_is_detected(self):
+        """`sudo -u bob git commit` runs a REAL commit past sudo's own option.
+
+        The predecessor `bob` is sudo's `-u` VALUE (not a separator/wrapper/
+        assignment), so none of the prev-based boundary clauses fire; only the
+        segment-head-is-wrapper clause (`sudo` in _EXEC_WRAPPERS) promotes git to
+        head. Before the fix this UNDER-detected — a real commit slipped every
+        gate. Mutation lever: drop the segment-head clause and this vanishes.
+        """
+        assert self._invocations("sudo -u bob git commit -m x") == [["commit", ["-m", "x"]]]
+
+    def test_nice_wrapper_with_option_commit_is_detected(self):
+        """`nice -n 10 git commit` — git past nice's `-n` option is a real commit.
+
+        Same mechanism as the sudo case: predecessor `10` is nice's option value,
+        so detection depends entirely on the segment head `nice` being a wrapper.
+        """
+        assert self._invocations("nice -n 10 git commit -m x") == [["commit", ["-m", "x"]]]
+
+
+# ---------------------------------------------------------------------------
+# resolve_branch_check_target — ambiguous-cwd fail-safe (TRK-137)
+# ---------------------------------------------------------------------------
+
+class TestResolveBranchCheckTarget:
+    """Only three cwd-unambiguous command shapes resolve cleanly (TRK-137)."""
+
+    @staticmethod
+    def _resolve(command: str):
+        result = run_python(
+            "import json\n"
+            "from _lib.git import resolve_branch_check_target\n"
+            f"root, ambiguous = resolve_branch_check_target({command!r})\n"
+            "print(json.dumps([root, ambiguous]))\n"
+        )
+        assert result.returncode == 0, result.stderr
+        return json.loads(result.stdout)
+
+    @pytest.mark.parametrize("command", [
+        "cd /A && cd /B && git commit",       # >1 dir-change op
+        "pushd /B && git commit",             # pushd, not cd
+        "env --chdir=/B git commit",          # wrapper carrying --chdir
+        "foo && cd /B && git commit",         # non-leading cd
+        "cd relative && git commit",          # single relative cd
+    ])
+    def test_ambiguous_working_dir(self, command):
+        root, ambiguous = self._resolve(command)
+        assert ambiguous is True
+        assert root is None
+
+    def test_absolute_c_target_resolves_clean(self):
+        root, ambiguous = self._resolve("git -C /featrepo commit")
+        assert ambiguous is False
+        assert root == "/featrepo"
+
+    def test_single_leading_absolute_cd_resolves_clean(self):
+        root, ambiguous = self._resolve("cd /repo && git add f && git commit")
+        assert ambiguous is False
+        assert root == "/repo"
+
+    def test_shlex_normalized_cd_resolves(self):
+        """D5 pin: `c\\d /B` normalises to `cd /B` under shlex → clean /B."""
+        root, ambiguous = self._resolve(r"c\d /B && git commit")
+        assert ambiguous is False
+        assert root == "/B"
+
+    # --- Fix A: unquoted grouping / substitution is fail-safe ambiguous ---
+
+    def test_subshell_cd_commit_is_ambiguous(self):
+        """`(cd /repo && git commit)` — a subshell hides the real cwd (Fix A).
+
+        The `cd` runs in a subshell, so `_find_dir_change_ops` never saw it and
+        the resolver wrongly answered (cwd, False), checking the WRONG repo. An
+        unquoted grouping construct must fail-safe block. Mutation lever: remove
+        the _has_unquoted_grouping_or_substitution guard and this goes RED
+        (resolver returns a concrete cwd, ambiguous False).
+        """
+        root, ambiguous = self._resolve("(cd /repo && git commit)")
+        assert ambiguous is True
+        assert root is None
+
+    def test_brace_group_cd_commit_is_ambiguous(self):
+        """`{ cd /repo && git commit; }` — a brace group is equally opaque (Fix A)."""
+        root, ambiguous = self._resolve("{ cd /repo && git commit; }")
+        assert ambiguous is True
+        assert root is None
+
+    def test_command_substitution_is_ambiguous(self):
+        """`echo $(git commit)` — an unquoted `$(` is a substitution → block (Fix A)."""
+        root, ambiguous = self._resolve("echo $(git commit)")
+        assert ambiguous is True
+        assert root is None
+
+    def test_backtick_substitution_is_ambiguous(self):
+        """A backtick command substitution is fail-safe ambiguous (Fix A)."""
+        root, ambiguous = self._resolve("echo `git commit`")
+        assert ambiguous is True
+        assert root is None
+
+    def test_conventional_commit_scope_parens_not_blocked(self):
+        """`git commit -m "fix(parser): tidy (again)"` — quoted parens resolve clean.
+
+        The Fix A grouping guard MUST be quote-aware: literal parens inside a
+        conventional-commit scope message are NOT a shell grouping construct and
+        must NOT be blocked. Mutation lever (verified BOTH directions): make the
+        grouping guard a raw `"(" in command` substring scan and this goes RED
+        (every scoped conventional-commit message would be falsely blocked).
+        """
+        root, ambiguous = self._resolve('git commit -m "fix(parser): tidy (again)"')
+        assert ambiguous is False
+        assert root is not None
+
+    def test_c_option_with_scoped_message_resolves(self):
+        """`git -C /feat commit -m "feat(x): y"` → resolves /feat, not ambiguous."""
+        root, ambiguous = self._resolve('git -C /feat commit -m "feat(x): y"')
+        assert ambiguous is False
+        assert root == "/feat"
+
+    # --- Fix B: a glued `cd` separator still resolves cleanly ---
+
+    def test_glued_cd_semicolon_resolves_clean(self):
+        """`cd /repo; git commit` — the glued `;` must not blur the cd target (Fix B).
+
+        Old tokenising left the cd path as '/repo;', which the resolver could not
+        confirm, so it fell to (None, True). After splitting the glued `;` the
+        single leading absolute cd resolves cleanly and the commit is allowed to
+        proceed to the branch check.
+        """
+        root, ambiguous = self._resolve("cd /repo; git commit")
+        assert ambiguous is False
+        assert root is not None
+
+    # --- Fix C: a dir-change AFTER the last gated git op is not ambiguous ---
+
+    def test_post_commit_cd_resolves_clean(self):
+        """`git commit && cd /tmp` — the `cd` runs AFTER the commit (Fix C).
+
+        A dir-change positioned after the last gated git op cannot affect that
+        op's cwd, so it must NOT make the working dir ambiguous. Mutation lever:
+        remove the post-last-gated-op filter and this goes RED ((None, True)).
+        """
+        root, ambiguous = self._resolve("git commit && cd /tmp")
+        assert ambiguous is False
+        assert root is not None
+
+    def test_leading_cd_then_post_commit_cd_resolves_clean(self):
+        """`cd /repo && git commit && cd /tmp` — only the leading cd counts (Fix C)."""
+        root, ambiguous = self._resolve("cd /repo && git commit && cd /tmp")
+        assert ambiguous is False
+        assert root == "/repo"
+
+    def test_pre_commit_multi_cd_still_ambiguous(self):
+        """`cd /A && cd /B && git commit` — two cds BEFORE the commit stay ambiguous (Fix C guard).
+
+        Fix C must not weaken the genuine multi-cd case: both cds precede the
+        commit and either could be its cwd, so the guard cannot confirm the repo.
+        """
+        root, ambiguous = self._resolve("cd /A && cd /B && git commit")
+        assert ambiguous is True
+        assert root is None
+
+
+# ---------------------------------------------------------------------------
+# Exception totality — parser + resolver never raise (hook blocks closed)
+# ---------------------------------------------------------------------------
+
+class TestBranchCheckExceptionTotality:
+    """A NUL byte or symlink loop must return, never propagate (fail-safe block)."""
+
+    def test_nul_command_does_not_raise_in_parser(self):
+        result = run_python(
+            "import json\n"
+            "from _lib.git import git_invocations, _parse_invocations, _tokenize\n"
+            "cmd = 'git -C /ab' + chr(0) + 'cd commit'\n"
+            "a = git_invocations(cmd)\n"
+            "b = _parse_invocations(_tokenize(cmd))\n"
+            "print(json.dumps([isinstance(a, list), isinstance(b, list)]))\n"
+        )
+        assert result.returncode == 0, result.stderr
+        assert json.loads(result.stdout) == [True, True]
+
+    def test_nul_command_resolver_is_ambiguous(self):
+        result = run_python(
+            "import json\n"
+            "from _lib.git import resolve_branch_check_target\n"
+            "cmd = 'git -C /ab' + chr(0) + 'cd commit'\n"
+            "root, ambiguous = resolve_branch_check_target(cmd)\n"
+            "print(json.dumps([root, ambiguous]))\n"
+        )
+        assert result.returncode == 0, result.stderr
+        assert json.loads(result.stdout) == [None, True]
+
+    def test_symlink_loop_resolver_is_ambiguous(self, tmp_path):
+        loop_a = tmp_path / "a"
+        loop_b = tmp_path / "b"
+        loop_a.symlink_to(loop_b)
+        loop_b.symlink_to(loop_a)
+        result = run_python(
+            "import json\n"
+            "from _lib.git import resolve_branch_check_target\n"
+            f"root, ambiguous = resolve_branch_check_target('git -C {loop_a}/x commit')\n"
+            "print(json.dumps([root, ambiguous]))\n"
+        )
+        assert result.returncode == 0, result.stderr
+        assert json.loads(result.stdout) == [None, True]
