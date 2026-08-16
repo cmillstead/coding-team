@@ -155,6 +155,34 @@ class TestExtractGitCommand:
         )
         assert result.stdout.strip() == "push"
 
+    @pytest.mark.parametrize("command,expected", [
+        ("git -C /abs/repo commit -m x", "commit"),
+        ("git -c user.name=agent commit -m x", "commit"),
+        ("git --work-tree /abs/repo status", "status"),
+        ("git --git-dir=/abs/repo/.git push origin main", "push"),
+        ("git --no-pager log --oneline", "log"),
+    ])
+    def test_global_option_does_not_shadow_subcommand(self, command, expected):
+        """A git global option between `git` and the subcommand is not the subcommand.
+
+        The old "first non-dash token" rule returned the option's VALUE
+        (`/abs/repo`, `user.name=agent`) instead of the subcommand.
+        """
+        result = run_python(
+            'from _lib.git import extract_git_command; '
+            f'print(extract_git_command({command!r}))',
+        )
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.strip() == expected
+
+    def test_bare_git_has_no_subcommand(self):
+        result = run_python(
+            'from _lib.git import extract_git_command; '
+            'print(extract_git_command("git"))',
+        )
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.strip() == "None"
+
 
 # ---------------------------------------------------------------------------
 # is_broad_add
@@ -332,3 +360,303 @@ class TestGetSessionIdPrecedence:
         )
         assert result.returncode == 0, result.stderr
         assert result.stdout.strip().startswith("pid-")
+
+
+# ---------------------------------------------------------------------------
+# git_invocations / git_subcommands / has_git_subcommand
+# ---------------------------------------------------------------------------
+
+# Every spelling of "run this subcommand" that a git global option can wrap.
+# `git -C /abs <sub>` is the HOUSE STYLE (~/.claude/command-hygiene.md tells
+# agents to prefer `-C` over `cd`), so these are the default path for agent
+# commands, not exotic edge cases.
+GLOBAL_OPTION_FORMS = [
+    "git {sub} target.txt",
+    "git -C /abs/repo {sub} target.txt",
+    "git -c user.name=agent {sub} target.txt",
+    "git --no-pager {sub} target.txt",
+    "git --git-dir=/abs/repo/.git {sub} target.txt",
+    "git --work-tree /abs/repo {sub} target.txt",
+    "git -C /abs/repo -c user.name=agent --no-pager {sub} target.txt",
+]
+
+
+class TestGitSubcommandDetection:
+    """Global options between `git` and the subcommand must never hide it.
+
+    git-safety-guard gates on the detected subcommand, so a missed `commit`
+    is a silently ungated commit.
+    """
+
+    @pytest.mark.parametrize("sub", ["commit", "push", "merge", "add"])
+    @pytest.mark.parametrize("form", GLOBAL_OPTION_FORMS)
+    def test_subcommand_detected_through_global_options(self, sub, form):
+        command = form.format(sub=sub)
+        result = run_python(
+            'from _lib.git import has_git_subcommand; '
+            f'print(has_git_subcommand({command!r}, {sub!r}))',
+        )
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.strip() == "True", f"subcommand missed in: {command}"
+
+    def test_compound_yields_every_invocation(self):
+        """`git add f && git -C /a commit` must surface BOTH subcommands."""
+        command = "git add file.py && git -C /abs/repo commit -m x"
+        result = run_python(
+            'from _lib.git import git_subcommands; '
+            f'print(sorted(git_subcommands({command!r})))',
+        )
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.strip() == "['add', 'commit']"
+
+    def test_invocations_carry_remaining_args(self):
+        command = "git -C /abs/repo commit -m msg && git push origin main"
+        result = run_python(
+            'from _lib.git import git_invocations; '
+            f'print(git_invocations({command!r}))',
+        )
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.strip() == (
+            "[('commit', ['-m', 'msg']), ('push', ['origin', 'main'])]"
+        )
+
+    def test_unknown_option_is_skipped_as_a_flag_not_a_value_taker(self):
+        """An unrecognised `-x` must NOT consume the next token.
+
+        Treating an unknown option as value-consuming would skip past the real
+        subcommand and reopen the detection hole this parser exists to close.
+        """
+        command = "git --bogus-option commit -m x"
+        result = run_python(
+            'from _lib.git import has_git_subcommand; '
+            f'print(has_git_subcommand({command!r}, "commit"))',
+        )
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.strip() == "True"
+
+    def test_subcommand_argument_is_not_a_subcommand(self):
+        """`git log --grep commit` is a log, not a commit."""
+        command = "git log --grep commit"
+        result = run_python(
+            'from _lib.git import git_subcommands, has_git_subcommand; '
+            f'print(sorted(git_subcommands({command!r})), '
+            f'has_git_subcommand({command!r}, "commit"))',
+        )
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.strip() == "['log'] False"
+
+    @pytest.mark.parametrize("command", [
+        "gitk --all",
+        "legit commit -m x",
+        "git-foo commit",
+    ])
+    def test_non_git_binaries_do_not_match(self, command):
+        result = run_python(
+            'from _lib.git import git_subcommands; '
+            f'print(sorted(git_subcommands({command!r})))',
+        )
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.strip() == "[]"
+
+    def test_bare_git_yields_no_invocation(self):
+        result = run_python(
+            'from _lib.git import git_invocations; '
+            'print(git_invocations("git"))',
+        )
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.strip() == "[]"
+
+    def test_malformed_quoting_does_not_raise(self):
+        """Unbalanced quotes break shlex; the parser must degrade, not explode.
+
+        git-safety-guard blocks CLOSED on an uncaught exception, so a raise here
+        would kill every Bash call in the session.
+        """
+        command = 'git -C "/a commit -m x'
+        result = run_python(
+            'from _lib.git import has_git_subcommand; '
+            f'print(has_git_subcommand({command!r}, "commit"))',
+        )
+        assert result.returncode == 0, result.stderr
+        assert "Traceback" not in result.stderr
+        # Fail-safe direction: the commit is still detected, so it stays gated.
+        assert result.stdout.strip() == "True"
+
+    @pytest.mark.parametrize("option", [
+        "--git-dir=/abs/repo/.git",
+        "--git-dir /abs/repo/.git",
+    ])
+    @pytest.mark.parametrize("sub,other", [("commit", "status"), ("status", "commit")])
+    def test_git_dir_pair_proves_real_option_parsing(self, option, sub, other):
+        """Same `--git-dir`, two subcommands: each is found, the other is not.
+
+        Pinning `--git-dir=/abs/repo/.git commit` alone would also pass if the
+        parser merely noticed the `.git commit` substring. Asserting that the
+        SAME option with `status` reports status and NOT commit is what proves
+        the option is genuinely consumed.
+        """
+        command = f"git {option} {sub}"
+        result = run_python(
+            'from _lib.git import git_subcommands, has_git_subcommand; '
+            f'print(sorted(git_subcommands({command!r})), '
+            f'has_git_subcommand({command!r}, {other!r}))',
+        )
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.strip() == f"['{sub}'] False"
+
+    @pytest.mark.parametrize("command", [
+        "git --git-dir=/abs/repo/git commit -m x",
+        "git --work-tree=/abs/repo/git commit -m x",
+    ])
+    def test_option_value_ending_in_git_is_not_a_new_invocation(self, command):
+        """An option VALUE ending in `/git` must not read as the git binary.
+
+        `_is_git_token` matches any token ending in `/git`; without the
+        leading-dash rejection, `--work-tree=/abs/repo/git` starts a phantom
+        second invocation and the option is silently dropped.
+
+        The target dir — not the subcommand — is what this pins. The
+        subcommand survives the bug by accident (the phantom invocation simply
+        consumes the option token and `commit` becomes the next invocation's
+        subcommand), so asserting on it alone would pin nothing. The dropped
+        option is what points the safety guard at the wrong repository.
+        """
+        result = run_python(
+            'from _lib.git import git_subcommands, git_global_target_dir; '
+            f'print(sorted(git_subcommands({command!r})), '
+            f'git_global_target_dir({command!r}))',
+        )
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.strip() == "['commit'] /abs/repo/git"
+
+    def test_chain_with_glued_separator_still_finds_the_commit(self):
+        """`git add f; git commit -m x` — the `;` does not survive tokenising.
+
+        shlex yields [..., 'f;', 'git', 'commit', ...]. If the arg scan did not
+        also stop at a git token, the trailing commit would be absorbed as an
+        argument to `add` and escape the gate — a false negative.
+        """
+        command = "git add f; git commit -m x"
+        result = run_python(
+            'from _lib.git import git_subcommands; '
+            f'print(sorted(git_subcommands({command!r})))',
+        )
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.strip() == "['add', 'commit']"
+
+    def test_has_git_subcommand_accepts_multiple_names(self):
+        result = run_python(
+            'from _lib.git import has_git_subcommand; '
+            'print(has_git_subcommand("git -C /a push origin main", '
+            '"commit", "push", "merge"), '
+            'has_git_subcommand("git -C /a status", "commit", "push", "merge"))',
+        )
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.strip() == "True False"
+
+
+# ---------------------------------------------------------------------------
+# git_global_target_dir
+# ---------------------------------------------------------------------------
+
+class TestGitGlobalTargetDir:
+    @pytest.mark.parametrize("command,expected", [
+        ("git -C /abs/repo commit -m x", "/abs/repo"),
+        ("git --git-dir=/abs/repo/.git commit -m x", "/abs/repo"),
+        ("git --git-dir /abs/repo/.git commit -m x", "/abs/repo"),
+        ("git --work-tree /abs/repo status", "/abs/repo"),
+        # -C outranks --work-tree, which outranks --git-dir.
+        ("git --work-tree /via-work-tree -C /via-c status", "/via-c"),
+        ("git --git-dir=/via-git-dir/.git --work-tree /via-work-tree status",
+         "/via-work-tree"),
+        # First -C wins; reconciling divergent targets is TRK-137 territory.
+        ("git -C /first status && git -C /second status", "/first"),
+        # Regression: an option value whose last segment is literally "git"
+        # must survive. This answered None before _is_git_token learned to
+        # reject leading-dash tokens, sending the guard at the wrong repo.
+        ("git --git-dir=/abs/repo/git status", "/abs/repo/git"),
+        ("git -C /abs/repo/git status", "/abs/repo/git"),
+        ("git commit -m x", "None"),
+        ("ls -la", "None"),
+    ])
+    def test_target_dir(self, command, expected):
+        result = run_python(
+            'from _lib.git import git_global_target_dir; '
+            f'print(git_global_target_dir({command!r}))',
+        )
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.strip() == expected
+
+
+# ---------------------------------------------------------------------------
+# resolve_command_target_dir — `git -C` awareness
+# ---------------------------------------------------------------------------
+
+class TestResolveCommandTargetDirGitOptions:
+    """`cd` sets the base directory; `git -C` then applies relative to it."""
+
+    @staticmethod
+    def _resolve(command: str, cwd) -> subprocess.CompletedProcess:
+        return run_python(
+            f"import os; os.chdir({str(cwd)!r})\n"
+            "from _lib.git import resolve_command_target_dir\n"
+            f"print(resolve_command_target_dir({command!r}))\n"
+        )
+
+    @pytest.fixture
+    def dirs(self, tmp_path):
+        base = tmp_path / "base"
+        other = tmp_path / "other"
+        base.mkdir()
+        other.mkdir()
+        (base / "sub").mkdir()
+        return base, other
+
+    def test_c_option_without_cd_wins_over_cwd(self, dirs):
+        base, other = dirs
+        result = self._resolve(f"git -C {other} commit -m x", base)
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.strip() == str(other)
+
+    def test_c_option_wins_over_cd(self, dirs):
+        base, other = dirs
+        result = self._resolve(f"cd {base} && git -C {other} commit -m x", base)
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.strip() == str(other)
+
+    def test_relative_c_resolves_against_the_cd_base(self, dirs):
+        base, other = dirs
+        result = self._resolve(f"cd {base} && git -C sub commit -m x", other)
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.strip() == str(base / "sub")
+
+    def test_git_dir_option_resolves_to_worktree_root(self, dirs):
+        base, other = dirs
+        result = self._resolve(f"git --git-dir={other}/.git commit -m x", base)
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.strip() == str(other)
+
+    def test_work_tree_option(self, dirs):
+        base, other = dirs
+        result = self._resolve(f"git --work-tree {other} status", base)
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.strip() == str(other)
+
+    def test_first_of_two_conflicting_c_targets_wins(self, dirs):
+        base, other = dirs
+        command = f"git -C {other} add f && git -C {base} commit -m x"
+        result = self._resolve(command, base)
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.strip() == str(other)
+
+    def test_cd_without_c_is_unchanged(self, dirs):
+        base, other = dirs
+        result = self._resolve(f"cd {base} && git commit -m x", other)
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.strip() == str(base)
+
+    def test_no_cd_and_no_c_falls_back_to_cwd(self, dirs):
+        base, _other = dirs
+        result = self._resolve("git commit -m x", base)
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.strip() == str(Path(base).resolve())

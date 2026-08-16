@@ -2958,3 +2958,196 @@ class TestNvmBootstrapGuard:
         assert result.returncode == 0, f"hook crashed on {command!r}: stderr={result.stderr!r}"
         assert result.stdout.strip() == ""
 
+
+# ---------------------------------------------------------------------------
+# TRK-136: git global options between `git` and its subcommand
+# ---------------------------------------------------------------------------
+
+
+class TestGitGlobalOptionsReachGates:
+    """A global option between `git` and its subcommand must not hide the subcommand.
+
+    The guard used to detect subcommands with `re.search(r'\\bgit\\s+commit\\b')`.
+    Every git global option — `-C <dir>`, `-c k=v`, `--no-pager`, `--git-dir=` —
+    sits between `git` and the subcommand and defeats that pattern, so
+    `git -C /repo commit -m x` on main walked straight past the branch guard.
+    The call sites now ask _lib.git.has_git_subcommand / git_invocations, which
+    parse the option grammar instead of matching adjacency.
+    """
+
+    def _assert_branch_block(self, run_hook, make_event, repo: Path, command: str):
+        """Run *command* with cwd inside *repo* and assert the branch guard fired."""
+        old_cwd = os.getcwd()
+        os.chdir(str(repo))
+        try:
+            result = run_hook("git-safety-guard.py", make_event("Bash", command=command))
+        finally:
+            os.chdir(old_cwd)
+        assert result.parsed is not None, (
+            f"Expected BLOCK for {command!r} on main, got silent allow. "
+            f"stdout={result.stdout!r} stderr={result.stderr!r}"
+        )
+        assert result.parsed["decision"] == "block"
+        assert "feature branch" in result.parsed["reason"].lower(), (
+            f"Blocked, but not by the branch guard: {result.parsed['reason']!r}"
+        )
+        return result
+
+    def _assert_no_branch_block(self, run_hook, make_event, repo: Path, command: str):
+        """Run *command* with cwd inside *repo* and assert the branch guard did NOT fire.
+
+        Other gates (verification checklist) may legitimately fire; only a
+        branch-guard block is a failure here.
+        """
+        old_cwd = os.getcwd()
+        os.chdir(str(repo))
+        try:
+            result = run_hook("git-safety-guard.py", make_event("Bash", command=command))
+        finally:
+            os.chdir(old_cwd)
+        if result.parsed is not None and result.parsed.get("decision") == "block":
+            assert "feature branch" not in result.parsed["reason"].lower(), (
+                f"Branch guard wrongly fired on {command!r}: {result.parsed['reason']!r}"
+            )
+        return result
+
+    # --- Gate sites: the option forms must now reach the branch check ---
+
+    def test_dash_c_commit_blocked_on_main(self, run_hook, make_event, tmp_path):
+        """`git -C <abs> commit` on main -> BLOCKED (the -C form now reaches the gate)."""
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        _make_repo_on_branch(repo, branch="main")
+        self._assert_branch_block(
+            run_hook, make_event, repo, f'git -C {repo} commit -m "feat: x"'
+        )
+
+    def test_bare_commit_still_blocked_on_main(self, run_hook, make_event, tmp_path):
+        """Regression: plain `git commit` on main -> still BLOCKED, unchanged by TRK-136."""
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        _make_repo_on_branch(repo, branch="main")
+        self._assert_branch_block(run_hook, make_event, repo, 'git commit -m "feat: x"')
+
+    def test_dash_lowercase_c_config_commit_blocked_on_main(self, run_hook, make_event, tmp_path):
+        """`git -c k=v commit` on main -> BLOCKED (per-command config option)."""
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        _make_repo_on_branch(repo, branch="main")
+        self._assert_branch_block(
+            run_hook, make_event, repo, 'git -c user.name=x commit -m "feat: y"'
+        )
+
+    def test_no_pager_commit_blocked_on_main(self, run_hook, make_event, tmp_path):
+        """`git --no-pager commit` on main -> BLOCKED (valueless global flag)."""
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        _make_repo_on_branch(repo, branch="main")
+        self._assert_branch_block(
+            run_hook, make_event, repo, 'git --no-pager commit -m "feat: y"'
+        )
+
+    # --- The --git-dir coincidence pair ---
+
+    def test_git_dir_commit_blocked_on_main(self, run_hook, make_event, tmp_path):
+        """`git --git-dir=<abs>/.git commit` on main -> BLOCKED (treated as a commit).
+
+        Pairs with test_git_dir_status_not_treated_as_commit. Note this case is
+        NOT by itself proof of option parsing: the old regex also matched it, by
+        coincidence, on the `.git commit` substring. The discriminating case is
+        test_subcommand_named_only_inside_an_argument_is_not_a_commit.
+        """
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        _make_repo_on_branch(repo, branch="main")
+        self._assert_branch_block(
+            run_hook, make_event, repo, f'git --git-dir={repo}/.git commit -m "feat: x"'
+        )
+
+    def test_git_dir_status_not_treated_as_commit(self, run_hook, make_event, tmp_path):
+        """`git --git-dir=<abs>/.git status` on main -> NOT gated as a commit."""
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        _make_repo_on_branch(repo, branch="main")
+        result = self._assert_no_branch_block(
+            run_hook, make_event, repo, f'git --git-dir={repo}/.git status'
+        )
+        assert result.returncode == 0, f"hook crashed: stderr={result.stderr!r}"
+
+    def test_subcommand_named_only_inside_an_argument_is_not_a_commit(
+        self, run_hook, make_event, tmp_path
+    ):
+        """`git log --grep="git commit"` on main -> NOT gated as a commit.
+
+        This is the case that separates option parsing from substring matching in
+        the direction that matters for over-blocking: the words "git commit"
+        appear in the command, but only inside an ARGUMENT to `log`. The old
+        regex saw them and fired the branch guard on a read-only command.
+        """
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        _make_repo_on_branch(repo, branch="main")
+        result = self._assert_no_branch_block(
+            run_hook, make_event, repo, 'git log --oneline --grep="git commit"'
+        )
+        assert result.returncode == 0, f"hook crashed: stderr={result.stderr!r}"
+
+    # --- Exemption site: delete-only push must survive the -C form ---
+
+    def test_dash_c_delete_flag_push_not_branch_blocked(self, run_hook, make_event, tmp_path):
+        """`git -C <abs> push --delete origin foo` on main -> delete-only exemption applies.
+
+        Once the -C form reaches the branch gate, is_delete_only_push must also
+        see it, or the carve-out silently disappears for -C-style pushes.
+        """
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        _make_repo_on_branch(repo, branch="main")
+        self._assert_no_branch_block(
+            run_hook, make_event, repo, f'git -C {repo} push --delete origin foo'
+        )
+
+    def test_dash_c_colon_refspec_push_not_branch_blocked(self, run_hook, make_event, tmp_path):
+        """`git -C <abs> push origin :foo` on main -> colon-form delete exemption applies."""
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        _make_repo_on_branch(repo, branch="main")
+        self._assert_no_branch_block(
+            run_hook, make_event, repo, f'git -C {repo} push origin :foo'
+        )
+
+    def test_dash_c_normal_push_still_branch_blocked(self, run_hook, make_event, tmp_path):
+        """`git -C <abs> push origin main` on main -> BLOCKED.
+
+        The mirror of the two exemption tests: widening is_delete_only_push must
+        not turn every -C push into an exempt one.
+        """
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        _make_repo_on_branch(repo, branch="main")
+        self._assert_branch_block(
+            run_hook, make_event, repo, f'git -C {repo} push origin main'
+        )
+
+    # --- Over-blocking guard: read-only -C commands stay allowed (TRK-048) ---
+
+    @pytest.mark.parametrize("subcommand", ["log --oneline", "status", "diff"])
+    def test_dash_c_read_only_commands_allowed(
+        self, subcommand, run_hook, make_event, tmp_path
+    ):
+        """`git -C <abs> log|status|diff` -> silent allow, even on main."""
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        _make_repo_on_branch(repo, branch="main")
+        command = f'git -C {repo} {subcommand}'
+        old_cwd = os.getcwd()
+        os.chdir(str(repo))
+        try:
+            result = run_hook("git-safety-guard.py", make_event("Bash", command=command))
+        finally:
+            os.chdir(old_cwd)
+        assert result.returncode == 0, f"hook crashed on {command!r}: stderr={result.stderr!r}"
+        assert result.stdout.strip() == "", (
+            f"Read-only command wrongly produced output: {result.stdout!r}"
+        )
+
