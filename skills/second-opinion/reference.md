@@ -28,7 +28,7 @@ codex exec \
 
 Be specific and actionable.
 End with exactly: VERDICT: APPROVED or VERDICT: REVISE" \
-  2>&1 | tee /tmp/second-opinion-review-${REVIEW_ID}.txt
+  < /dev/null 2>&1 | tee /tmp/second-opinion-review-${REVIEW_ID}.txt
 ```
 
 #### Verification gate (used by both revision loops)
@@ -63,7 +63,7 @@ codex exec resume ${CODEX_SESSION_ID} \
   "I've revised the plan based on your feedback. Updated plan is at <plan-file-path>.
 Changes made: [list specific changes]
 Please re-review. End with VERDICT: APPROVED or VERDICT: REVISE" \
-  2>&1 | tee /tmp/second-opinion-review-${REVIEW_ID}.txt
+  < /dev/null 2>&1 | tee /tmp/second-opinion-review-${REVIEW_ID}.txt
 ```
 
 Max 2 rounds by default (more only at explicit user request — see SKILL.md Mode 1). If `resume` fails (session expired), fall back to a fresh `codex exec` with prior context in the prompt.
@@ -130,7 +130,7 @@ For each attack vector you find, provide:
 - Severity (P1 critical / P2 high / P3 medium)
 
 Be specific. Show the attack, not just describe the category." \
-  2>&1 | tee /tmp/second-opinion-challenge-${REVIEW_ID}.txt
+  < /dev/null 2>&1 | tee /tmp/second-opinion-challenge-${REVIEW_ID}.txt
 ```
 
 ### Consult: open-ended question
@@ -140,10 +140,10 @@ codex exec \
   "<user's question>
 
 Read the codebase for context. Give a specific, actionable answer." \
-  2>&1 | tee /tmp/second-opinion-consult-${REVIEW_ID}.txt
+  < /dev/null 2>&1 | tee /tmp/second-opinion-consult-${REVIEW_ID}.txt
 ```
 
-For follow-ups: `codex exec resume ${CODEX_SESSION_ID} "FOLLOW-UP QUESTION"`
+For follow-ups: `codex exec resume ${CODEX_SESSION_ID} "FOLLOW-UP QUESTION" < /dev/null`
 
 ## Mode 2: Challenge (adversarial)
 
@@ -158,7 +158,7 @@ rm -f /tmp/second-opinion-challenge-${REVIEW_ID}.txt
 
 ## Mode 3: Consult (open-ended)
 
-Ask Codex an open-ended question about the codebase via `codex exec`. Use the prompt template under "Consult: open-ended question" above. For follow-ups, use `codex exec resume ${CODEX_SESSION_ID}` to maintain conversation context.
+Ask Codex an open-ended question about the codebase via `codex exec`. Use the prompt template under "Consult: open-ended question" above. For follow-ups, use `codex exec resume ${CODEX_SESSION_ID} "FOLLOW-UP QUESTION" < /dev/null` to maintain conversation context.
 
 ### Cleanup
 ```bash
