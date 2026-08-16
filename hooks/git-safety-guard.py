@@ -1243,9 +1243,26 @@ def main():
             return
 
     # --- 2. Branch check (commit/push/merge) ---
+    # ORDERING DEPENDENCY (do not reorder): this gate returns early on BOTH an
+    # ambiguous working directory AND a protected branch. The later best-effort
+    # sites — the codex digest-sync gate (~:1330) and the verification checklist
+    # (~:1340), which still call resolve_commit_target_root/resolve_command_target_dir
+    # — therefore only ever run on a commit whose target dir resolved cleanly to a
+    # NON-protected branch. Weakening this early-return would expose those sites to
+    # the ambiguous-cwd cases that resolve_branch_check_target exists to reject.
     if is_commit_push_or_merge(command) and not is_delete_only_push(command):
-        target_root = resolve_commit_target_root(command)
-        if git.is_protected_branch(cwd=target_root):
+        root, ambiguous = git.resolve_branch_check_target(command)
+        if ambiguous:
+            output.block(
+                "Ambiguous working directory for a commit/push/merge in a compound "
+                "command — the safety guard can't confirm which repo/branch it targets.\n"
+                "Run it as a SINGLE command with an absolute repo path:\n"
+                "  git -C /abs/repo commit -m \"...\"\n"
+                "Known rationalization: 'I know which dir it runs in' — the guard must "
+                "confirm the branch itself; use the -C form so it can."
+            )
+            return
+        if git.is_protected_branch(cwd=root):
             output.block(
                 "Create a feature branch first. Direct commits to "
                 "main/master are not allowed. Run: git checkout -b <feature-name>"

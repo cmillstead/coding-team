@@ -99,6 +99,24 @@ class TestAllowedCommands:
         result = run_hook("git-safety-guard.py", event)
         assert result.stdout.strip() == ""
 
+    @pytest.mark.parametrize("command", [
+        "grep -e git commit file",
+        "grep --color git commit f",
+    ])
+    def test_allows_text_tool_matching_a_git_command(self, run_hook, make_event, command):
+        """`grep -e git commit file` — git is grep's ARGUMENT, so the guard is silent.
+
+        Gate-A regression guard for TRK-048: the blunt `prev.startswith('-')` head
+        rule promoted the git token because its predecessor `-e`/`--color` is a
+        dash-option, making the hook block a plain text search. The segment head
+        `grep` is not an exec-wrapper, so no git invocation is detected and the
+        hook allows silently. Mutation lever: restore the dash clause in
+        _git_token_is_head and this text search is falsely gated.
+        """
+        event = make_event("Bash", command=command)
+        result = run_hook("git-safety-guard.py", event)
+        assert result.stdout.strip() == ""
+
 
 class TestCommitMessageFormat:
     """Tests for commit message prefix validation."""
@@ -1555,6 +1573,33 @@ class TestBranchCheckChainingBypass:
         finally:
             os.chdir(old_cwd)
 
+    def test_sudo_wrapper_commit_on_main_blocked(self, run_hook, make_event, tmp_path):
+        """`sudo -u bob git commit` on main → BLOCKED (wrapper-option under-detection fix).
+
+        Before the fix, `sudo -u bob git commit` parsed to NO invocation (the
+        predecessor `bob` is sudo's `-u` value, and the blunt dash rule never
+        looked past it), so a real commit reached main un-gated. The segment head
+        `sudo` is an exec-wrapper, so the git token is now detected as head, Gate A
+        resolves the cwd (no dir-change op → base = repo), sees main, and blocks.
+        """
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        _make_repo_on_branch(repo, branch="main")
+
+        old_cwd = os.getcwd()
+        os.chdir(str(repo))
+        try:
+            command = "sudo -u bob git commit -m 'feat: add x'"
+            event = make_event("Bash", command=command)
+            result = run_hook("git-safety-guard.py", event)
+            assert result.parsed is not None, (
+                f"Expected BLOCK for sudo-wrapped commit on main, got: {result.stdout!r}"
+            )
+            assert result.parsed["decision"] == "block"
+            assert "feature branch" in result.parsed["reason"].lower()
+        finally:
+            os.chdir(old_cwd)
+
     def test_git_merge_on_main_blocked(self, run_hook, make_event, tmp_path):
         """git merge on main → BLOCKED (verifies merge is covered by the fix)."""
         repo = tmp_path / "repo"
@@ -1592,6 +1637,134 @@ class TestBranchCheckChainingBypass:
                 reason = result.parsed["reason"]
                 assert "feature branch" not in reason.lower(), (
                     f"Branch guard incorrectly blocked delete-only push: {reason!r}"
+                )
+        finally:
+            os.chdir(old_cwd)
+
+    def test_subshell_cd_commit_blocked_on_feature(self, run_hook, make_event, tmp_path):
+        """`(cd /elsewhere && git commit)` → BLOCKED as ambiguous even on a feature branch (Fix A).
+
+        A commit hidden in a subshell defeated the dir-change parser, so Gate A
+        resolved the cwd and checked the WRONG repo. The commit is still detected
+        (the trailing `)` no longer glues to `commit`), and the resolver flags the
+        unquoted grouping construct as ambiguous, so Gate A blocks with the
+        ambiguous-working-directory message regardless of the branch. Using a
+        feature-branch repo proves it is the AMBIGUOUS block, not the branch block.
+        """
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        _make_repo_on_branch(repo, branch="feature/x")
+
+        old_cwd = os.getcwd()
+        os.chdir(str(repo))
+        try:
+            command = f'(cd {repo} && git commit -m "feat: x")'
+            event = make_event("Bash", command=command)
+            result = run_hook("git-safety-guard.py", event)
+            assert result.parsed is not None, (
+                f"Expected BLOCK for subshell commit, got silent allow. "
+                f"stderr: {result.stderr!r}"
+            )
+            assert result.parsed["decision"] == "block"
+            assert "ambiguous working directory" in result.parsed["reason"].lower()
+        finally:
+            os.chdir(old_cwd)
+
+    def test_brace_group_cd_commit_blocked_on_feature(self, run_hook, make_event, tmp_path):
+        """`{ cd /elsewhere && git commit; }` → BLOCKED as ambiguous (Fix A)."""
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        _make_repo_on_branch(repo, branch="feature/x")
+
+        old_cwd = os.getcwd()
+        os.chdir(str(repo))
+        try:
+            command = f'{{ cd {repo} && git commit -m "feat: x"; }}'
+            event = make_event("Bash", command=command)
+            result = run_hook("git-safety-guard.py", event)
+            assert result.parsed is not None, (
+                f"Expected BLOCK for brace-group commit, got silent allow. "
+                f"stderr: {result.stderr!r}"
+            )
+            assert result.parsed["decision"] == "block"
+            assert "ambiguous working directory" in result.parsed["reason"].lower()
+        finally:
+            os.chdir(old_cwd)
+
+    def test_conventional_scope_message_not_ambiguous_blocked(self, run_hook, make_event, tmp_path):
+        """`git commit -m "fix(parser): x"` on a feature branch → NOT ambiguous-blocked (Fix A guard).
+
+        The quote-aware grouping guard must let a conventional-commit scope
+        message (literal parens inside quotes) resolve cleanly. Any block here
+        must NOT be the ambiguous-working-directory block.
+        """
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        _make_repo_on_branch(repo, branch="feature/x")
+
+        old_cwd = os.getcwd()
+        os.chdir(str(repo))
+        try:
+            command = 'git commit -m "fix(parser): tidy (again)"'
+            event = make_event("Bash", command=command)
+            result = run_hook("git-safety-guard.py", event)
+            if result.parsed is not None and result.parsed.get("decision") == "block":
+                reason = result.parsed["reason"]
+                assert "ambiguous working directory" not in reason.lower(), (
+                    f"Grouping guard falsely blocked a scoped conventional-commit "
+                    f"message: {reason!r}"
+                )
+        finally:
+            os.chdir(old_cwd)
+
+    def test_glued_semicolon_chain_blocked_on_main(self, run_hook, make_event, tmp_path):
+        """`git add f;git commit` (glued `;`) on main → BLOCKED (Fix B end-to-end).
+
+        The glued `;` used to fuse `f;git` so the commit was never detected and
+        the branch check was skipped. With the tokeniser splitting the glued
+        separator, the commit is detected and Gate A blocks on main.
+        """
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        _make_repo_on_branch(repo, branch="main")
+        (repo / "new_file.py").write_text("x = 1\n")
+
+        old_cwd = os.getcwd()
+        os.chdir(str(repo))
+        try:
+            command = f'cd {repo} && git add new_file.py;git commit -m "feat: add x"'
+            event = make_event("Bash", command=command)
+            result = run_hook("git-safety-guard.py", event)
+            assert result.parsed is not None, (
+                f"Expected BLOCK for glued-`;` commit on main, got silent allow. "
+                f"stderr: {result.stderr!r}"
+            )
+            assert result.parsed["decision"] == "block"
+        finally:
+            os.chdir(old_cwd)
+
+    def test_post_commit_cd_allowed_on_feature(self, run_hook, make_event, tmp_path):
+        """`git commit && cd /tmp` on a feature branch → NOT ambiguous-blocked (Fix C).
+
+        A `cd` positioned AFTER the commit cannot change the commit's cwd, so it
+        must not trip the ambiguous-working-directory guard. Any block here must
+        NOT be the ambiguous block.
+        """
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        _make_repo_on_branch(repo, branch="feature/x")
+        (repo / "new_file.py").write_text("x = 1\n")
+
+        old_cwd = os.getcwd()
+        os.chdir(str(repo))
+        try:
+            command = 'git commit -m "feat: add x" && cd /tmp'
+            event = make_event("Bash", command=command)
+            result = run_hook("git-safety-guard.py", event)
+            if result.parsed is not None and result.parsed.get("decision") == "block":
+                reason = result.parsed["reason"]
+                assert "ambiguous working directory" not in reason.lower(), (
+                    f"Post-commit cd falsely tripped the ambiguous guard: {reason!r}"
                 )
         finally:
             os.chdir(old_cwd)
@@ -3150,4 +3323,99 @@ class TestGitGlobalOptionsReachGates:
         assert result.stdout.strip() == "", (
             f"Read-only command wrongly produced output: {result.stdout!r}"
         )
+
+
+class TestBranchCheckAmbiguousCwd:
+    """Gate A fail-safe blocks a commit/push/merge whose target dir is ambiguous (TRK-137).
+
+    A compound that changes directory more than once (or via pushd/env --chdir/a
+    non-leading or relative cd) hides which repo/branch the commit lands in, so
+    the branch guard cannot confirm the branch. It blocks and steers to the
+    single `git -C <abs>` form. Clean single-`cd`/absolute-`-C` forms still
+    resolve and gate on the actual branch.
+    """
+
+    @pytest.mark.parametrize("command", [
+        "cd /A && cd /B && git commit -m x",   # >1 dir-change op
+        "pushd /B && git commit -m x",         # pushd, not cd
+        "env --chdir=/B git commit -m x",      # wrapper carrying --chdir
+        "foo && cd /B && git commit -m x",     # non-leading cd
+        "cd relative && git commit -m x",      # single relative cd
+    ])
+    def test_ambiguous_cwd_commit_blocked(self, command, run_hook, make_event):
+        result = run_hook("git-safety-guard.py", make_event("Bash", command=command))
+        assert result.parsed is not None, (
+            f"Expected BLOCK for ambiguous cwd, got silent allow: {result.stderr!r}"
+        )
+        assert result.parsed["decision"] == "block"
+        assert "ambiguous working directory" in result.parsed["reason"].lower()
+
+    def test_clean_absolute_c_on_main_still_blocks_branch(
+        self, run_hook, make_event, tmp_path
+    ):
+        """`git -C <mainrepo> commit` resolves cleanly → branch guard fires."""
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        _make_repo_on_branch(repo, branch="main")
+        command = f'git -C {repo} commit -m "feat: x"'
+        result = run_hook("git-safety-guard.py", make_event("Bash", command=command))
+        assert result.parsed is not None, (
+            f"Expected feature-branch BLOCK, got: {result.stdout!r}"
+        )
+        assert result.parsed["decision"] == "block"
+        assert "feature branch" in result.parsed["reason"].lower()
+
+    def test_clean_absolute_c_on_feature_not_branch_blocked(
+        self, run_hook, make_event, tmp_path
+    ):
+        """`git -C <featrepo> commit` resolves cleanly → no ambiguous/branch block."""
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        _make_repo_on_branch(repo, branch="feature/x")
+        command = f'git -C {repo} commit -m "feat: x"'
+        result = run_hook("git-safety-guard.py", make_event("Bash", command=command))
+        if result.parsed is not None and result.parsed.get("decision") == "block":
+            reason = result.parsed["reason"].lower()
+            assert "ambiguous working directory" not in reason, (
+                f"Clean -C form wrongly blocked as ambiguous: {reason!r}"
+            )
+            assert "feature branch" not in reason, (
+                f"Branch guard wrongly fired on a feature branch: {reason!r}"
+            )
+
+    def test_single_leading_cd_on_main_still_blocks_branch(
+        self, run_hook, make_event, tmp_path
+    ):
+        """`cd <mainrepo> && git commit` (one leading absolute cd) → branch guard fires."""
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        _make_repo_on_branch(repo, branch="main")
+        command = f'cd {repo} && git commit -m "feat: x"'
+        result = run_hook("git-safety-guard.py", make_event("Bash", command=command))
+        assert result.parsed is not None, (
+            f"Expected feature-branch BLOCK, got: {result.stdout!r}"
+        )
+        assert result.parsed["decision"] == "block"
+        assert "feature branch" in result.parsed["reason"].lower()
+
+
+class TestHeadAnchoredMentionsAllowed:
+    """Textual mentions of a git command must not trip any gate (TRK-048 / TRK-139)."""
+
+    @pytest.mark.parametrize("command", [
+        "echo git commit -m x",
+        "grep git commit file",
+        "ls # git commit here",
+        "printf git push",
+        'track add "note: git commit -m foo"',
+    ])
+    def test_mention_is_silently_allowed(self, command, run_hook, make_event):
+        result = run_hook("git-safety-guard.py", make_event("Bash", command=command))
+        # A mention must not produce a git-safety block. (A non-git compound may
+        # hit compound hygiene, but none of these are multi-statement.)
+        if result.parsed is not None and result.parsed.get("decision") == "block":
+            reason = result.parsed["reason"].lower()
+            assert "feature branch" not in reason
+            assert "ambiguous working directory" not in reason
+            assert "verification" not in reason
 
