@@ -75,7 +75,7 @@ For each task in plan:
       Do NOT read entire files raw when an outline or symbol search would suffice.
 
   IMPLEMENTER (see ~/.claude/agents/ct-implementer.md)
-  2. Dispatch implementer via Agent tool — use model tier from the plan
+  2. Dispatch implementer via Agent tool
      - Pass: full task text, context, working directory
      - Record the `agentId` returned by the dispatch — the Agent Teardown step in `phases/completion.md` (and `/release`) uses it to reap a lingering implementer at session exit.
      - If the task has advisory skills: include the advisory block in the implementer prompt's Advisory Skills section. The implementer applies these rules throughout implementation.
@@ -138,12 +138,12 @@ The implementer on each task team reports one of four statuses:
 **NEEDS_CONTEXT:** Provide missing context and re-dispatch.
 
 **BLOCKED:** Assess the blocker:
-1. Context problem -> provide more context, re-dispatch same model
-2. Needs more reasoning -> re-dispatch with a more capable model
+1. Context problem -> provide the missing context, re-dispatch the implementer
+2. Needs more reasoning -> split the task into smaller steps and re-dispatch, or add worked examples / exact code to the task text; do NOT change the agent's model — every agent inherits the session model
 3. Task too large -> break into smaller pieces
 4. Plan itself is wrong -> escalate to user
 
-**Never** ignore an escalation or retry the same model without changes.
+**Never** ignore an escalation, and never re-dispatch an identical prompt — every re-dispatch must change the task text, the context, or the scope.
 
 ## Plan Completeness Verification (after all tasks)
 

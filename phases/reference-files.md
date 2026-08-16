@@ -55,7 +55,7 @@ Loaded on demand by the skill router. Not needed during active phase work.
 | `phases/planning-next-steps.md` | planning.md | Risk signals and second-opinion gate |
 | `phases/design-team-context-retrieval.md` | design-team.md | Episode & context retrieval for design workers |
 | `phases/reference-files.md` | SKILL.md | Standalone skills, phase details, on-demand files, agent definitions |
-| `phases/agent-standards.md` | global CLAUDE.md (moved 2026-05-20) | Model routing tiers + UI/UX standards for dispatched agents |
+| `phases/agent-standards.md` | global CLAUDE.md (moved 2026-05-20) | UI/UX standards for dispatched agents |
 | `phases/task-weight.md` | SKILL.md / referenced by all gates | Single source of truth for task tier classification and per-tier gate matrix |
 | `phases/named-rationalizations.md` | cross-phase | Coding-team-specific known rationalizations, cross-referencing the global failure taxonomy |
 | `phases/wiki-generation.md` | completion.md | Tier-gated vault wiki article generation |

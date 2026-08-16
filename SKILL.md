@@ -67,7 +67,7 @@ If COORDINATION = no → subagents regardless of AGENT_TEAMS_AVAILABLE
 | Bug report or test failure | `/debug` skill (`skills/debug/SKILL.md`) |
 | Existing PR with review feedback | `/review-feedback` skill (`skills/review-feedback/SKILL.md`) |
 | Multiple independent failures | `/parallel-fix` skill (`skills/parallel-fix/SKILL.md`) |
-| Single-file change under 20 lines with a complete spec | Phase 5 with a single haiku-tier task. Still goes through the pipeline. |
+| Single-file change under 20 lines with a complete spec | Phase 5 with a single task. Still goes through the pipeline. |
 | User says "autoplan", "auto-review", "run all reviews", or "make the decisions" | **Phase 4 auto-advance** — run Phase 1→4 sequentially, auto-deciding intermediate questions using these principles: (1) completeness over shortcuts, (2) pragmatic over theoretical, (3) explicit over clever, (4) bias toward action, (5) DRY, (6) boil lakes not oceans. Surface only taste decisions (close approaches, borderline scope) at a final approval gate before Phase 5. |
 
 ---
@@ -82,7 +82,6 @@ These apply to every agent in the team:
 - **Focused agents produce correct agents** — one worker, one lens, one scope. Workers that wander produce slop.
 - **No ambiguity in specs** — the Planning Worker leaves nothing to inference. Exact file paths, exact line ranges, complete code snippets, exact commands with expected output.
 - **Evidence before claims** — no completion claims without fresh verification output. If you haven't run the command in this message, you cannot claim it passes. See `/verify` skill (`skills/verify/SKILL.md`).
-- **Right-size the model** — use the cheapest model that can handle the task. Haiku for mechanical edits, Sonnet for implementation, Opus for architecture and review.
 - **Dispatch first, self-execute second** — when you have both delegatable work (agent tasks) and self-executable work (memory saves, doc writes, context reads), dispatch agents FIRST, then do your own tasks while agents run. Agent work takes longer; starting it immediately maximizes parallelism. Never block agent dispatch behind your own lightweight tasks.
 
 **Session memory:** At session start, read `memory/consolidated-feedback.md` using the Read tool. These are hard-won behavioral rules and case study principles from prior sessions — they prevent known failure modes from recurring.
@@ -165,7 +164,6 @@ Known rationalization: "All tasks passed individually" — these 4 steps catch c
 - Verify tests before offering completion options
 - Present exactly 4 structured completion options
 - Get confirmation before discarding work
-- Use the model tier assigned in the plan
 - Match process weight to task weight
 
 ---
@@ -195,4 +193,4 @@ Instruction files ALWAYS delegate through the Agent tool regardless of change si
 
 ## Reference Files
 
-For standalone skills, phase details, extracted on-demand files, and agent definitions, read `phases/reference-files.md`. For model-routing tiers and UI/UX standards that apply to dispatched agents, read `phases/agent-standards.md`.
+For standalone skills, phase details, extracted on-demand files, and agent definitions, read `phases/reference-files.md`. For UI/UX standards that apply to dispatched agents, read `phases/agent-standards.md`.

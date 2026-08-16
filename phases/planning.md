@@ -36,7 +36,7 @@ Before writing tasks, check if any planned work needs specialized skill involvem
 > 5. Identity over prohibition — for role boundaries, write "You are the orchestrator" not "NEVER write code directly"
 > 6. Name known rationalizations — if a rule has bypass phrases ("too simple", "already handled"), name them as compliance triggers
 
-**Annotating tasks:** For each task in the plan, add an `**Advisory skills:**` line after the `**Model:**` line. Reference the advisory by name (e.g., "PROMPT_CRAFT_ADVISORY"). If no detection rule matches, write `**Advisory skills:** None`.
+**Annotating tasks:** For each task in the plan, add an `**Advisory skills:**` line after the task's `**Files:**` block. Reference the advisory by name (e.g., "PROMPT_CRAFT_ADVISORY"). If no detection rule matches, write `**Advisory skills:** None`.
 
 ## Step 0.7: Load Accumulated Eval Criteria
 
@@ -105,7 +105,7 @@ If any file doesn't exist, skip and note in status. Do NOT fabricate context.
 
 ## Plan Document Format
 
-Read `phases/plan-format.md` for the complete plan template including header, context brief, eval criteria, file structure, task structure, model assignment, and testing rules. Follow the format exactly.
+Read `phases/plan-format.md` for the complete plan template including header, context brief, eval criteria, file structure, task structure, and testing rules. Follow the format exactly.
 
 Every plan starts with a YAML frontmatter block setting `status: planned`. The orchestrator manages this field across phases:
 

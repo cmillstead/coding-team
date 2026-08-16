@@ -81,7 +81,7 @@ Before defining tasks, map out which files will be created or modified and what 
 - Modify: `exact/path/to/existing.py:123-145`
 - Test: `tests/exact/path/to/test.py`
 
-**Model:** haiku | sonnet | opus
+**Advisory skills:** [advisory name, e.g. PROMPT_CRAFT_ADVISORY — or None]
 
 **Side-effects:** [only include when task creates infrastructure artifacts]
 - Hook registration in `settings.json`
@@ -125,13 +125,6 @@ git commit -m "feat: add specific feature"
 **Each step is one action (2-5 minutes).** Complete code in plan — not "add validation here." Exact commands with expected output.
 
 **Infrastructure tasks:** When a task creates hooks, agents, skills, or config files that require registration or deployment beyond the file itself, include a final step: "Register/deploy: [exact command or manual step]." Unregistered infrastructure is a dark feature — it exists but doesn't work.
-
-## Model Assignment Per Task
-
-The planning worker assigns a model tier to each task:
-- **haiku** — touches 1-2 files with complete spec, mechanical changes
-- **sonnet** — touches multiple files, needs judgment, integration work
-- **opus** — requires design decisions, broad codebase understanding
 
 ## Testing Rules (baked into every plan)
 
