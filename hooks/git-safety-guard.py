@@ -379,18 +379,18 @@ def is_verification(command: str) -> bool:
 
 
 def is_commit_or_push(command: str) -> bool:
-    return bool(re.search(r'\bgit\s+(commit|push)\b', command))
+    return git.has_git_subcommand(command, "commit", "push")
 
 
 def is_commit_push_or_merge(command: str) -> bool:
     """Return True if the command contains a git commit, push, or merge anywhere.
 
-    Uses a regex scan rather than first-subcommand detection so that chained
-    commands like `git add f && git commit -m x` are not misclassified by
+    Scans every git invocation in the chain rather than only the first, so
+    chained commands like `git add f && git commit -m x` are not misclassified by
     first-subcommand extraction (which would return 'add' and skip the branch
     check entirely).
     """
-    return bool(re.search(r'\bgit\s+(commit|push|merge)\b', command))
+    return git.has_git_subcommand(command, "commit", "push", "merge")
 
 
 def is_delete_only_push(command: str) -> bool:
@@ -404,47 +404,32 @@ def is_delete_only_push(command: str) -> bool:
     the safety guards still apply. On any parsing uncertainty, returns False
     (fail-safe: guards stay ON).
     """
-    # Must contain a git push; anything else is immediately False.
-    if not re.search(r'\bgit\s+push\b', command):
+    # Isolate the push invocation's post-subcommand args; None => no push at all.
+    push_args = None
+    for sub, args in git.git_invocations(command):
+        if sub == "push":
+            push_args = args
+            break
+    if push_args is None:
         return False
 
-    # --- Flag form: --delete or -d is present ---
-    # We only need to confirm the push has the flag; the branches are positional
-    # arguments after the remote so there is nothing unsafe about exempting this.
-    if re.search(r'\bgit\s+push\b.*?(?:--delete|-d)\b', command, re.DOTALL):
+    # --- Flag form: --delete or -d present among the push args ---
+    if "--delete" in push_args or "-d" in push_args:
         return True
 
-    # --- Colon form: every non-flag, non-remote argument starts with ':' ---
-    # Isolate the git push invocation from any leading shell fragment (e.g. "cd /x && ").
-    push_match = re.search(r'\bgit\s+push\b(.*)', command)
-    if not push_match:
-        return False
-
-    push_args_str = push_match.group(1)
-
-    # Tokenize safely: shlex handles quoting but may raise on unbalanced shell syntax.
-    try:
-        tokens = shlex.split(push_args_str)
-    except ValueError:
-        try:
-            tokens = push_args_str.split()
-        except Exception:
-            return False  # Cannot parse — fail safe
-
-    # Walk the token list: skip flags (start with '-'), consume the remote name
-    # (first non-flag), then collect refspecs.
+    # --- Colon form: every non-flag, non-remote arg starts with ':' ---
+    # push_args are already the tokens AFTER `push`, so no re-tokenising or
+    # leading-fragment stripping is needed.
     saw_remote = False
     refspecs: list[str] = []
     i = 0
-    while i < len(tokens):
-        tok = tokens[i]
+    while i < len(push_args):
+        tok = push_args[i]
         if tok.startswith("-"):
-            # Flags that take a value: consume the next token too.
-            # Known value-taking push flags: --repo, --push-option/-o, --recurse-submodules
+            # Flags that take a separate value: consume the next token too.
             if tok in ("--repo", "--push-option", "-o", "--recurse-submodules"):
                 i += 2
                 continue
-            # --flag=value style: nothing extra to consume
             i += 1
             continue
         if not saw_remote:
@@ -454,7 +439,6 @@ def is_delete_only_push(command: str) -> bool:
         refspecs.append(tok)
         i += 1
 
-    # Must have at least one refspec and ALL must start with ':'.
     if not refspecs:
         return False
     return all(r.startswith(":") for r in refspecs)
@@ -594,7 +578,7 @@ def is_pointer_only_commit(command: str, target_root: str) -> bool:
         target_root: The repo root to inspect for staged entries.
     """
     # Only exempt git commit — pushes are out of scope.
-    if not re.search(r'\bgit\s+commit\b', command):
+    if not git.has_git_subcommand(command, "commit"):
         return False
 
     try:
@@ -643,7 +627,7 @@ def is_docs_only_commit(command: str, target_root: str) -> bool:
         target_root: The repo root to inspect for staged files.
     """
     # Only exempt git commit — pushes are out of scope.
-    if not re.search(r'\bgit\s+commit\b', command):
+    if not git.has_git_subcommand(command, "commit"):
         return False
 
     try:
@@ -900,7 +884,7 @@ def check_codex_digest_sync(command: str, target_root: str) -> str | None:
         target_root: The repo root to inspect for changed files and to run from.
     """
     # Only the commit case is in scope; pushes/merges are a no-op here.
-    if not re.search(r'\bgit\s+commit\b', command):
+    if not git.has_git_subcommand(command, "commit"):
         return None
 
     # Candidate set: union of staged AND tracked-unstaged-modified files. This
@@ -990,17 +974,21 @@ def check_codex_digest_sync(command: str, target_root: str) -> str | None:
 # Compound auto-allow gating
 # ---------------------------------------------------------------------------
 
-# git subcommands this hook gates (secret/branch/verify/format). A command that
-# contains ANY of these must flow through the existing block logic and is NEVER a
-# candidate for the compound deny/bless path — that path only fires for compound
-# commands that do not carry a gated git op (so it cannot override a guard).
-_GATED_GIT_SUBCMD = re.compile(r'\bgit\s+(add|commit|push|merge)\b')
-
-
 def _has_gated_git_op(command: str) -> bool:
-    """Return True iff the command contains a git op this hook gates (fail-safe True on error)."""
+    """Return True iff the command contains a git op this hook gates (fail-safe True on error).
+
+    The gated subcommands are add/commit/push (secret/branch/verify/format gates)
+    and merge. A command carrying ANY of them must flow through the existing block
+    logic and is NEVER a candidate for the compound deny/bless path — that path
+    only fires for compound commands without a gated git op, so it cannot override
+    a guard.
+
+    has_git_subcommand already never raises, but the try/except stays: its
+    fail-safe answer is False ("no git command detected"), and on the auto-allow
+    path the safe answer is the opposite one — treat the command as gated.
+    """
     try:
-        return bool(_GATED_GIT_SUBCMD.search(command))
+        return git.has_git_subcommand(command, "add", "commit", "push", "merge")
     except Exception:
         return True  # on any error, treat as gated → do NOT auto-allow
 
@@ -1349,7 +1337,7 @@ def main():
             return
 
         # Commit message format check (only for git commit, not push)
-        if re.search(r'\bgit\s+commit\b', command):
+        if git.has_git_subcommand(command, "commit"):
             # Skip if --amend or --no-edit (no new message expected)
             if re.search(r'--amend|--no-edit', command):
                 return
