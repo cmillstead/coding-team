@@ -9,7 +9,7 @@ Assembles specialist agent teams to collaboratively work through code tasks. The
 1. **Dialogue** — clarify requirements, explore approaches, get alignment
 2. **Design team** — specialist workers analyze the problem from multiple angles
 3. **Spec review** — automated reviewer validates the design doc
-4. **Planning** — detailed TDD implementation plan with model routing per task
+4. **Planning** — detailed TDD implementation plan
 5. **Execution** — task teams (implementer + audit team) build and verify
 6. **Completion** — full verification, learning loop, then merge / PR / keep / discard
 
@@ -81,18 +81,6 @@ COORDINATION is the dominant signal. If agents don't need to talk to each other,
 
 When agent teams aren't available, all patterns fall back to subagents.
 
-### Model routing
-
-Uses the cheapest model that can handle each task:
-
-| Task type | Model | Examples |
-|---|---|---|
-| Mechanical | haiku | Single file edits, formatting, simple rewrites |
-| Implementation | sonnet | Feature implementation, test writing, multi-file refactoring |
-| Architecture/review | opus | Planning, design, spec review, complex debugging |
-
-If a cheaper model fails or returns low-quality results, the task is re-dispatched with the next tier up.
-
 ## How it works
 
 ### Session routing
@@ -112,7 +100,7 @@ For fresh tasks (no prior plans), it routes based on what you bring:
 | A bug report or test failure | `/debug` skill |
 | A PR with review feedback | `/review-feedback` skill |
 | Multiple independent failures | `/parallel-fix` skill |
-| Single-file change under 20 lines with a complete spec | Phase 5 with a single haiku-tier task |
+| Single-file change under 20 lines with a complete spec | Phase 5 with a single task |
 
 ### Phase 1: Dialogue
 
@@ -186,7 +174,7 @@ Each task gets a **task team**: an implementer (using TDD) plus an audit team of
 
 **Completeness checks** run at two levels: per-task (every step accounted for before audit) and end-of-execution (every plan task has a commit before Phase 6).
 
-**Documentation checks** run at three levels: per-task (implementer scans doc files before reporting DONE), end-of-execution (doc drift scan via sonnet agent against the full diff), and spec reviewer backstop (flags possible doc drift when implementer claims "no impact").
+**Documentation checks** run at three levels: per-task (implementer scans doc files before reporting DONE), end-of-execution (doc drift scan agent against the full diff), and spec reviewer backstop (flags possible doc drift when implementer claims "no impact").
 
 **Phase transition reminders** print after every exit gate — guiding you to the next phase, suggesting when to clear context, and recommending relevant skills (`/second-opinion`, `/prompt-craft`, `/scope-lock`). Mid-execution reminders fire every 3 tasks with progress and context check.
 
@@ -273,7 +261,6 @@ Technical evaluation, not performative agreement. Read, understand, verify again
 - **Focused agents produce correct agents** — one worker, one lens, one scope
 - **No ambiguity in specs** — exact file paths, exact line ranges, complete code, exact commands
 - **Evidence before claims** — no completion claims without fresh verification output
-- **Right-size the model** — use the cheapest model that can handle the task
 - **Right-size the coordination** — agent teams when agents need to talk, subagents when they don't
 - **Dispatch first, self-execute second** — start long-running agent work before doing lightweight self-tasks
 
@@ -383,7 +370,7 @@ Or invoke the build command directly:
 /build Add caching to the API response layer with TTL-based invalidation
 ```
 
-For simple tasks (typo, rename, single-file fix), the skill skips to Phase 5 with a single haiku-tier task.
+For simple tasks (typo, rename, single-file fix), the skill skips to Phase 5 with a single task.
 
 ## File structure
 
@@ -434,7 +421,7 @@ phases/                           # canonical pipeline phase files (21 files, lo
   reference-files.md              #   index of all reference files
   task-weight.md                  #   task weight classification + gate matrix
   named-rationalizations.md       #   catalog of known rationalization patterns to reject
-  agent-standards.md              #   model-routing tiers + UI/UX standards for dispatched agents
+  agent-standards.md              #   UI/UX standards for dispatched agents
 cookbook/                         # historical / narrative material (2 files, not part of the live pipeline)
   case-studies.md                 #   worked examples and retrospective case studies
   context-inheritance-matrix.md   #   point-in-time verification artifact — historical content, not maintained
@@ -559,7 +546,6 @@ Use `/prompt-craft diagnose` to find the conflict:
 |---|---|---|
 | "Write tests alongside new code" | Implies the agent writes tests | "Ensure tests exist (coding-team handles this)" |
 | "Read code-style.md when writing Python" | Implies the agent writes Python | "Pass code-style.md to coding-team agents" |
-| Model routing table without "(for coding-team agents)" | Reads as tasks for the main agent | Add "(for coding-team agents, NOT for you)" to the header |
 | Escape hatch language ("skip", "simple", "trivial") | Agent reclassifies everything as "simple" | Quantify thresholds: "single-file under 20 lines" not "simple" |
 | Identity statement not first section | Gets outweighed by surrounding code-writing context | Identity framing must be the first thing the agent reads |
 

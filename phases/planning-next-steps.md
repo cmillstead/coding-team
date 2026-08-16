@@ -7,7 +7,6 @@ After the plan passes review and is saved:
 | Signal | Detection |
 |---|---|
 | Plan touches 5+ files | Count files in task list `**Files:**` sections |
-| Plan has opus-tier tasks | Any task with `**Model:** opus` |
 | Plan introduces new security surface | Tasks touch auth, payment, encryption, session, token, CORS, or CSP files |
 | Plan modifies CC instruction files | Tasks touch `phases/*.md`, `agents/*.md`, `skills/*/SKILL.md`, `CLAUDE.md`, `SKILL.md` |
 | Plan includes database migrations | Tasks create or alter schema, migrations, or indexes |
@@ -21,7 +20,7 @@ After the plan passes review and is saved:
 >
 > **Plan saved to `docs/plans/<actual-path>`.**
 >
-> [If risk signals fired: "This plan [touches N files / modifies security surface / has opus-tier tasks / etc.]."]
+> [If risk signals fired: "This plan [touches N files / modifies security surface / etc.]."]
 >
 > Running `/second-opinion review` on the plan — required at tier ≥ Medium.
 >

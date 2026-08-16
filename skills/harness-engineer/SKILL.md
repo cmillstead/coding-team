@@ -93,7 +93,7 @@ Never paste raw secrets, tokens, or credentials into any prediction field or `--
 
 This skill dispatches the `ct-harness-engineer` native agent (`~/.claude/agents/ct-harness-engineer.md`).
 
-**For standalone use:** Dispatch via Agent tool with model `opus`. Pass the mode (audit/design/assess/verify) and any user arguments.
+**For standalone use:** Dispatch via Agent tool. Pass the mode (audit/design/assess/verify) and any user arguments.
 
 **From /coding-team Phase 2:** The team leader dispatches as a design worker alongside other specialists. The harness engineer evaluates the task through the constraint/observability lens.
 

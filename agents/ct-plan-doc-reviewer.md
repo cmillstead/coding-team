@@ -37,7 +37,6 @@ Work from: [INSERT WORKING DIRECTORY]
 | Spec Alignment | Plan covers spec requirements, no major scope creep |
 | Task Decomposition | Tasks have clear boundaries, steps are actionable |
 | Buildability | Could an engineer follow this plan without getting stuck? |
-| Model Assignment | Each task has an appropriate model tier (haiku/sonnet/opus) |
 | **Finding Coverage** | **Every input finding is accounted for (see Traceability Audit below)** |
 
 ## Traceability Audit (MANDATORY — do this FIRST)
