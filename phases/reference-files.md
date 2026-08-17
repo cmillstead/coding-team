@@ -8,16 +8,12 @@ Loaded on demand by the skill router. Not needed during active phase work.
 
 | Skill | Path | Purpose |
 |-------|------|---------|
-| `/a11y` | `skills/a11y/SKILL.md` | WCAG 2.2 AA source code audit — semantic markup, ARIA, keyboard nav, contrast, focus |
-| `/api-qa` | `skills/api-qa/SKILL.md` | API endpoint testing — contract compliance, error handling, security, performance |
 | `/debug` | `skills/debug/SKILL.md` | Four-phase root cause investigation |
 | `/dep-audit` | `skills/dep-audit/SKILL.md` | Dependency audit — staleness, license risk, upgrade paths, health |
 | `/doc-sync` | `skills/doc-sync/SKILL.md` | Post-ship documentation update |
 | `/doc-write` | `skills/doc-write/SKILL.md` | Write or improve documentation from scratch — README, ARCHITECTURE, API references, tutorials |
 | `/harness-engineer` | `skills/harness-engineer/SKILL.md` | Harness infrastructure: hooks, rules, settings, constraint promotion, maturity assessment. For systems design — not instruction text. |
 | `/incident` | `skills/incident/SKILL.md` | Production incident coordination, response process design, post-mortems |
-| `/migration-guide` | `skills/migration-guide/SKILL.md` | Write upgrade/migration guides for breaking changes |
-| `/onboard` | `skills/onboard/SKILL.md` | Guided orientation to an unfamiliar codebase |
 | `/parallel-fix` | `skills/parallel-fix/SKILL.md` | Parallel agent dispatch for independent failures |
 | `/prompt-craft` | `skills/prompt-craft/SKILL.md` | Skill & prompt engineering, diagnosis, audit. For instruction text quality — not harness infrastructure. |
 | `/release` | `skills/release/SKILL.md` | Automated release: sync, test, push, PR |
