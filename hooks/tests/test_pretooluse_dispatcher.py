@@ -410,8 +410,16 @@ class TestAgentGuardChaining:
 
     def test_agent_guard_block_passes_through(self, tmp_path):
         """An execution-intent Agent dispatch for a PLAN with no PASS is blocked
-        by the dispatcher (guard output, not codesight injection)."""
-        sub = tmp_path / ".paul" / "phases" / "02-medium-risk-domains"
+        by the dispatcher (guard output, not codesight injection).
+
+        Run inside a hermetic ~/src (cwd under tmp_path/src) so the codesight
+        cwd-gate WOULD allow injection: that makes the secondary assertion below
+        isolate the guard short-circuit as the ONLY reason the directive is
+        absent. Outside ~/src the gate would suppress the directive regardless,
+        rendering that assertion vacuous.
+        """
+        proj = _provision_home_under_src(tmp_path)
+        sub = proj / ".paul" / "phases" / "02-medium-risk-domains"
         sub.mkdir(parents=True)
         plan = sub / "02-02-PLAN.md"
         plan.write_bytes(b"plan body\n")  # no .review.json
@@ -423,12 +431,14 @@ class TestAgentGuardChaining:
         result = subprocess.run(
             [sys.executable, str(PRETOOLUSE_DISPATCHER)],
             input=json.dumps(event), capture_output=True, text=True,
-            timeout=20, cwd=str(tmp_path), env={**os.environ},
+            timeout=20, cwd=str(proj), env={**os.environ, "HOME": str(tmp_path)},
         )
         assert result.returncode == 0
         parsed = json.loads(result.stdout)
         assert parsed.get("decision") == "block"
-        # codesight injection must NOT be present (guard short-circuited)
+        # codesight injection must NOT be present (guard short-circuited).
+        # cwd is under ~/src, so the cwd-gate would ALLOW injection — the only
+        # reason the directive is absent is the guard's short-circuit.
         assert "MANDATORY SEARCH RULES" not in result.stdout
 
     def test_agent_non_execution_falls_through_to_codesight(self, tmp_path):
