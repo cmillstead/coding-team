@@ -61,6 +61,18 @@ def pytest_configure(config):
     falsely match), means no test path can start with "/tmp" or contain
     "hooks" on any platform. Only applies when --basetemp wasn't
     explicitly passed on the command line.
+
+    The basetemp is rooted in a PER-PROCESS subdirectory
+    (.pytest-tmp/<pid>/) rather than a single shared .pytest-tmp/.
+    Two concurrent pytest processes (e.g. concurrent agents) must not
+    share one basetemp: on startup pytest rm_rf's and recreates its
+    basetemp, so a shared fixed path lets process B wipe process A's
+    temp tree mid-test — surfacing as FileExistsError on .pytest-tmp
+    and "could not write config file .../.git/config: No such file or
+    directory" (the cwd deleted underneath a running test). Keying the
+    subdir on os.getpid() confines each process's startup rm_rf to its
+    own dir, so there is no cross-process collision (TRK-132). The
+    .pytest-tmp/ parent stays gitignore-covered.
     """
     config.addinivalue_line(
         "markers",
@@ -71,8 +83,8 @@ def pytest_configure(config):
         "smoke: Tier 1 agent smoke tests (structural validation, no LLM calls)",
     )
     if config.option.basetemp is None:
-        base = HOOKS_DIR.parent / ".pytest-tmp"
-        base.mkdir(exist_ok=True)
+        base = HOOKS_DIR.parent / ".pytest-tmp" / str(os.getpid())
+        base.mkdir(parents=True, exist_ok=True)
         config.option.basetemp = str(base)
 
 
