@@ -221,7 +221,7 @@ After the user chooses a completion option and it's been executed, print this bl
 >
 > **If you chose "Push and create PR" and want a more automated release:** Run `/release` — it syncs main, runs tests, audits coverage, pushes, and creates the PR with coverage stats.
 >
-> **Starting something new?** `/clear` then `/coding-team` with your next task. If it's an unfamiliar codebase, start with `/onboard` for a guided orientation.
+> **Starting something new?** `/clear` then `/coding-team` with your next task.
 >
 > ---
 
