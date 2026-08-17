@@ -25,6 +25,7 @@ Shared-state reset strategy (critical for parity validity):
 import importlib.util
 import json
 import os
+import re
 import subprocess
 import time
 import uuid
@@ -91,6 +92,21 @@ def _env_for_state(marker: Path, state: Path) -> dict[str, str]:
     env["ENGRAM_RECALL_MARKER"] = str(marker)
     env["ENGRAM_RECALL_STATE"] = str(state)
     return env
+
+
+# Matches the single-decimal relevance score emitted by
+# mid-session-recall.py:296 -> f'  #{node_id} "{title}" (relevance {score:.1f})'.
+_RELEVANCE_RE = re.compile(rb"\(relevance \d+\.\d\)")
+
+
+def _normalize_engram_relevance(output: bytes) -> bytes:
+    """Collapse the volatile per-query relevance score in the <engram-recall>
+    block to a fixed placeholder so byte-parity is not defeated by the score
+    rounding differently between the oracle run and the dispatcher run (both
+    query the live engram DB, which logs access per query). Structural content
+    (node ids, titles, survivor count, ordering) is left untouched — a real
+    dispatcher-vs-oracle divergence still fails the gate."""
+    return _RELEVANCE_RE.sub(b"(relevance N)", output)
 
 
 def _oracle_bytes(payload: str, env: dict[str, str]) -> bytes:
@@ -161,7 +177,10 @@ class TestByteIdenticalParity:
         finally:
             _delete_if_exists(marker, state)
 
-        return baseline, dispatcher
+        return (
+            _normalize_engram_relevance(baseline),
+            _normalize_engram_relevance(dispatcher),
+        )
 
     def test_parity_first_prompt(self):
         """First prompt: proactive-recall fires (marker absent), mid-session silent."""
@@ -244,6 +263,76 @@ class TestByteIdenticalParity:
             f"  baseline  ({len(baseline)} bytes): {baseline[:400]!r}\n"
             f"  dispatcher({len(dispatcher)} bytes): {dispatcher[:400]!r}"
         )
+
+
+# ---------------------------------------------------------------------------
+# Relevance normalizer — non-vacuity: proves the collapse is score-only
+# ---------------------------------------------------------------------------
+
+class TestRelevanceNormalizer:
+    """The normalizer must collapse ONLY the volatile relevance score, so a
+    genuine dispatcher-vs-oracle divergence (different node id, title, or
+    survivor count) still fails the parity gate."""
+
+    def test_only_relevance_digit_differs_normalizes_equal(self):
+        """Two blocks identical except the relevance digit → equal after normalize."""
+        block_a = (
+            b'<engram-recall>\n'
+            b'  #42 "Harness North Star" (relevance 12.5)\n'
+            b'</engram-recall>'
+        )
+        block_b = (
+            b'<engram-recall>\n'
+            b'  #42 "Harness North Star" (relevance 12.6)\n'
+            b'</engram-recall>'
+        )
+        assert block_a != block_b
+        assert _normalize_engram_relevance(block_a) == _normalize_engram_relevance(block_b)
+
+    def test_different_node_id_stays_unequal(self):
+        """A structural token (node id) differs → still unequal after normalize."""
+        block_a = b'  #42 "Harness North Star" (relevance 12.5)'
+        block_b = b'  #43 "Harness North Star" (relevance 12.6)'
+        assert (
+            _normalize_engram_relevance(block_a)
+            != _normalize_engram_relevance(block_b)
+        )
+
+    def test_different_title_stays_unequal(self):
+        """A structural token (title) differs → still unequal after normalize."""
+        block_a = b'  #42 "Harness North Star" (relevance 12.5)'
+        block_b = b'  #42 "Codex Learning Engine" (relevance 12.5)'
+        assert (
+            _normalize_engram_relevance(block_a)
+            != _normalize_engram_relevance(block_b)
+        )
+
+    def test_different_survivor_count_stays_unequal(self):
+        """A different NUMBER of survivor lines → still unequal after normalize."""
+        block_a = (
+            b'<engram-recall>\n'
+            b'  #42 "A" (relevance 9.1)\n'
+            b'</engram-recall>'
+        )
+        block_b = (
+            b'<engram-recall>\n'
+            b'  #42 "A" (relevance 9.1)\n'
+            b'  #43 "B" (relevance 8.0)\n'
+            b'</engram-recall>'
+        )
+        assert (
+            _normalize_engram_relevance(block_a)
+            != _normalize_engram_relevance(block_b)
+        )
+
+    def test_no_relevance_token_returned_unchanged(self):
+        """A block with no (relevance …) token is returned byte-for-byte unchanged."""
+        block = (
+            b'<engram-recall>\n'
+            b'Related prior knowledge (you changed topic):\n'
+            b'</engram-recall>'
+        )
+        assert _normalize_engram_relevance(block) == block
 
 
 # ---------------------------------------------------------------------------
