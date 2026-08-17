@@ -61,6 +61,9 @@ class AmbiguousActivePlanError(RuntimeError):
 
 _FRONTMATTER_KEY_RE = re.compile(r"^([a-zA-Z_][\w-]*)\s*:\s*(.*?)\s*$")
 _FRONTMATTER_END_RE = re.compile(r"^---\s*$", re.MULTILINE)
+# A YAML block-list item line: leading indent, a dash, an optional single
+# space, then the item text (which may be empty).
+_FRONTMATTER_LIST_ITEM_RE = re.compile(r"^\s+-\s?(.*)$")
 
 
 def _parse_frontmatter(
@@ -69,7 +72,17 @@ def _parse_frontmatter(
     """Parse YAML frontmatter delimited by leading '---' lines.
 
     Returns {} if no frontmatter or malformed. Strips a leading UTF-8 BOM.
-    Only handles flat `key: value` lines (sufficient for our schema).
+    Handles flat `key: value` lines AND multi-line YAML BLOCK lists: a `key:`
+    line whose value is EMPTY, followed by one or more indented `- item`
+    lines, is canonicalized to the inline comma value (`item1,item2`) that the
+    downstream split validators already understand. Empty `-` items are kept
+    (as empty entries) so a malformed list still fails closed downstream. The
+    canonical join is performed BEFORE the preserve_case lowercasing, so a
+    path value's case is retained. (Flow lists `[a, b]` remain a single scalar
+    value here and are unwrapped by read_instruction_allowlist for the one key
+    that needs it — no `import yaml` is added; the module keeps its zero-yaml
+    dependency by design, since a hard yaml import under the pyenv-shim
+    interpreter would be a fail-closed wedge risk.)
     Keys are always lowercased. Values are stripped of surrounding quotes and
     lowercased for case-insensitive comparison, EXCEPT for keys listed in
     `preserve_case_keys` — those keep their original case because they carry
@@ -96,22 +109,43 @@ def _parse_frontmatter(
         return {}
     body = rest[: end.start()]
     out: dict[str, str] = {}
-    for line in body.splitlines():
-        m = _FRONTMATTER_KEY_RE.match(line)
-        if m:
-            key = m.group(1).lower()
-            value = m.group(2).strip()
-            # Strip matching surrounding quotes
-            if len(value) >= 2 and value[0] == value[-1] and value[0] in ("\"", "'"):
-                value = value[1:-1]
-            if key not in preserve_case_keys:
-                value = value.lower()
-            if key in out:
-                raise AmbiguousActivePlanError(
-                    f"duplicate frontmatter key {key!r} — cannot determine "
-                    f"which value is authoritative, refusing to guess"
-                )
-            out[key] = value
+    lines = body.splitlines()
+    idx = 0
+    while idx < len(lines):
+        m = _FRONTMATTER_KEY_RE.match(lines[idx])
+        if m is None:
+            idx += 1
+            continue
+        key = m.group(1).lower()
+        value = m.group(2).strip()
+        idx += 1
+        # Block-list form: a `key:` line with an EMPTY value followed by one
+        # or more indented `- item` lines. Consume them as list items and
+        # canonicalize to the inline comma value. Empty items are appended
+        # verbatim (so a malformed list fails closed downstream). The join
+        # happens BEFORE the preserve_case lowercasing below, so path case is
+        # kept for preserve_case_keys.
+        if value == "":
+            items: list[str] = []
+            while idx < len(lines):
+                item_match = _FRONTMATTER_LIST_ITEM_RE.match(lines[idx])
+                if item_match is None:
+                    break
+                items.append(item_match.group(1).strip())
+                idx += 1
+            if items:
+                value = ",".join(items)
+        # Strip matching surrounding quotes
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in ("\"", "'"):
+            value = value[1:-1]
+        if key not in preserve_case_keys:
+            value = value.lower()
+        if key in out:
+            raise AmbiguousActivePlanError(
+                f"duplicate frontmatter key {key!r} — cannot determine "
+                f"which value is authoritative, refusing to guess"
+            )
+        out[key] = value
     return out
 
 
@@ -476,6 +510,16 @@ def read_instruction_allowlist(
     if raw is None:
         return None
 
+    # Flow-list form `[a, b]`: unwrap the surrounding brackets (scoped to THIS
+    # key only) before the comma split. `_parse_frontmatter` already
+    # canonicalizes the BLOCK-list form to the inline comma value, so both list
+    # shapes and the legacy inline comma converge on the same split below. An
+    # empty flow list `[]` unwraps to "" -> a single empty entry -> Malformed
+    # (correct: it declares no paths).
+    stripped = raw.strip()
+    if stripped.startswith("[") and stripped.endswith("]"):
+        raw = stripped[1:-1]
+
     # `str.split(",")` always returns at least one element, so `all()` alone
     # is the whole check: it is False iff some entry is empty, which covers
     # both an empty value and a leading/trailing/doubled comma.
@@ -484,11 +528,15 @@ def read_instruction_allowlist(
         raise MalformedInstructionAllowlistError(
             f"`{INSTRUCTION_ALLOWLIST_KEY}` in {plan} is malformed — it "
             f"declares no paths, or has an empty entry from a leading, "
-            f"trailing, or doubled comma. Remove the key, or list at least "
-            f"one repo-relative path with no empty entries. A malformed "
-            f"declaration is NEVER silently normalized into a valid one: "
-            f"`a.md,,b.md` is a typo, and quietly honouring `a.md` and `b.md` "
-            f"would authorize an edit the author did not clearly declare."
+            f"trailing, or doubled comma (a malformed declaration is NEVER "
+            f"silently normalized into a valid one). STOP and escalate to the "
+            f"operator; do NOT edit the plan file yourself — this hook fires "
+            f"on that edit too, so a self-repair attempt is itself blocked. "
+            f"Accepted forms for `{INSTRUCTION_ALLOWLIST_KEY}` (repo-relative "
+            f"paths, no empty entries): inline comma `a.md, b.md`; a YAML block "
+            f"list (`{INSTRUCTION_ALLOWLIST_KEY}:` then indented `- a.md` "
+            f"lines); or a flow list `[a.md, b.md]`. The operator can recover a "
+            f"wedged gate by setting WRITE_GUARD_ALLOW_INSTRUCTION_EDIT=1."
         )
 
     try:
