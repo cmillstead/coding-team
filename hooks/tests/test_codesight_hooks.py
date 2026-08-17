@@ -1,13 +1,35 @@
 """Tests for codesight-hooks.py hook."""
 
+import importlib.util
 import json
 import os
 import subprocess
 import sys
+import types
 from pathlib import Path
 
 HOOKS_DIR = Path(__file__).resolve().parent.parent  # tests/ -> hooks/
 CODESIGHT_HOOKS = HOOKS_DIR / "codesight-hooks.py"
+
+
+def _run_agent_hook(event, *, home=None, cwd=None):
+    """Run codesight-hooks.py as a subprocess with optional HOME/cwd override.
+    Returns a namespace with .parsed/.stdout/.stderr/.returncode so tests use
+    result.parsed like the existing run_hook fixture."""
+    env = {**os.environ}
+    if home is not None:
+        env["HOME"] = str(home)
+    cp = subprocess.run(
+        [sys.executable, str(CODESIGHT_HOOKS)],
+        input=json.dumps(event), capture_output=True, text=True,
+        timeout=10, env=env, cwd=(str(cwd) if cwd else None),
+    )
+    try:
+        parsed = json.loads(cp.stdout)
+    except (json.JSONDecodeError, ValueError):
+        parsed = None
+    return types.SimpleNamespace(stdout=cp.stdout, stderr=cp.stderr,
+                                 returncode=cp.returncode, parsed=parsed)
 
 
 class TestPreToolUseAgentEdgeCases:
@@ -23,9 +45,11 @@ class TestPreToolUseAgentEdgeCases:
 
 
 class TestPreToolUseAgent:
-    def test_injects_codesight_instruction_into_agent_prompt(self, run_hook, make_event):
+    def test_injects_codesight_instruction_into_agent_prompt(self, make_event, tmp_path):
+        proj = tmp_path / "src" / "proj"
+        proj.mkdir(parents=True)
         event = make_event("Agent", prompt="Search for the function definition")
-        result = run_hook("codesight-hooks.py", event)
+        result = _run_agent_hook(event, home=tmp_path, cwd=proj)
         assert result.parsed is not None
         # Should have hookSpecificOutput with updatedInput
         hook_output = result.parsed.get("hookSpecificOutput", {})
@@ -58,10 +82,12 @@ class TestStyleInjection:
         assert "code-style.md" in updated
         assert "golden-principles.md" in updated
 
-    def test_non_code_prompt_no_style_injection(self, run_hook, make_event):
+    def test_non_code_prompt_no_style_injection(self, make_event, tmp_path):
         """Agent prompt without code signals does not get style injection."""
+        proj = tmp_path / "src" / "proj"
+        proj.mkdir(parents=True)
         event = make_event("Agent", prompt="Summarize the meeting notes")
-        result = run_hook("codesight-hooks.py", event)
+        result = _run_agent_hook(event, home=tmp_path, cwd=proj)
         assert result.parsed is not None
         output = result.parsed.get("hookSpecificOutput", {})
         updated = output.get("updatedInput", {}).get("prompt", "")
@@ -98,7 +124,9 @@ class TestFieldPreservation:
     validation. See update_input merge contract in _lib/output.py.
     """
 
-    def test_preserves_other_agent_fields(self, run_hook, make_event):
+    def test_preserves_other_agent_fields(self, make_event, tmp_path):
+        proj = tmp_path / "src" / "proj"
+        proj.mkdir(parents=True)
         event = make_event(
             "Agent",
             prompt="Search for the function definition",
@@ -106,7 +134,7 @@ class TestFieldPreservation:
             subagent_type="Explore",
             model="sonnet",
         )
-        result = run_hook("codesight-hooks.py", event)
+        result = _run_agent_hook(event, home=tmp_path, cwd=proj)
         assert result.parsed is not None
         updated = result.parsed["hookSpecificOutput"]["updatedInput"]
         # Non-prompt fields survive the merge
@@ -194,3 +222,73 @@ class TestHandlePostQuery:
         fields = self._last_tsv_fields(tmp_path)
         assert len(fields) == 5, f"Expected 5 TSV fields, got {len(fields)}: {fields}"
         assert fields[3] == "MyClass.my_method"
+
+
+def _load_module():
+    """Load the hyphen-named codesight-hooks.py in-process for unit tests."""
+    spec = importlib.util.spec_from_file_location("codesight_hooks", CODESIGHT_HOOKS)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+class TestCodesightPathGate:
+    """The MANDATORY-codesight directive is injected only when cwd is under ~/src/.
+
+    codesight-mcp only indexes repos under ~/src/, so the directive is an
+    unfollowable order anywhere else. The STYLE directive is orthogonal and
+    must still fire on code-work prompts regardless of cwd.
+    """
+
+    def test_pre_agent_injects_codesight_inside_src(self, make_event, tmp_path):
+        proj = tmp_path / "src" / "proj"
+        proj.mkdir(parents=True)
+        event = make_event("Agent", prompt="find the function")
+        result = _run_agent_hook(event, home=tmp_path, cwd=proj)
+        assert result.parsed is not None
+        updated = result.parsed["hookSpecificOutput"]["updatedInput"]["prompt"]
+        assert "MANDATORY SEARCH RULES" in updated
+
+    def test_pre_agent_omits_codesight_outside_src(self, make_event, tmp_path):
+        event = make_event("Agent", prompt="find the function")
+        result = _run_agent_hook(event, home=tmp_path, cwd=tmp_path)
+        assert result.parsed is not None
+        updated = result.parsed["hookSpecificOutput"]["updatedInput"]["prompt"]
+        assert "MANDATORY SEARCH RULES" not in updated
+
+    def test_pre_agent_style_present_outside_src(self, make_event, tmp_path):
+        event = make_event("Agent", prompt="implement the login feature")
+        result = _run_agent_hook(event, home=tmp_path, cwd=tmp_path)
+        assert result.parsed is not None
+        updated = result.parsed["hookSpecificOutput"]["updatedInput"]["prompt"]
+        assert "code-style.md" in updated
+
+    def test_pre_agent_omits_codesight_for_sibling_srcfoo(self, make_event, tmp_path):
+        (tmp_path / "src").mkdir()
+        proj = tmp_path / "srcfoo" / "proj"
+        proj.mkdir(parents=True)
+        event = make_event("Agent", prompt="find the function")
+        result = _run_agent_hook(event, home=tmp_path, cwd=proj)
+        assert result.parsed is not None
+        updated = result.parsed["hookSpecificOutput"]["updatedInput"]["prompt"]
+        assert "MANDATORY SEARCH RULES" not in updated
+
+    def test_pre_agent_empty_prompt_unchanged(self):
+        event = {"tool_name": "Agent", "tool_input": {"prompt": ""}}
+        result = _run_agent_hook(event)
+        assert result.stdout.strip() == ""
+        assert result.stderr == ""
+
+    def test_codesight_covers_cwd_false_on_getcwd_oserror(self, tmp_path):
+        """A deleted cwd makes os.getcwd() raise a real OSError; the guard must
+        swallow it and return False (fail off — do not inject the directive)."""
+        mod = _load_module()
+        gone = tmp_path / "gone"
+        gone.mkdir()
+        orig = os.getcwd()
+        os.chdir(gone)
+        try:
+            gone.rmdir()  # cwd now deleted -> os.getcwd() raises OSError
+            assert mod.codesight_covers_cwd() is False
+        finally:
+            os.chdir(orig)
