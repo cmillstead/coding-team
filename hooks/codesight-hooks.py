@@ -53,6 +53,21 @@ PROJECT_MARKERS = ("pyproject.toml", "package.json", "Cargo.toml", "go.mod")
 DEBOUNCE_SECONDS = 30
 
 
+def codesight_covers_cwd() -> bool:
+    """True iff the current working directory is under ~/src/ (codesight's index root).
+
+    codesight-mcp only indexes repos under SRC_PREFIX and rejects targets elsewhere,
+    so the mandatory-codesight directive must only be injected there. Exception-total:
+    any OSError -> False (do not inject; the directive is what misleads, so fail off).
+    """
+    try:
+        cwd = os.path.realpath(os.getcwd())
+        src_root = os.path.realpath(SRC_PREFIX.rstrip("/"))
+        return cwd == src_root or cwd.startswith(src_root + os.sep)
+    except OSError:
+        return False
+
+
 def find_project_root(file_path: str) -> str | None:
     """Walk up from file_path to find the project root under ~/src/."""
     d = file_path
@@ -95,7 +110,9 @@ def handle_pre_agent(event: dict) -> None:
     if not isinstance(prompt, str) or not prompt:
         return
 
-    injected = prompt + CODESIGHT_INSTRUCTION
+    injected = prompt
+    if codesight_covers_cwd():
+        injected += CODESIGHT_INSTRUCTION
 
     if is_code_work(prompt):
         injected += STYLE_INSTRUCTION

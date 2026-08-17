@@ -28,3 +28,11 @@ CC's normal permission handling only while `GIT_SAFETY_ALLOW_COMPOUND` is on; `V
 value-captures always fall through to a CC prompt regardless. Clean single commands = zero friction;
 a compound MAY cost a prompt (or a block, when the flag is off). Naming the path inside a single
 command sidesteps the question entirely — there is no compound to fall through.
+
+## File ownership
+
+- `code-style.md`, `command-hygiene.md`, and `golden-principles.md` exist at the `~/.claude` root
+  ONLY as relative symlinks into `skills/coding-team/config/` — the root paths are links, not files.
+- Their real content is tracked in the `cmillstead/coding-team` submodule, NOT `claude-harness`.
+- Consequence: editing any of the three surfaces only as `M skills/coding-team` in `~/.claude` git
+  status, and they ship via a coding-team PR + a parent gitlink bump — never a plain claude-harness PR.
