@@ -409,6 +409,302 @@ class TestPhase5AmbiguousState:
         assert "unreadable" in reason
 
 
+class TestPhase5AmbiguityRecovery:
+    """TRK-161: when >=2 plans are `status: in-progress` the gate fails closed
+    (AmbiguousActivePlanError), and the documented remedy — demote one plan —
+    is itself a docs/plans/*.md edit that WAS blocked by the same gate
+    (self-deadlock). The recovery: allow a docs/plans/*.md edit whose POST-edit
+    result is NOT `status: in-progress`, so the ambiguity is reachably curable
+    without the env override. Arming a new in-progress plan, promoting a
+    planned plan, editing an instruction file, or a nested
+    docs/plans/<subdir>/*.md edit all stay blocked.
+
+    These tests use the default root seam (cwd=repo), so plan_root resolves to
+    the test repo and both the ambiguity lookup and the recovery's structural
+    docs/plans/ comparison operate on it.
+    """
+
+    def _plans_dir(self, repo: Path) -> Path:
+        d = repo / "docs" / "plans"
+        d.mkdir(parents=True, exist_ok=True)
+        return d
+
+    def _in_progress(self, repo: Path, name: str) -> Path:
+        p = self._plans_dir(repo) / name
+        p.write_text("---\nstatus: in-progress\n---\n\n# Plan\n")
+        return p
+
+    def _two_in_progress(self, repo: Path) -> tuple[Path, Path]:
+        return self._in_progress(repo, "plan-a.md"), self._in_progress(repo, "plan-b.md")
+
+    def test_demote_one_of_two_in_progress_is_allowed(self, repo: Path):
+        """Edit plan-a: in-progress -> complete, resolving the ambiguity -> ALLOW."""
+        plan_a, _plan_b = self._two_in_progress(repo)
+        event = {
+            "tool_name": "Edit",
+            "tool_input": {
+                "file_path": str(plan_a),
+                "old_string": "status: in-progress",
+                "new_string": "status: complete",
+            },
+        }
+        parsed, stdout, stderr, rc = _run(event, cwd=repo)
+        _assert_allowed(parsed, stdout, stderr, rc,
+                        "demoting one plan must be allowed to break the deadlock")
+
+    def test_write_new_in_progress_plan_is_blocked(self, repo: Path):
+        """During ambiguity, WRITING a new status:in-progress plan -> BLOCK."""
+        self._two_in_progress(repo)
+        new_plan = self._plans_dir(repo) / "plan-c.md"
+        event = {
+            "tool_name": "Write",
+            "tool_input": {
+                "file_path": str(new_plan),
+                "content": "---\nstatus: in-progress\n---\n\n# New\n",
+            },
+        }
+        parsed, stdout, _stderr, _rc = _run(event, cwd=repo)
+        assert parsed is not None and parsed.get("decision") == "block", (
+            f"arming a new in-progress plan during ambiguity must block, got {stdout!r}"
+        )
+        assert "cannot determine active plan state" in parsed.get("reason", "").lower()
+
+    def test_promote_planned_to_in_progress_is_blocked(self, repo: Path):
+        """During ambiguity, promoting a planned plan to in-progress -> BLOCK."""
+        self._two_in_progress(repo)
+        planned = self._plans_dir(repo) / "plan-c.md"
+        planned.write_text("---\nstatus: planned\n---\n\n# Planned\n")
+        event = {
+            "tool_name": "Edit",
+            "tool_input": {
+                "file_path": str(planned),
+                "old_string": "status: planned",
+                "new_string": "status: in-progress",
+            },
+        }
+        parsed, stdout, _stderr, _rc = _run(event, cwd=repo)
+        assert parsed is not None and parsed.get("decision") == "block", (
+            f"planned->in-progress promotion during ambiguity must block, got {stdout!r}"
+        )
+        assert "cannot determine active plan state" in parsed.get("reason", "").lower()
+
+    def test_edit_instruction_file_during_ambiguity_is_blocked(self, repo: Path):
+        """An agents/x.md edit is NOT a docs/plans/*.md edit -> stays blocked."""
+        self._two_in_progress(repo)
+        agent = repo / "agents" / "x.md"
+        agent.parent.mkdir(parents=True)
+        agent.write_text("# Agent\nYou are x.\n")
+        event = {
+            "tool_name": "Edit",
+            "tool_input": {"file_path": str(agent), "new_string": "altered"},
+        }
+        parsed, stdout, _stderr, _rc = _run(event, cwd=repo)
+        assert parsed is not None and parsed.get("decision") == "block", (
+            f"instruction-file edit during ambiguity must block, got {stdout!r}"
+        )
+        assert "cannot determine active plan state" in parsed.get("reason", "").lower()
+
+    def test_nested_docs_plans_subdir_is_blocked(self, repo: Path):
+        """A nested docs/plans/agents/x.md must FAIL the structural parent-equality
+        check (not substring/startswith) -> stays blocked."""
+        self._two_in_progress(repo)
+        nested = repo / "docs" / "plans" / "agents" / "x.md"
+        nested.parent.mkdir(parents=True)
+        nested.write_text("---\nstatus: complete\n---\n# nested\n")
+        event = {
+            "tool_name": "Edit",
+            "tool_input": {
+                "file_path": str(nested),
+                "old_string": "complete",
+                "new_string": "done",
+            },
+        }
+        parsed, stdout, _stderr, _rc = _run(event, cwd=repo)
+        assert parsed is not None and parsed.get("decision") == "block", (
+            f"nested docs/plans/<subdir> edit must not be treated as recovery, got {stdout!r}"
+        )
+        assert "cannot determine active plan state" in parsed.get("reason", "").lower()
+
+    def test_single_in_progress_demote_is_allowed(self, repo: Path):
+        """A single-in-progress demote goes through the normal (non-ambiguous)
+        path — a docs/plans/*.md edit is never an instruction file -> ALLOW."""
+        only = self._in_progress(repo, "plan-a.md")
+        event = {
+            "tool_name": "Edit",
+            "tool_input": {
+                "file_path": str(only),
+                "old_string": "status: in-progress",
+                "new_string": "status: complete",
+            },
+        }
+        parsed, stdout, stderr, rc = _run(event, cwd=repo)
+        _assert_allowed(parsed, stdout, stderr, rc,
+                        "single-in-progress demote must be allowed")
+
+    def test_unreadable_plan_write_repair_allowed(self, repo: Path):
+        """Ambiguity via an unreadable plan; a WRITE-repair (full content, no
+        read) whose result is not in-progress -> ALLOW."""
+        self._in_progress(repo, "plan-a.md")
+        locked = self._in_progress(repo, "plan-b.md")
+        locked.chmod(0)
+        event = {
+            "tool_name": "Write",
+            "tool_input": {
+                "file_path": str(locked),
+                "content": "---\nstatus: complete\n---\n\n# Fixed\n",
+            },
+        }
+        try:
+            parsed, stdout, stderr, rc = _run(event, cwd=repo)
+        finally:
+            locked.chmod(stat.S_IRUSR | stat.S_IWUSR)
+        _assert_allowed(parsed, stdout, stderr, rc,
+                        "write-repair of an unreadable plan must be allowed")
+
+    def test_unreadable_plan_edit_repair_blocked(self, repo: Path):
+        """An EDIT-repair must READ the unreadable plan -> read fails -> the
+        result cannot be proven not-in-progress -> BLOCK (fail closed)."""
+        self._in_progress(repo, "plan-a.md")
+        locked = self._in_progress(repo, "plan-b.md")
+        locked.chmod(0)
+        event = {
+            "tool_name": "Edit",
+            "tool_input": {
+                "file_path": str(locked),
+                "old_string": "status: in-progress",
+                "new_string": "status: complete",
+            },
+        }
+        try:
+            parsed, stdout, _stderr, _rc = _run(event, cwd=repo)
+        finally:
+            locked.chmod(stat.S_IRUSR | stat.S_IWUSR)
+        assert parsed is not None and parsed.get("decision") == "block", (
+            f"edit-repair of an unreadable plan must fail closed, got {stdout!r}"
+        )
+        assert "cannot determine active plan state" in parsed.get("reason", "").lower()
+
+    def test_post_edit_duplicate_status_is_blocked(self, repo: Path):
+        """An edit whose RESULT has duplicate `status:` keys cannot be parsed
+        unambiguously -> not provably not-in-progress -> BLOCK."""
+        plan_a, _plan_b = self._two_in_progress(repo)
+        event = {
+            "tool_name": "Edit",
+            "tool_input": {
+                "file_path": str(plan_a),
+                "old_string": "status: in-progress",
+                "new_string": "status: complete\nstatus: planned",
+            },
+        }
+        parsed, stdout, _stderr, _rc = _run(event, cwd=repo)
+        assert parsed is not None and parsed.get("decision") == "block", (
+            f"a post-edit duplicate status key must block, got {stdout!r}"
+        )
+        assert "cannot determine active plan state" in parsed.get("reason", "").lower()
+
+    def test_block_message_names_the_reachable_remedy(self, repo: Path):
+        """The ambiguity block message must name the reachable demotion remedy."""
+        self._two_in_progress(repo)
+        agent = repo / "agents" / "x.md"
+        agent.parent.mkdir(parents=True)
+        agent.write_text("# Agent\nYou are x.\n")
+        event = {
+            "tool_name": "Edit",
+            "tool_input": {"file_path": str(agent), "new_string": "altered"},
+        }
+        parsed, stdout, _stderr, _rc = _run(event, cwd=repo)
+        assert parsed is not None, f"expected JSON, got {stdout!r}"
+        reason = parsed.get("reason", "")
+        lower = reason.lower()
+        assert "status: complete" in lower, (
+            f"message must name the demotion target status, got {reason!r}"
+        )
+        assert "docs/plans" in lower, (
+            f"message must point at docs/plans/*.md as the reachable edit, got {reason!r}"
+        )
+        assert _WRITE_GUARD.INSTRUCTION_EDIT_OVERRIDE_ENV in reason, (
+            f"message must keep the env-override note, got {reason!r}"
+        )
+
+    def test_docs_plans_claude_md_during_ambiguity_is_blocked(self, repo: Path):
+        """FIX 1: a docs/plans/CLAUDE.md Write is a behavioral INSTRUCTION file
+        (is_instruction_file classifies by BASENAME first, so CLAUDE.md is an
+        instruction file in ANY directory). Even though its parent is
+        docs/plans/ and its post-edit result is not in-progress, recovery must
+        reject it via the explicit is_instruction_file exclusion -> stays
+        blocked, so the recovery path never grants instruction-file authority.
+
+        Mutation lever: remove the `if is_instruction_file(...): return False`
+        guard in _is_ambiguity_recovery_edit -> this goes RED (wrongly allowed).
+        """
+        self._two_in_progress(repo)
+        instr = self._plans_dir(repo) / "CLAUDE.md"
+        event = {
+            "tool_name": "Write",
+            "tool_input": {
+                "file_path": str(instr),
+                "content": "---\nstatus: complete\n---\n\n# Not a plan\n",
+            },
+        }
+        parsed, stdout, _stderr, _rc = _run(event, cwd=repo)
+        assert parsed is not None and parsed.get("decision") == "block", (
+            f"docs/plans/CLAUDE.md edit during ambiguity must block, got {stdout!r}"
+        )
+        assert "cannot determine active plan state" in parsed.get("reason", "").lower()
+
+    def test_docs_plans_skill_md_during_ambiguity_is_blocked(self, repo: Path):
+        """FIX 1 (same lever, Edit path): docs/plans/SKILL.md is an instruction
+        file by basename -> recovery must reject it -> stays blocked.
+
+        Mutation lever: remove the is_instruction_file guard -> RED.
+        """
+        self._two_in_progress(repo)
+        instr = self._plans_dir(repo) / "SKILL.md"
+        instr.write_text("# Demo\nYou are demo.\n")
+        event = {
+            "tool_name": "Edit",
+            "tool_input": {
+                "file_path": str(instr),
+                "old_string": "demo",
+                "new_string": "altered",
+            },
+        }
+        parsed, stdout, _stderr, _rc = _run(event, cwd=repo)
+        assert parsed is not None and parsed.get("decision") == "block", (
+            f"docs/plans/SKILL.md edit during ambiguity must block, got {stdout!r}"
+        )
+        assert "cannot determine active plan state" in parsed.get("reason", "").lower()
+
+    def test_null_content_write_blocks_cleanly_without_hook_crash(self, repo: Path):
+        """FIX 2: a Write with content: null to a docs/plans/*.md during
+        ambiguity must produce a CLEAN ambiguity block, NOT a HOOK CRASH. The
+        recovery helpers are exception-total: non-str content is guarded (the
+        result cannot be proven not-in-progress) -> recovery returns False ->
+        the normal ambiguity block fires; no TypeError escapes to the top-level
+        crash handler.
+
+        Mutation lever: remove the isinstance guard in
+        _plan_edit_result_not_in_progress AND the TypeError catch in
+        _is_ambiguity_recovery_edit -> the null slice raises TypeError -> the
+        block reason becomes 'HOOK CRASH' -> RED.
+        """
+        self._two_in_progress(repo)
+        target = self._plans_dir(repo) / "plan-a.md"
+        event = {
+            "tool_name": "Write",
+            "tool_input": {"file_path": str(target), "content": None},
+        }
+        parsed, stdout, _stderr, _rc = _run(event, cwd=repo)
+        assert parsed is not None and parsed.get("decision") == "block", (
+            f"null-content write during ambiguity must block, got {stdout!r}"
+        )
+        reason = parsed.get("reason", "")
+        assert "HOOK CRASH" not in reason, (
+            f"null content must be handled cleanly, not crash the hook, got {reason!r}"
+        )
+        assert "cannot determine active plan state" in reason.lower()
+
+
 class TestPhase5ReferenceDataFilesAllowed:
     """DEFECT 2: co-located reference/DATA docs under instruction dirs are
     NOT behavioral instruction files and must be allowed even in-pipeline."""
@@ -1003,6 +1299,112 @@ class TestPhase5InstructionAllowlist:
                         "non-instruction file must be allowed")
 
 
+class TestPhase5InstructionAllowlistYamlLists:
+    """TRK-055 end-to-end: the plan's `instruction_files` may be declared as a
+    YAML block list or a flow list, not only the inline comma form. A declared
+    file is editable; an undeclared one is blocked; a malformed list fails
+    closed with an escalate-don't-self-repair message."""
+
+    def _armed(self, repo: Path, allowlist_block: str) -> Path:
+        body = (
+            "---\nstatus: in-progress\n"
+            f"{allowlist_block}"
+            "---\n\n# Plan\n"
+        )
+        return _write_plan(repo, "plan.md", body=body)
+
+    def _agent(self, repo: Path, name: str) -> Path:
+        agent = repo / "agents" / name
+        agent.parent.mkdir(parents=True, exist_ok=True)
+        agent.write_text("# Agent\nYou are the reviewer.\n")
+        return agent
+
+    def test_block_list_declared_file_allowed(self, repo: Path):
+        self._armed(
+            repo,
+            "instruction_files:\n  - agents/a.md\n  - agents/b.md\n",
+        )
+        agent = self._agent(repo, "a.md")
+        event = {
+            "tool_name": "Edit",
+            "tool_input": {"file_path": str(agent), "new_string": "altered"},
+        }
+        parsed, stdout, stderr, rc = _run(event, cwd=repo)
+        _assert_allowed(parsed, stdout, stderr, rc,
+                        "block-list declared file must be allowed")
+
+    def test_block_list_undeclared_file_blocked(self, repo: Path):
+        self._armed(
+            repo,
+            "instruction_files:\n  - agents/a.md\n  - agents/b.md\n",
+        )
+        agent = self._agent(repo, "c.md")
+        event = {
+            "tool_name": "Edit",
+            "tool_input": {"file_path": str(agent), "new_string": "altered"},
+        }
+        parsed, stdout, _stderr, _rc = _run(event, cwd=repo)
+        _assert_blocked_by_phase5(parsed, stdout)
+
+    def test_flow_list_declared_file_allowed(self, repo: Path):
+        self._armed(repo, "instruction_files: [agents/a.md, agents/b.md]\n")
+        agent = self._agent(repo, "b.md")
+        event = {
+            "tool_name": "Edit",
+            "tool_input": {"file_path": str(agent), "new_string": "altered"},
+        }
+        parsed, stdout, stderr, rc = _run(event, cwd=repo)
+        _assert_allowed(parsed, stdout, stderr, rc,
+                        "flow-list declared file must be allowed")
+
+    def test_inline_comma_legacy_still_allowed(self, repo: Path):
+        self._armed(repo, "instruction_files: agents/a.md, agents/b.md\n")
+        agent = self._agent(repo, "a.md")
+        event = {
+            "tool_name": "Edit",
+            "tool_input": {"file_path": str(agent), "new_string": "altered"},
+        }
+        parsed, stdout, stderr, rc = _run(event, cwd=repo)
+        _assert_allowed(parsed, stdout, stderr, rc,
+                        "inline-comma legacy form must still be allowed")
+
+    def test_block_list_empty_item_malformed_blocks_with_escalate(self, repo: Path):
+        self._armed(repo, "instruction_files:\n  - agents/a.md\n  -\n")
+        agent = self._agent(repo, "a.md")
+        event = {
+            "tool_name": "Edit",
+            "tool_input": {"file_path": str(agent), "new_string": "altered"},
+        }
+        parsed, stdout, _stderr, _rc = _run(event, cwd=repo)
+        assert parsed is not None and parsed.get("decision") == "block", (
+            f"malformed block list must fail closed, got {stdout!r}"
+        )
+        reason = parsed.get("reason", "")
+        assert "HOOK CRASH" not in reason, f"block from crash: {stdout!r}"
+        assert "declaration is unusable" in reason, (
+            f"message must name the unusable declaration, got {reason!r}"
+        )
+        assert "escalate" in reason.lower(), (
+            f"message must tell the agent to escalate, got {reason!r}"
+        )
+        assert "do not edit the plan" in reason.lower(), (
+            f"message must say NOT to self-repair, got {reason!r}"
+        )
+
+    def test_empty_flow_list_malformed_blocks(self, repo: Path):
+        self._armed(repo, "instruction_files: []\n")
+        agent = self._agent(repo, "a.md")
+        event = {
+            "tool_name": "Edit",
+            "tool_input": {"file_path": str(agent), "new_string": "altered"},
+        }
+        parsed, stdout, _stderr, _rc = _run(event, cwd=repo)
+        assert parsed is not None and parsed.get("decision") == "block", (
+            f"empty flow list must fail closed, got {stdout!r}"
+        )
+        assert "declaration is unusable" in parsed.get("reason", "")
+
+
 def _assert_blocked_by_phase5(parsed, stdout: str) -> None:
     """Shared P2-D helper: a bare `decision == "block"` passes against a
     crashed hook too (write-guard.py's top-level handler turns ANY
@@ -1548,6 +1950,236 @@ class TestMigrationGuard:
             assert "WRITE_GUARD_ALLOW_MIGRATION_EDIT" in reason, (
                 f"block message must name the override env var, got {reason!r}"
             )
+        finally:
+            shutil.rmtree(repo, ignore_errors=True)
+
+
+class TestMigrationCommitHistory:
+    """TRK-091: the migration gate keys on COMMIT HISTORY, not tracked state.
+
+    `git ls-files --error-unmatch` returned 0 for a staged-but-never-committed
+    file, so a freshly `git add`ed NEW migration was falsely treated as
+    deployed and its edit blocked — contradicting the create-and-audit intent.
+    `_has_commit_history()` asks git whether the file has ANY commit; a staged
+    file with no commit history is not yet deployed and stays editable.
+
+    Direct-unit rows call `_has_commit_history()`; the end-to-end rows drive
+    the whole hook and deliberately use fixed non-test-like /tmp repo paths so
+    the migration path does not match `is_test_file()` (pytest tmp_path dirs
+    contain `test_` segments, which would trigger the test-file exemption and
+    make the migration gate never run — a vacuous pass). No active plan is
+    written in any repo, so the Phase-5 gate can never mask the result.
+    """
+
+    def _commit(self, repo: Path, message: str) -> None:
+        subprocess.run(
+            ["git", "-c", "user.email=t@t", "-c", "user.name=t",
+             "commit", "-q", "-m", message],
+            cwd=repo, check=True, capture_output=True,
+        )
+
+    def _add(self, repo: Path, path: Path) -> None:
+        subprocess.run(
+            ["git", "add", str(path)], cwd=repo, check=True, capture_output=True,
+        )
+
+    # --- direct-unit rows -------------------------------------------------
+    def test_has_commit_history_true_for_committed(self, repo: Path):
+        migration = repo / "migrations" / "001_create.py"
+        migration.parent.mkdir(parents=True)
+        migration.write_text("# migration")
+        self._add(repo, migration)
+        self._commit(repo, "init")
+        assert _WRITE_GUARD._has_commit_history(str(migration)) is True
+
+    def test_has_commit_history_false_for_staged_never_committed(self, repo: Path):
+        """Repo HAS commits (a README), but the migration is only staged."""
+        readme = repo / "README.md"
+        readme.write_text("# repo")
+        self._add(repo, readme)
+        self._commit(repo, "init")
+
+        migration = repo / "migrations" / "002_add.py"
+        migration.parent.mkdir(parents=True)
+        migration.write_text("# migration")
+        self._add(repo, migration)  # staged, never committed
+        assert _WRITE_GUARD._has_commit_history(str(migration)) is False
+
+    def test_has_commit_history_false_for_untracked(self, repo: Path):
+        readme = repo / "README.md"
+        readme.write_text("# repo")
+        self._add(repo, readme)
+        self._commit(repo, "init")
+
+        migration = repo / "migrations" / "003_add.py"
+        migration.parent.mkdir(parents=True)
+        migration.write_text("# migration")  # never added
+        assert _WRITE_GUARD._has_commit_history(str(migration)) is False
+
+    def test_has_commit_history_true_when_not_in_repo(self):
+        """A file whose parent is not a git repo -> git log exits non-zero ->
+        conservative True (block).
+
+        Uses a real system-temp dir (NOT the tmp_path fixture): conftest.py
+        points the tmp_path base at `<repo>/.pytest-tmp`, which is INSIDE the
+        coding-team git repo, so tmp_path would resolve to a real repo and
+        make this row vacuous.
+        """
+        loose_root = Path(tempfile.mkdtemp())
+        try:
+            loose = loose_root / "migrations" / "004_add.py"
+            loose.parent.mkdir(parents=True)
+            loose.write_text("# migration")
+            assert _WRITE_GUARD._has_commit_history(str(loose)) is True
+        finally:
+            shutil.rmtree(loose_root, ignore_errors=True)
+
+    def test_has_commit_history_true_when_git_absent(self, repo: Path):
+        """git binary unreachable (FileNotFoundError) -> conservative True."""
+        readme = repo / "README.md"
+        readme.write_text("# repo")
+        self._add(repo, readme)
+        self._commit(repo, "init")
+        migration = repo / "migrations" / "005_add.py"
+        migration.parent.mkdir(parents=True)
+        migration.write_text("# migration")
+        self._add(repo, migration)
+
+        saved_path = os.environ.get("PATH", "")
+        os.environ["PATH"] = ""  # real env change (not a mock): git cannot be found
+        try:
+            assert _WRITE_GUARD._has_commit_history(str(migration)) is True
+        finally:
+            os.environ["PATH"] = saved_path
+
+    # --- end-to-end rows --------------------------------------------------
+    def test_staged_migration_allowed(self):
+        """Staged-but-never-committed migration -> ALLOW (the TRK-091 fix)."""
+        repo = Path("/tmp/ct_migration_staged_repo")
+        if repo.exists():
+            shutil.rmtree(repo)
+        repo.mkdir(parents=True)
+        try:
+            _init_repo(repo)
+            readme = repo / "README.md"
+            readme.write_text("# repo")
+            self._add(repo, readme)
+            self._commit(repo, "init")
+
+            migration = repo / "migrations" / "010_new.py"
+            migration.parent.mkdir(parents=True)
+            migration.write_text("# migration")
+            self._add(repo, migration)  # staged, uncommitted
+
+            event = {
+                "tool_name": "Edit",
+                "tool_input": {"file_path": str(migration), "new_string": "# edited"},
+            }
+            parsed, stdout, stderr, rc = _run(event, cwd=repo)
+            _assert_allowed(parsed, stdout, stderr, rc,
+                            "staged-but-uncommitted migration must be editable")
+        finally:
+            shutil.rmtree(repo, ignore_errors=True)
+
+    def test_committed_migration_blocked(self):
+        """Committed migration -> BLOCK (both-direction pair for staged-ALLOW)."""
+        repo = Path("/tmp/ct_migration_committed_repo")
+        if repo.exists():
+            shutil.rmtree(repo)
+        repo.mkdir(parents=True)
+        try:
+            _init_repo(repo)
+            migration = repo / "migrations" / "011_new.py"
+            migration.parent.mkdir(parents=True)
+            migration.write_text("# migration")
+            self._add(repo, migration)
+            self._commit(repo, "init")
+
+            event = {
+                "tool_name": "Edit",
+                "tool_input": {"file_path": str(migration), "new_string": "# edited"},
+            }
+            parsed, stdout, _stderr, _rc = _run(event, cwd=repo)
+            assert parsed is not None, f"expected JSON output, got {stdout!r}"
+            assert parsed["decision"] == "block"
+            assert "migration" in parsed["reason"].lower()
+        finally:
+            shutil.rmtree(repo, ignore_errors=True)
+
+    def test_untracked_migration_allowed(self):
+        """Untracked (never-added) migration -> ALLOW."""
+        repo = Path("/tmp/ct_migration_untracked_repo")
+        if repo.exists():
+            shutil.rmtree(repo)
+        repo.mkdir(parents=True)
+        try:
+            _init_repo(repo)
+            readme = repo / "README.md"
+            readme.write_text("# repo")
+            self._add(repo, readme)
+            self._commit(repo, "init")
+
+            migration = repo / "migrations" / "012_new.py"
+            migration.parent.mkdir(parents=True)
+            migration.write_text("# migration")  # never added
+
+            event = {
+                "tool_name": "Edit",
+                "tool_input": {"file_path": str(migration), "new_string": "# edited"},
+            }
+            parsed, stdout, stderr, rc = _run(event, cwd=repo)
+            _assert_allowed(parsed, stdout, stderr, rc,
+                            "untracked migration must be editable")
+        finally:
+            shutil.rmtree(repo, ignore_errors=True)
+
+    def test_non_migration_staged_allowed(self):
+        """A staged NON-migration file -> ALLOW (migration guard never fires)."""
+        repo = Path("/tmp/ct_nonmigration_staged_repo")
+        if repo.exists():
+            shutil.rmtree(repo)
+        repo.mkdir(parents=True)
+        try:
+            _init_repo(repo)
+            src = repo / "src" / "app.py"
+            src.parent.mkdir(parents=True)
+            src.write_text("x = 1\n")
+            self._add(repo, src)
+            self._commit(repo, "init")
+
+            event = {
+                "tool_name": "Edit",
+                "tool_input": {"file_path": str(src), "new_string": "x = 2\n"},
+            }
+            parsed, stdout, stderr, rc = _run(event, cwd=repo)
+            _assert_allowed(parsed, stdout, stderr, rc,
+                            "non-migration file must not hit the migration guard")
+        finally:
+            shutil.rmtree(repo, ignore_errors=True)
+
+    def test_committed_migration_allowed_with_override(self):
+        """Committed migration + WRITE_GUARD_ALLOW_MIGRATION_EDIT=1 -> ALLOW."""
+        repo = Path("/tmp/ct_migration_override091_repo")
+        if repo.exists():
+            shutil.rmtree(repo)
+        repo.mkdir(parents=True)
+        try:
+            _init_repo(repo)
+            migration = repo / "migrations" / "013_new.py"
+            migration.parent.mkdir(parents=True)
+            migration.write_text("# migration")
+            self._add(repo, migration)
+            self._commit(repo, "init")
+
+            event = {
+                "tool_name": "Edit",
+                "tool_input": {"file_path": str(migration), "new_string": "# guard"},
+            }
+            parsed, stdout, stderr, rc = _run(
+                event, cwd=repo, env={"WRITE_GUARD_ALLOW_MIGRATION_EDIT": "1"}
+            )
+            _assert_allowed(parsed, stdout, stderr, rc,
+                            "override must allow a committed migration edit")
         finally:
             shutil.rmtree(repo, ignore_errors=True)
 

@@ -25,6 +25,7 @@ from _lib.active_plan import (
     AmbiguousActivePlanError,
     INSTRUCTION_ALLOWLIST_KEY,
     MalformedInstructionAllowlistError,
+    _parse_frontmatter,
     _resolve_target_git_roots,
     find_active_plan,
     find_active_plan_cached,
@@ -258,8 +259,109 @@ def _plan_staleness_note(plan: Path) -> str:
     return ""
 
 
-def check_phase5(file_path: str) -> str | None:
+def _plan_edit_result_not_in_progress(
+    tool_name: "str | None", tool_input: "dict | None", target: Path
+) -> bool:
+    """Return True iff the POST-edit plan content would NOT be status: in-progress.
+
+    TRK-161 helper. Reconstructs what `target` will contain after this
+    Write/Edit and parses its frontmatter. Exception-total (never raises):
+      - Write -> uses tool_input["content"] verbatim (no file read, so a
+        write-repair of an UNREADABLE plan still works). A non-str content
+        (e.g. JSON `null` -> None) cannot be sliced/parsed, so it returns
+        False (fail closed) rather than letting `None[:4096]` raise TypeError.
+      - Edit  -> reads the current file text (OSError/PermissionError -> False,
+        i.e. an unreadable plan cannot be edit-repaired) and applies
+        old_string->new_string (honoring replace_all: all vs. first only). A
+        non-str old_string/new_string (e.g. JSON `null`) returns False rather
+        than letting `str.replace(None)` raise TypeError.
+      - a duplicate-key result raises AmbiguousActivePlanError from
+        _parse_frontmatter -> caught -> False.
+    Returning False on any failure is FAIL CLOSED: a recovery edit must
+    POSITIVELY prove its result is not in-progress before it is allowed.
+    """
+    tool_input = tool_input or {}
+    if tool_name == "Write":
+        new_content = tool_input.get("content", "")
+        if not isinstance(new_content, str):
+            return False
+    else:
+        try:
+            new_content = target.read_text(encoding="utf-8", errors="replace")
+        except (OSError, PermissionError):
+            return False
+        old_string = tool_input.get("old_string", "")
+        new_string = tool_input.get("new_string", "")
+        if not isinstance(old_string, str) or not isinstance(new_string, str):
+            return False
+        if tool_input.get("replace_all"):
+            new_content = new_content.replace(old_string, new_string)
+        else:
+            new_content = new_content.replace(old_string, new_string, 1)
+    try:
+        fm = _parse_frontmatter(new_content[:4096])
+    except AmbiguousActivePlanError:
+        return False
+    return fm.get("status") != "in-progress"
+
+
+def _is_ambiguity_recovery_edit(
+    tool_name: "str | None",
+    file_path: str,
+    tool_input: "dict | None",
+    plan_root: Path,
+) -> bool:
+    """Return True iff this edit is a reachable ambiguity-recovery edit.
+
+    TRK-161. Exception-total (never raises): any failure -> False (block).
+    ALL THREE conditions must hold:
+      1. `file_path` is a DIRECT child of `<plan_root>/docs/plans/` and ends
+         `.md`. The parent comparison is STRUCTURAL Path equality on resolved
+         paths — NOT substring / startswith / is_relative_to — so a nested
+         `docs/plans/agents/x.md` (whose parent is docs/plans/agents) FAILS.
+      2. `file_path` is NOT a behavioral instruction file. is_instruction_file()
+         classifies by BASENAME first, so CLAUDE.md / SKILL.md / SKILL.md.tmpl
+         are instruction files in ANY directory — including directly under
+         docs/plans/. Without this explicit exclusion, `docs/plans/CLAUDE.md`
+         and `docs/plans/SKILL.md` would pass condition 1 and slip through as
+         "recovery" edits, granting instruction-file authority the ambiguity
+         gate exists to withhold. This invariant is enforced HERE, by this
+         check — it is NOT a structural property of a docs/plans/*.md path.
+      3. `_plan_edit_result_not_in_progress(...)` is True — so a new
+         in-progress plan or a planned->in-progress promotion cannot slip
+         through (its result would be in-progress).
+    Because a single Edit/Write touches one file and condition 3 forbids an
+    in-progress result, the in-progress plan count can only stay or decrease.
+    Condition 2 guarantees this recovery never grants instruction-file
+    authority.
+    """
+    try:
+        target = Path(file_path)
+        plans_dir = (plan_root / "docs" / "plans").resolve()
+        if target.resolve().parent != plans_dir:
+            return False
+        if target.suffix != ".md":
+            return False
+        if is_instruction_file(file_path):
+            return False
+        return _plan_edit_result_not_in_progress(tool_name, tool_input, target)
+    except (OSError, ValueError, RuntimeError, TypeError):
+        return False
+
+
+def check_phase5(
+    file_path: str,
+    tool_name: "str | None" = None,
+    tool_input: "dict | None" = None,
+) -> str | None:
     """Check coding-team pipeline edit guard. Returns block reason or None.
+
+    `tool_name`/`tool_input` are supplied by main() so the ambiguity handler
+    can recognize a reachable ambiguity-recovery edit (TRK-161): a
+    docs/plans/*.md edit whose POST-edit result is not `status: in-progress`
+    is allowed even while >=2 plans race to in-progress, so the documented
+    remedy (demote one plan) is not itself blocked by the same gate. They
+    default to None so a legacy `check_phase5(file_path)` call still parses.
 
     Root resolution is TARGET-scoped (P1-5): both the active-plan lookup and
     the orchestrator-exemption containment check use the repo that OWNS
@@ -321,11 +423,30 @@ def check_phase5(file_path: str) -> str | None:
     except AmbiguousActivePlanError as exc:
         if overridden:
             return None
+        # TRK-161: the documented remedy for this wedged state — demote one of
+        # the racing in-progress plans — is itself a docs/plans/*.md edit, so
+        # without this branch it would be blocked by the very gate it is meant
+        # to clear (self-deadlock). Allow a docs/plans/*.md edit whose POST-edit
+        # result is not `status: in-progress`; arming a new plan, a
+        # planned->in-progress promotion, an instruction-file edit, and a nested
+        # docs/plans/<subdir>/*.md edit all fail one of the two conditions and
+        # stay blocked.
+        if _is_ambiguity_recovery_edit(
+            tool_name, file_path, tool_input, plan_root
+        ):
+            return None
         return (
             f"BLOCKED: cannot determine active plan state — {exc}.\n\n"
-            f"Fix the plan file's readability, or remove/resolve its "
-            f"`status: in-progress` frontmatter, then retry.\n"
-            f"To proceed deliberately for this one edit, set "
+            f"File: {file_path}\n\n"
+            f"REACHABLE REMEDY: edit exactly ONE of the in-progress plan files "
+            f"under docs/plans/ and set its frontmatter to `status: complete` "
+            f"(or `status: planned`). That single demotion is PERMITTED even "
+            f"while the gate is wedged, because it is a docs/plans/*.md edit "
+            f"whose RESULT is not `status: in-progress` — the hook allows it as "
+            f"an ambiguity-recovery edit. Editing an instruction file, arming a "
+            f"NEW in-progress plan, or a nested docs/plans/<subdir>/*.md edit "
+            f"all stay blocked.\n"
+            f"To proceed deliberately for this one edit instead, set "
             f"{INSTRUCTION_EDIT_OVERRIDE_ENV}=1 in the environment."
         )
     if active is None:
@@ -404,11 +525,18 @@ def check_phase5(file_path: str) -> str | None:
                 f"declaration is unusable — {exc}\n\n"
                 f"File:        {file_path}\n"
                 f"Arming plan: {active}\n\n"
-                f"Repair the plan's frontmatter, then retry. The value is a "
-                f"COMMA-SEPARATED list of repo-root-relative paths:\n"
-                f"    {INSTRUCTION_ALLOWLIST_KEY}: agents/ct-qa-reviewer.md, "
-                f"hooks/write-guard.py\n"
-                f"To recover a wedged gate, set "
+                f"STOP and escalate to the operator. Do NOT edit the plan file "
+                f"yourself to fix this — this is a process-global hook that "
+                f"fires on that edit too, so a self-repair attempt is itself "
+                f"blocked. Accepted `{INSTRUCTION_ALLOWLIST_KEY}` forms "
+                f"(repo-root-relative paths, no empty entries):\n"
+                f"  - inline comma: {INSTRUCTION_ALLOWLIST_KEY}: "
+                f"agents/ct-qa-reviewer.md, hooks/write-guard.py\n"
+                f"  - block list:   `{INSTRUCTION_ALLOWLIST_KEY}:` then "
+                f"indented `- agents/ct-qa-reviewer.md` lines\n"
+                f"  - flow list:    {INSTRUCTION_ALLOWLIST_KEY}: "
+                f"[agents/ct-qa-reviewer.md, hooks/write-guard.py]\n"
+                f"To recover a wedged gate, the operator sets "
                 f"{INSTRUCTION_EDIT_OVERRIDE_ENV}=1 in the environment."
             )
         except Exception as exc:  # noqa: BLE001 — fail closed, never allow
@@ -514,26 +642,40 @@ def is_migration_file(filepath: str) -> bool:
     return False
 
 
-def _is_tracked_in_git(filepath: str) -> bool:
-    """Return True if the file is tracked by git (i.e., has been committed at some point).
+def _has_commit_history(filepath: str) -> bool:
+    """Return True iff the file has at least one commit in git history.
 
-    Untracked files (new, never-committed) return False — safe to edit, not yet deployed.
-    If git isn't available or the path isn't in a repo, default to True (conservative — keep blocking).
+    TRK-091: the migration gate must key on COMMIT HISTORY, not tracked
+    state. `git ls-files --error-unmatch` returns 0 for a STAGED-but-never-
+    committed file, so a freshly `git add`ed new migration was falsely
+    treated as deployed. A migration is "deployed" only once it has been
+    committed at least once — a staged/untracked file is still in the
+    create-and-audit cycle and must stay editable.
+
+    Uses `git log -1 --format=%H -- <name>` (cwd = the file's parent), with
+    stdout captured DIRECTLY — never piped to grep, which can yield a false
+    negative when the passing answer is "no output" (memory: git-piped-to-
+    grep). Interpretation:
+      - exit 0 + empty stdout  -> no commits touch it -> not deployed -> False
+      - exit 0 + non-empty     -> has commit history  -> deployed     -> True
+      - non-zero / git absent / timeout / OSError -> conservative True (block)
+        (covers an unborn repo, a path outside any repo, and a missing git).
     """
     path = Path(filepath)
     try:
         result = subprocess.run(
-            ["git", "ls-files", "--error-unmatch", str(path)],
+            ["git", "log", "-1", "--format=%H", "--", path.name],
             cwd=path.parent,
             capture_output=True,
+            text=True,
             timeout=2,
             check=False,
         )
-        # Exit code 0 → tracked; non-zero (typically 1) → untracked or not in repo
-        return result.returncode == 0
     except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
-        # git not installed, path invalid, timeout — default conservative (block)
         return True
+    if result.returncode != 0:
+        return True
+    return bool(result.stdout.strip())
 
 
 def check_migration(tool_name: str, file_path: str) -> str | None:
@@ -551,9 +693,11 @@ def check_migration(tool_name: str, file_path: str) -> str | None:
     if not is_migration_file(file_path):
         return None
 
-    # An untracked migration is not yet deployed — allow edits during the
-    # create-and-audit cycle, before the first commit.
-    if not _is_tracked_in_git(file_path):
+    # A migration with no commit history is not yet deployed — allow edits
+    # during the create-and-audit cycle, before the first commit. A staged
+    # (git add-ed) but never-committed migration counts as not-yet-deployed
+    # (TRK-091: tracked-state via `git ls-files` wrongly blocked it).
+    if not _has_commit_history(file_path):
         return None
 
     # Sanctioned escape hatch: operator has explicitly acknowledged this edit.
@@ -1034,7 +1178,7 @@ def main():
         return
 
     # 1. Phase 5 edit guard (blocking)
-    reason = check_phase5(file_path)
+    reason = check_phase5(file_path, tool_name=tool_name, tool_input=tool_input)
     if reason:
         _output.block(reason)
         return

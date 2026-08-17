@@ -1020,3 +1020,162 @@ class TestReadInstructionAllowlist:
 def allowlist_repo(tmp_path: Path) -> Path:
     """A repo root for in-process reader calls, passed explicitly as `root`."""
     return tmp_path
+
+
+class TestFrontmatterYamlLists:
+    """TRK-055: `_parse_frontmatter` must accept a multi-line BLOCK list as well
+    as the flat `key: value` form, canonicalizing it to the inline comma value
+    the downstream split validator already understands. Case is preserved for
+    `preserve_case_keys` (path values must not be lowercased). No `import yaml`
+    is added — the module keeps its zero-yaml-dependency design."""
+
+    def test_block_list_joined_to_inline(self):
+        text = (
+            "---\n"
+            "status: in-progress\n"
+            "instruction_files:\n"
+            "  - agents/a.md\n"
+            "  - hooks/b.py\n"
+            "---\n# x\n"
+        )
+        fm = _parse_frontmatter(
+            text, preserve_case_keys=frozenset({"instruction_files"})
+        )
+        assert fm["instruction_files"] == "agents/a.md,hooks/b.py"
+        assert fm["status"] == "in-progress"
+
+    def test_block_list_preserves_case(self):
+        text = (
+            "---\n"
+            "instruction_files:\n"
+            "  - agents/A.md\n"
+            "  - SKILL.md\n"
+            "---\n"
+        )
+        fm = _parse_frontmatter(
+            text, preserve_case_keys=frozenset({"instruction_files"})
+        )
+        assert fm["instruction_files"] == "agents/A.md,SKILL.md"
+
+    def test_block_list_with_empty_item_kept_as_empty(self):
+        """An empty `-` item must be appended (empty), so the joined value has
+        an empty entry that the downstream split validator rejects."""
+        text = (
+            "---\n"
+            "instruction_files:\n"
+            "  - agents/a.md\n"
+            "  -\n"
+            "---\n"
+        )
+        fm = _parse_frontmatter(
+            text, preserve_case_keys=frozenset({"instruction_files"})
+        )
+        assert fm["instruction_files"] == "agents/a.md,"
+
+    def test_scalar_value_still_parsed(self):
+        """Legacy flat `key: value` lines are unchanged."""
+        text = "---\nstatus: in-progress\ninstruction_files: agents/a.md, b.py\n---\n"
+        fm = _parse_frontmatter(
+            text, preserve_case_keys=frozenset({"instruction_files"})
+        )
+        assert fm["instruction_files"] == "agents/a.md, b.py"
+
+    def test_key_with_empty_value_and_no_items_stays_empty(self):
+        text = "---\ninstruction_files:\nstatus: in-progress\n---\n"
+        fm = _parse_frontmatter(
+            text, preserve_case_keys=frozenset({"instruction_files"})
+        )
+        assert fm["instruction_files"] == ""
+        assert fm["status"] == "in-progress"
+
+    def test_block_list_duplicate_key_still_raises(self):
+        text = (
+            "---\n"
+            "instruction_files:\n"
+            "  - agents/a.md\n"
+            "instruction_files:\n"
+            "  - agents/b.md\n"
+            "---\n"
+        )
+        with pytest.raises(AmbiguousActivePlanError):
+            _parse_frontmatter(
+                text, preserve_case_keys=frozenset({"instruction_files"})
+            )
+
+
+class TestReadInstructionAllowlistYamlLists:
+    """TRK-055: the reader accepts block lists and flow lists, both resolving
+    to the same absolute paths as the legacy inline-comma form. Malformed forms
+    (empty flow `[]`, block list with an empty item) still fail closed."""
+
+    def _plan(self, repo: Path, body: str) -> Path:
+        plans = repo / "docs" / "plans"
+        plans.mkdir(parents=True, exist_ok=True)
+        p = plans / "plan.md"
+        p.write_text(body)
+        return p
+
+    def test_block_list_resolves(self, allowlist_repo: Path):
+        plan = self._plan(
+            allowlist_repo,
+            "---\nstatus: in-progress\n"
+            "instruction_files:\n  - agents/a.md\n  - hooks/b.py\n---\n",
+        )
+        result = read_instruction_allowlist(plan, allowlist_repo)
+        assert result == frozenset({
+            (allowlist_repo / "agents" / "a.md").resolve(),
+            (allowlist_repo / "hooks" / "b.py").resolve(),
+        })
+
+    def test_flow_list_resolves(self, allowlist_repo: Path):
+        plan = self._plan(
+            allowlist_repo,
+            "---\nstatus: in-progress\n"
+            "instruction_files: [agents/a.md, hooks/b.py]\n---\n",
+        )
+        result = read_instruction_allowlist(plan, allowlist_repo)
+        assert result == frozenset({
+            (allowlist_repo / "agents" / "a.md").resolve(),
+            (allowlist_repo / "hooks" / "b.py").resolve(),
+        })
+
+    def test_flow_list_preserves_case(self, allowlist_repo: Path):
+        plan = self._plan(
+            allowlist_repo,
+            "---\nstatus: in-progress\ninstruction_files: [agents/A.md, SKILL.md]\n---\n",
+        )
+        result = read_instruction_allowlist(plan, allowlist_repo)
+        assert result == frozenset({
+            (allowlist_repo / "agents" / "A.md").resolve(),
+            (allowlist_repo / "SKILL.md").resolve(),
+        })
+
+    def test_empty_flow_list_malformed(self, allowlist_repo: Path):
+        plan = self._plan(
+            allowlist_repo,
+            "---\nstatus: in-progress\ninstruction_files: []\n---\n",
+        )
+        with pytest.raises(MalformedInstructionAllowlistError):
+            read_instruction_allowlist(plan, allowlist_repo)
+
+    def test_block_list_empty_item_malformed(self, allowlist_repo: Path):
+        plan = self._plan(
+            allowlist_repo,
+            "---\nstatus: in-progress\n"
+            "instruction_files:\n  - agents/a.md\n  -\n---\n",
+        )
+        with pytest.raises(MalformedInstructionAllowlistError):
+            read_instruction_allowlist(plan, allowlist_repo)
+
+    def test_malformed_message_says_escalate_not_repair(self, allowlist_repo: Path):
+        plan = self._plan(
+            allowlist_repo,
+            "---\nstatus: in-progress\ninstruction_files:\n---\n",
+        )
+        with pytest.raises(MalformedInstructionAllowlistError) as exc_info:
+            read_instruction_allowlist(plan, allowlist_repo)
+        msg = str(exc_info.value).lower()
+        assert "escalate" in msg, f"message must tell the agent to escalate: {msg!r}"
+        assert "do not edit" in msg or "not edit the plan" in msg, (
+            f"message must say NOT to self-repair the plan: {msg!r}"
+        )
