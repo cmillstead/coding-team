@@ -38,6 +38,7 @@ def _run_script(
     script: Path,
     event: dict,
     env: dict | None = None,
+    cwd: str | None = None,
 ) -> tuple[str, int]:
     """Run hook script via subprocess with event on stdin. Return (stdout, returncode)."""
     merged_env = {**os.environ, **(env or {})}
@@ -51,8 +52,27 @@ def _run_script(
         text=True,
         timeout=20,
         env=merged_env,
+        cwd=cwd,
     )
     return result.stdout, result.returncode
+
+
+def _provision_home_under_src(tmp_path: Path) -> Path:
+    """Provision a hermetic HOME under tmp_path for dispatcher Agent-path tests.
+
+    codesight-hooks.py injects the mandatory-codesight directive only when cwd is
+    under ~/src/ (it reads SRC_PREFIX from HOME), so to exercise the injection the
+    dispatcher must run with HOME=tmp_path and cwd under tmp_path/src. But the
+    dispatcher also resolves its sibling hooks via HOME/.claude/hooks, so that dir
+    must contain the real handler scripts — symlink it to the source hooks dir.
+    Returns the tmp_path/src/proj path to use as cwd (callers set HOME=tmp_path).
+    """
+    proj = tmp_path / "src" / "proj"
+    proj.mkdir(parents=True)
+    claude_hooks = tmp_path / ".claude" / "hooks"
+    claude_hooks.parent.mkdir(parents=True)
+    claude_hooks.symlink_to(HOOKS_DIR)
+    return proj
 
 
 # Base64-encoded test content with mock usage to trigger write-guard.
@@ -362,8 +382,14 @@ class TestCodesightPromptInjection:
         parsed = json.loads(out)
         assert isinstance(parsed, dict)
 
-    def test_codesight_instruction_injected(self, agent_event):
-        out, _ = _run_script(PRETOOLUSE_DISPATCHER, agent_event)
+    def test_codesight_instruction_injected(self, agent_event, tmp_path):
+        # The codesight directive is only injected when cwd is under ~/src/;
+        # run inside a tmp ~/src (HOME=tmp_path) so the injection fires.
+        proj = _provision_home_under_src(tmp_path)
+        out, _ = _run_script(
+            PRETOOLUSE_DISPATCHER, agent_event,
+            env={"HOME": str(tmp_path)}, cwd=str(proj),
+        )
         parsed = json.loads(out)
         hook_out = parsed.get("hookSpecificOutput", {})
         updated = hook_out.get("updatedInput", {})
@@ -407,7 +433,9 @@ class TestAgentGuardChaining:
 
     def test_agent_non_execution_falls_through_to_codesight(self, tmp_path):
         """A benign Agent dispatch (no plan execution) still gets codesight
-        injection — the guard is silent and the chain falls through."""
+        injection — the guard is silent and the chain falls through. The
+        directive is only injected under ~/src/, so run inside a tmp ~/src."""
+        proj = _provision_home_under_src(tmp_path)
         event = {
             "tool_name": "Agent",
             "tool_input": {"prompt": "implement a function to process data"},
@@ -415,7 +443,7 @@ class TestAgentGuardChaining:
         result = subprocess.run(
             [sys.executable, str(PRETOOLUSE_DISPATCHER)],
             input=json.dumps(event), capture_output=True, text=True,
-            timeout=20, cwd=str(tmp_path), env={**os.environ},
+            timeout=20, cwd=str(proj), env={**os.environ, "HOME": str(tmp_path)},
         )
         assert result.returncode == 0
         parsed = json.loads(result.stdout)
