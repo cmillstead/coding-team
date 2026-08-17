@@ -34,7 +34,7 @@ If you haven't completed Phase 1, you cannot propose fixes.
 
 5. **Trace data flow** — where does the bad value originate? What called this with the bad value? Keep tracing up until you find the source. Fix at source, not at symptom.
 
-**Recent change analysis:** Use `mcp__plugin_github_github__list_commits` to see recent commits. For regressions, narrow the window with `git log --oneline --since="3 days ago"`. Use `mcp__plugin_github_github__get_commit` to inspect suspicious commits in detail. Recent changes are the most likely cause of new bugs.
+**Recent change analysis:** Use `git log` (for a local checkout) or `gh api repos/{owner}/{repo}/commits` to see recent commits. For regressions, narrow the window with `git log --oneline --since="3 days ago"`. Use `git show <sha>` (or `gh api repos/{owner}/{repo}/commits/{sha}`) to inspect suspicious commits in detail. Recent changes are the most likely cause of new bugs.
 
 **Trace downstream:** Use `mcp__codesight__query` with operation `get-callees` on failing functions to understand what they call — the bug may be in a downstream dependency, not the function itself.
 

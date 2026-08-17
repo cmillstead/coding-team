@@ -114,6 +114,28 @@ After producing the completion summary, append a structured metrics line to `~/.
 echo '{"date":"YYYY-MM-DD","project":"<repo-name>","task":"<feature-slug>","phases_used":["design","plan","execute","audit","complete"],"agents_dispatched":{"builder":N,"reviewer":N,"qa":N,"harden":N,"simplify":N,"prompt":N},"audit_rounds":N,"audit_exit":"clean|low-only|cap","findings_total":N,"findings_fixed":N,"findings_deferred":N,"rework_iterations":N,"test_pass_first_try":true|false,"ci_pass_first_push":true|false,"second_opinion":"ran|skipped|unavailable","second_opinion_outcome":"completed-with-changes|completed-no-changes|declined|n/a","elapsed_phases":{"design":"Nm","plan":"Nm","execute":"Nm","audit":"Nm"}}' >> ~/.claude/harness-metrics.jsonl
 ```
 
+Emit the template VERBATIM: `phases_used` is a JSON ARRAY of phase names and `elapsed_phases` a JSON OBJECT keyed by phase. Do NOT hand-compose `phases_used` as a count (an int) or `elapsed_phases` as a string — that record renders zero phase-heat on the harness-map dashboard (TRK-016), and the "I'll just summarize the phase count as a number" shortcut is exactly the rationalization that produces it.
+
+After appending, run this validation guard — a non-zero exit means the record just written violates the field-type contract and must be corrected (or removed and re-emitted from the template) before completion finishes:
+
+```bash
+# Validate the record just appended (TRK-016 — a hand-composed record with wrong
+# field types silently under-reports phase heat on the harness-map dashboard).
+python3 -c '
+import json, os, sys
+p = os.path.expanduser("~/.claude/harness-metrics.jsonl")
+rec = json.loads(open(p, encoding="utf-8").read().splitlines()[-1])
+errs = []
+if not isinstance(rec.get("phases_used"), list):
+    errs.append("phases_used must be a JSON array of phase names, got %r" % (rec.get("phases_used"),))
+if not isinstance(rec.get("elapsed_phases"), dict):
+    errs.append("elapsed_phases must be a JSON object keyed by phase, got %r" % (rec.get("elapsed_phases"),))
+if errs:
+    sys.exit("METRICS RECORD INVALID — fix the last line of harness-metrics.jsonl before continuing:\n  " + "\n  ".join(errs))
+print("metrics record valid")
+'
+```
+
 Fill values from this session's actual data. Use `null` for values you can't determine. Do NOT fabricate — `null` is better than a guess.
 
 When `second_opinion` is `"ran"`, ALSO set `second_opinion_outcome` to the terminal state: `completed-with-changes` (fixes applied), `completed-no-changes` (no fixes needed), or `declined` (user stopped it). When `second_opinion` is `"skipped"` or `"unavailable"`, set `second_opinion_outcome` to `"n/a"` — the catch-all. Always emit `second_opinion_outcome`; never leave it absent, because an absent value reads downstream as "unknown".
@@ -199,7 +221,7 @@ After the user chooses a completion option and it's been executed, print this bl
 >
 > **If you chose "Push and create PR" and want a more automated release:** Run `/release` — it syncs main, runs tests, audits coverage, pushes, and creates the PR with coverage stats.
 >
-> **Starting something new?** `/clear` then `/coding-team` with your next task. If it's an unfamiliar codebase, start with `/onboard` for a guided orientation.
+> **Starting something new?** `/clear` then `/coding-team` with your next task.
 >
 > ---
 
