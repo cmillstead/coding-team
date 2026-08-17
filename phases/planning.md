@@ -63,8 +63,8 @@ Use these tools to understand the codebase structure before decomposing tasks:
 | `mcp__codesight__query` (operation `get-type-hierarchy`) | Understand full class hierarchy before planning changes to base classes |
 | `mcp__codesight__query` (operation `get-key-symbols`) | Identify architecturally significant symbols — focuses planning on high-impact areas |
 | `mcp__codesight__query` (operation `get-diagram`) | Generate architecture diagrams — include in the plan for implementers |
-| `mcp__plugin_github_github__search_issues` | Find related issues — prior discussion contains requirements or edge cases not in the spec |
-| `mcp__plugin_github_github__search_pull_requests` | Check if similar work was previously attempted — learn from prior approaches |
+| `gh search issues` (or `gh issue list --search`) | Find related issues — prior discussion contains requirements or edge cases not in the spec |
+| `gh search prs` (or `gh pr list --search`) | Check if similar work was previously attempted — learn from prior approaches |
 | `mcp__context-keep__search_memories` | Find relevant prior architectural decisions — avoid contradicting established patterns |
 
 If a `mcp__codesight__query` call fails, fall back to Grep/Read for that query. If the codesight MCP server is not running, fall back to Glob and Grep tools. Do NOT skip codebase analysis — use whichever tools are available.
