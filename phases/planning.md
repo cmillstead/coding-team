@@ -162,10 +162,16 @@ If context budget is tight (planning worker above 60% context usage), prioritize
 6. Does the failure modes table have any critical gaps (no test + no handling + silent)?
 7. **Does the traceability table account for every input finding?** (If sourced from a scan or review)
 8. If the plan includes a build step, does it verify output filenames match package.json exports? (tsup .js vs .mjs mismatch caught in awareness-sdk)
+9. Any scope label (mechanical/small/broad) carries a linked grep/AST site inventory in the plan — no inventory, no size claim. (see `reference/process-rules-enforcement-design.md`)
+10. Every "the test/guard shall verify X" rule frozen into this plan ships with a computability spike proving the check runs against real code first. (see `reference/process-rules-enforcement-design.md`)
+11. A component whose job is to constrain other code (enforcement layer, wall, gate, trust boundary) gets a design-sheet + cross-model paper review before implementation. (see `reference/process-rules-enforcement-design.md`)
+12. Enforcement/structural designs: prefer deleting the possibility (private module, API deletion, directory ownership, keys-not-paths) over detecting the violation; falsifiers must be decidable — no judgment calls inside tests. (see `reference/process-rules-enforcement-design.md`)
 
 ## Plan Review Loop
 
 After writing the plan:
+
+**Before dispatching the first reviewer:** this plan names the stop-line for the review/audit loop it will enter — the harness-defined loops (this Plan Review Loop and the audit loop) count, not only custom loops — which finding-type ends the loop and what happens then (who rules, what escalates). (see `reference/process-rules-enforcement-design.md`)
 
 1. Dispatch plan-document-reviewer agent (see `~/.claude/agents/ct-plan-doc-reviewer.md`)
 2. If Issues Found: fix, re-dispatch (max 3 iterations, then surface to user)

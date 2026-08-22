@@ -6,6 +6,10 @@ Present to user:
 >
 > If the plan meets the `/worktree` threshold (5+ files across 3+ directories), print: "Setting up an isolated worktree — this plan touches N files across M directories."
 
+## Pre-flight: Plan-carried gates (skip-path coverage)
+
+A build that arrives with a plan skips Phase 4, so no one re-derives what the plan asserts. Before task-by-task execution, verify the plan carries — for each that applies: (a) a site inventory for any scope claim; (b) a computability spike for any frozen "test/guard shall verify X" rule; (c) a design-sheet + cross-model paper-review note for any structural component; (d) a construction-over-policing consideration for any enforcement design; (e) a pre-committed stop-line for the review/audit loop it will enter. If any applicable item is missing, return to planning to add it. Exempt: a trivial single-file change ≤20 lines (proportionality — see `reference/process-rules-enforcement-design.md`).
+
 ## Worktree Setup (threshold-gated)
 
 Apply the `/worktree` threshold to the plan's task list: 5+ files across 3+ directories -> set one up by following the `/worktree` skill (`skills/worktree/SKILL.md`). Below the threshold -> work in place. The threshold decides; do not ask.
