@@ -70,6 +70,10 @@ Loaded on demand by the skill router. Not needed during active phase work.
 | `reference/skill-suggestions.md` | global CLAUDE.md | Proactive skill-suggestion trigger table |
 | `reference/obsidian-vault.md` | global CLAUDE.md | Obsidian vault structure and `/save` convention |
 | `skills/debug/reference.md` | debug/SKILL.md | Pattern-analysis signature table, after-3-failed-fixes detail |
+| `phases/completion-reference.md` | completion.md | Decision Log (tier gate, decision-record template, ContextKeep persistence) |
+| `phases/execution-reference.md` | execution.md | Implementer Status Protocol; reminders, gates, and debugging protocol |
+| `phases/planning-reference.md` | planning.md | Code Intelligence tool table |
+| `agents/reference/ct-implementer-reference.md` | ct-implementer.md | Code organization, escalation, and self-review checklist |
 
 **Agent definitions** (used by the execution loop):
 
