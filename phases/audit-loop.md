@@ -24,7 +24,11 @@ After the completeness check passes and implementer reports DONE or DONE_WITH_CO
 5. If findings to fix → dispatch new implementer to fix → re-audit (max 3 rounds)
    Fresh audit agents each round — don't reuse. Each re-audit round reaps its own auditors the same way (step 3) once its findings are collected, so the loop doesn't reintroduce accumulation.
    After the implementer applies audit fixes: re-run tests to verify fixes didn't introduce regressions. This is mandatory.
-   **Same-class search (after security fixes):** When an implementer fixes a security finding (injection, auth bypass, unsanitized input, missing validation), dispatch a follow-up search before re-audit:
+
+   **Before patching a finding (construction over policing):** can the possibility be deleted instead — a structure change, not a detector? Patch-the-instance is the fallback, not the default. (see `reference/process-rules-enforcement-design.md`)
+   **A frozen rule that proves unbuildable (purpose over letter):** satisfy its purpose by other mechanical means and log the amendment — never waive it, never quietly patch the letter. (see `reference/process-rules-enforcement-design.md`)
+
+   **Same-class sweep (after any generating class is named in triage):** When triage names a generating class (or an implementer fixes a security finding — a special case of a named class), dispatch a follow-up search before re-audit:
    - Use `mcp__codesight__query` with operation `search-references` or `search-text` to find all analogous call sites
    - If the fix created a shared utility (sanitizer, validator), verify it's called at ALL expected sites
    - Flag unprotected sites as new findings for the next fix round
@@ -46,6 +50,10 @@ N-file/N-line diff. Confirm by citing specific code sections you reviewed."
 Read ~/.claude/reference/user-facing-translation.md before writing any of the user-facing reports in this section.
 
 After collecting findings from all auditors:
+
+**Generator trigger (before any fix is dispatched):** the second finding that rhymes with a prior one (same shape, different site) STOPS instance-fixing — name the generating class first, then run the same-class sweep (Audit Team Dispatch, step 5) to find every instance of that class. Fires on ANY repeated finding type, not only security. Naming the class is the trigger; the sweep is its execution — two halves of one mechanism, not a sibling rule. (see `reference/process-rules-enforcement-design.md`)
+
+**Decision-memo for user rulings:** when surfacing a finding, defer, or scope question to the user for a ruling (the budget check, BLOCKED auditors, and loop-cap escalation below are all such surfaces), write it as a decision memo — options, recommendation, verified evidence (checked against code, not memory), and what was already ruled; format: `reference/process-rules-enforcement-design.md`.
 
 **Refactor gate:** For any finding categorized as "refactor" (not a bug or security issue), apply this bar: *"Would a senior engineer say this is clearly wrong, not just imperfect?"* Reject style preferences and marginal improvements.
 
