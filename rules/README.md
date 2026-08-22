@@ -2,13 +2,13 @@
 
 The **authoritative source** for all rules in this directory is `skills/coding-team/rules/` (this directory).
 
-When `deploy.sh` runs, it creates **relative symlinks** in `~/.claude/rules/` pointing back to these files. There are no copies — one physical file per rule, deployed as a link.
+When `scripts/deploy.sh` runs, it creates **relative symlinks** in `~/.claude/rules/` pointing back to these files. There are no copies — one physical file per rule, deployed as a link.
 
 Do not edit rules in `~/.claude/rules/` directly; edit the source here and re-deploy.
 
 ## Cost: everything here is always-loaded
 
-Every `*.md` in this directory (except this README, which `deploy.sh` skips) is
+Every `*.md` in this directory (except this README, which `scripts/deploy.sh` skips) is
 deployed to `~/.claude/rules/` and loads **unconditionally into every session and
 every subagent**. Frontmatter does not change that — `globs:`, `alwaysApply:`,
 and `scope:` are all inert; the directory is the entire mechanism.
