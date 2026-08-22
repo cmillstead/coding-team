@@ -69,6 +69,7 @@ Loaded on demand by the skill router. Not needed during active phase work.
 | `reference/engram-cli.md` | global CLAUDE.md | Engram knowledge-graph CLI command reference |
 | `reference/skill-suggestions.md` | global CLAUDE.md | Proactive skill-suggestion trigger table |
 | `reference/obsidian-vault.md` | global CLAUDE.md | Obsidian vault structure and `/save` convention |
+| `reference/process-rules-enforcement-design.md` | planning.md, audit-loop.md, execution.md (gate lines) | Bodies of the six M2.0 process rules + purpose-over-letter; decision-memo format; proportionality exemption |
 | `skills/debug/reference.md` | debug/SKILL.md | Pattern-analysis signature table, after-3-failed-fixes detail |
 | `phases/completion-reference.md` | completion.md | Decision Log (tier gate, decision-record template, ContextKeep persistence) |
 | `phases/execution-reference.md` | execution.md | Implementer Status Protocol; reminders, gates, and debugging protocol |
