@@ -51,7 +51,7 @@ NON_TRANSITION = (
     "execution-reminders.md", "memory-nudge.md", "named-rationalizations.md",
     "plan-format.md", "reference-files.md", "session-resume.md",
     "task-weight.md", "wiki-generation.md", "completion-reference.md",
-    "execution-reference.md",
+    "execution-reference.md", "planning-reference.md",
 )
 
 _MAGIC_PHRASE = '"Proceed to Phase'
@@ -160,7 +160,7 @@ class TestDelegates:
 class TestOrphanFiles:
     def test_no_phase_file_is_an_orphan(self, phases_dir):
         all_files = sorted(p.name for p in phases_dir.glob("*.md"))
-        assert len(all_files) == 24, f"expected 24 phase files, found {len(all_files)}: {all_files}"
+        assert len(all_files) == 25, f"expected 25 phase files, found {len(all_files)}: {all_files}"
 
         categories = {
             "PHASE_EXIT_OWNERS": set(PHASE_EXIT_OWNERS),
