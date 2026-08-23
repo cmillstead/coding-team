@@ -326,6 +326,23 @@ def _is_ambiguous_push(command):
     return False
 
 
+def _pushed_branch(repo_root, command):
+    """Best-effort reported branch: the DESTINATION of the first simple refspec (so
+    `git push origin main` while on feat/x reports `main`, not the checkout). `src:dst`
+    -> dst; a plain `src` -> src; `refs/heads/x` -> x. Falls back to the local current
+    branch (bare `git push`, gh pr create)."""
+    parsed = _push_args(command)
+    if parsed is not None:
+        _remote, refspecs, _all, _tags, _mirror = parsed
+        for refspec in refspecs:
+            spec = refspec.lstrip("+")
+            dst = spec.split(":")[-1] if ":" in spec else spec
+            dst = dst.rsplit("/", 1)[-1]
+            if dst:
+                return dst
+    return _git_out(repo_root, ["branch", "--show-current"]) or "-"
+
+
 def _push_remote_nwo(repo_root, command):
     """owner/name of the ACTUAL pushed remote (A-2): the --repo value, else the first
     positional, else origin; a URL is parsed directly, a name resolved via git remote."""
@@ -380,7 +397,8 @@ def _resolve_target(command, mode):
     shas = _pushed_source_shas(repo_root, command) or head    # gh pr create -> HEAD (R3-2)
     if not shas:
         return None
-    return repo_root, branch, shas, armed_at, nwo, "0", MODE_PUSH, "-"
+    push_branch = _pushed_branch(repo_root, command)          # report the pushed ref (F6)
+    return repo_root, push_branch, shas, armed_at, nwo, "0", MODE_PUSH, "-"
 
 
 def _repo_root_fallback(directory):

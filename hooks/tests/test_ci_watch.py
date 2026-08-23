@@ -897,3 +897,28 @@ def test_many_refspecs_is_broad(tmp_path):
     os.chdir(repo)
     got = ARM._resolve_target("git push origin a b c d e", ARM.MODE_PUSH)
     assert got and got[5] == "1"                 # > MAX_LOCAL_REFS refspecs -> broad
+
+
+# --- Finding 6: reported branch derives from the pushed ref -----------------
+
+def test_reported_branch_is_pushed_ref(tmp_path):
+    repo, sha = divergent_repo(tmp_path)   # current branch feat/x; main + v1 also exist
+    os.chdir(repo)
+    got = ARM._resolve_target("git push origin main", ARM.MODE_PUSH)   # pushing main while on feat/x
+    assert got is not None
+    assert got[1] == "main"                # reports the pushed ref, not the checkout (feat/x)
+    assert got[2] == {sha("main")}         # ...and the SHA is main's, too
+
+
+def test_reported_branch_strips_refs_heads_and_dst(tmp_path):
+    repo, sha = divergent_repo(tmp_path)
+    os.chdir(repo)
+    got = ARM._resolve_target("git push origin feat/x:refs/heads/main", ARM.MODE_PUSH)
+    assert got is not None and got[1] == "main"    # src:dst -> dst, refs/heads/ stripped
+
+
+def test_reported_branch_falls_back_to_current_for_bare_push(tmp_path):
+    repo, _ = init_repo(tmp_path)          # current branch feat/x
+    os.chdir(repo)
+    got = ARM._resolve_target("git push", ARM.MODE_PUSH)
+    assert got is not None and got[1] == "feat/x"
