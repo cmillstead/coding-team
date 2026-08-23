@@ -7,6 +7,7 @@ import os
 import stat
 import subprocess
 import sys
+import time
 
 import pytest
 
@@ -484,3 +485,62 @@ def test_resolve_target_merge_broad_when_no_commit(tmp_path):  # safe-broad, inc
     stub_gh(tmp_path / "bin", prview=json.dumps({"mergeCommit": None}))
     got = ARM._resolve_target("gh pr merge 42 --auto", ARM.MODE_MERGE)
     assert got and got[5] == "1"                        # broad watch (sees nothing in-window -> exits)
+
+
+# --------------------------------------------------------------------------
+# Task 9: arm idempotency, cross-repo distinctness, spawn cleanup, stale sweep
+# --------------------------------------------------------------------------
+
+def _use_armed(tmp_path):
+    ARM.CI_WATCH_DIR = tmp_path / "cw"
+    ARM.ARMED_DIR = ARM.CI_WATCH_DIR / "armed"
+
+
+def _stub_watcher(tmp_path):
+    s = tmp_path / "sw.py"
+    s.write_text("import sys; sys.exit(0)\n")
+    ARM.WATCHER = s
+
+
+def test_arm_idempotent(tmp_path):
+    _use_armed(tmp_path)
+    _stub_watcher(tmp_path)
+    a = ARM._arm(str(tmp_path), "x", {"c" * 40}, "t", "o/n", "0", ARM.MODE_PUSH)
+    b = ARM._arm(str(tmp_path), "x", {"c" * 40}, "t", "o/n", "0", ARM.MODE_PUSH)
+    assert a is True and b is False and len(list(ARM.ARMED_DIR.glob("*.lock"))) == 1
+
+
+def test_arm_cross_repo_no_collision(tmp_path):  # A-1 end-to-end
+    # Real existing repo roots (arm spawns the watcher with cwd=repo_root): two
+    # DIFFERENT repos with the SAME SHA set must produce two DISTINCT locks.
+    _use_armed(tmp_path)
+    _stub_watcher(tmp_path)
+    shas = {"a" * 40, "b" * 40}
+    client = tmp_path / "client_api"
+    client.mkdir()
+    fork = tmp_path / "fork_api"
+    fork.mkdir()
+    assert ARM._arm(str(client), "x", shas, "t", "client/api", "0", ARM.MODE_PUSH) is True
+    assert ARM._arm(str(fork), "x", shas, "t", "fork/api", "0", ARM.MODE_PUSH) is True
+    assert len(list(ARM.ARMED_DIR.glob("*.lock"))) == 2
+
+
+def test_arm_unlinks_lock_on_spawn_failure(tmp_path):
+    _use_armed(tmp_path)
+    s = tmp_path / "sw.py"
+    s.write_text("pass\n")
+    ARM.WATCHER = s
+    assert ARM._arm("/no/such/repo", "x", {"d" * 40}, "t", "o/n", "0", ARM.MODE_PUSH) is False
+    assert list(ARM.ARMED_DIR.glob("*.lock")) == []
+
+
+def test_sweep_removes_only_stale_locks(tmp_path):
+    _use_armed(tmp_path)
+    ARM.ARMED_DIR.mkdir(parents=True)
+    (ARM.ARMED_DIR / "fresh.lock").write_text("{}")
+    stale = ARM.ARMED_DIR / "stale.lock"
+    stale.write_text("{}")
+    old = time.time() - (ARM.STALE_LOCK_SECS + 60)
+    os.utime(stale, (old, old))
+    ARM._sweep_stale_locks()
+    assert {p.name for p in ARM.ARMED_DIR.glob("*.lock")} == {"fresh.lock"}
