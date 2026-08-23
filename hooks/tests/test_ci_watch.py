@@ -852,3 +852,48 @@ def test_dry_run_push_does_not_arm(tmp_path):
     assert ARM._resolve_target("git push -n", ARM.MODE_PUSH) is None
     # a real push still resolves a target
     assert ARM._resolve_target("git push origin feat/x", ARM.MODE_PUSH) is not None
+
+
+# --- Finding 2: delete / source-less refspec -> safe-broad -----------------
+
+def test_delete_refspec_is_broad():
+    f = ARM._is_ambiguous_push
+    assert f("git push origin :old") is True
+    assert f("git push origin +:old") is True
+    assert f("git push --delete origin old") is True
+    assert f("git push -d origin old") is True
+    assert f("git push origin main") is False
+
+
+def test_resolve_target_delete_is_broad(tmp_path):
+    repo, _ = init_repo(tmp_path)
+    os.chdir(repo)
+    got = ARM._resolve_target("git push origin :old", ARM.MODE_PUSH)
+    assert got and got[5] == "1"                 # broad, never a wrong-SHA watch
+
+
+# --- Finding 1: bulk / many-ref pushes -> safe-broad (no N rev-parse) -------
+
+def test_bulk_tags_push_is_broad_no_per_ref(tmp_path):
+    repo, _ = init_repo(tmp_path)
+    os.chdir(repo)
+    for i in range(5):
+        subprocess.run(["git", "-C", str(repo), "tag", f"t{i}"], check=True)
+    got = ARM._resolve_target("git push --tags", ARM.MODE_PUSH)
+    assert got and got[5] == "1"                 # safe-broad
+    head = subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"],
+                          capture_output=True, text=True).stdout.strip()
+    assert got[2] == {head}                       # only HEAD resolved, not each tag
+
+
+def test_bulk_all_and_mirror_are_broad():
+    assert ARM._is_ambiguous_push("git push --all") is True
+    assert ARM._is_ambiguous_push("git push --tags") is True
+    assert ARM._is_ambiguous_push("git push --mirror") is True
+
+
+def test_many_refspecs_is_broad(tmp_path):
+    repo, _ = init_repo(tmp_path)
+    os.chdir(repo)
+    got = ARM._resolve_target("git push origin a b c d e", ARM.MODE_PUSH)
+    assert got and got[5] == "1"                 # > MAX_LOCAL_REFS refspecs -> broad

@@ -295,22 +295,34 @@ def _pushed_source_shas(repo_root, command):
 
 
 def _is_ambiguous_push(command):
-    """True when the push form cannot be precisely enumerated -> safe-broad watch."""
+    """True when the push form cannot be precisely + cheaply enumerated -> safe-broad
+    watch. Bulk pushes (--all/--tags/--mirror, or more than MAX_LOCAL_REFS refspecs)
+    would need N synchronous rev-parse calls, which would block the completed push, so
+    they take the broad path instead. Delete / source-less refspecs (`:old`, --delete)
+    have no source SHA to watch, so they too take the broad path (never a wrong SHA)."""
     parsed = _push_args(command)
     if parsed is None:
         return False
-    _remote, refspecs, _all, _tags, _mirror = parsed
+    _remote, refspecs, all_flag, tags_flag, mirror_flag = parsed
+    if all_flag or tags_flag or mirror_flag:
+        return True                          # bulk -> broad, no per-ref rev-parse (P1)
+    if len(refspecs) > MAX_LOCAL_REFS:
+        return True                          # too many refs to resolve fast -> broad (P1)
     if git_invocations is None:
         return True
     try:
-        for _sub, args in git_invocations(command):
+        for subcommand, args in git_invocations(command):
+            if subcommand != "push":
+                continue
             if any(a in _AMBIGUOUS_PUSH_FLAGS for a in args):
                 return True
+            if any(a in _DELETE_PUSH_FLAGS for a in args):
+                return True                  # `git push --delete` -> broad (P2)
     except Exception:  # noqa: BLE001
         return True
     for refspec in refspecs:
-        if refspec in (":", "::") or "*" in refspec:
-            return True
+        if refspec.lstrip("+").startswith(":") or "*" in refspec:
+            return True                      # delete `:old` / wildcard -> broad (P2)
     return False
 
 
