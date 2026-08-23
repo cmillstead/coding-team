@@ -137,3 +137,30 @@ def run_watcher_main(tmp_path, shas, *, nwo="o/n", armed_at="2000-01-01T00:00:00
 ])
 def test_is_alerting_conclusion(conclusion, alert):
     assert WATCHER._is_alerting_conclusion(conclusion) is alert
+
+
+# --------------------------------------------------------------------------
+# Task 3: paginated head_sha discovery + bounded recency predicate
+# --------------------------------------------------------------------------
+
+def test_runs_for_sha_parses_ndjson_and_keeps_headsha(tmp_path):
+    stub_gh(tmp_path / "bin", api_runs=[{"id": 1, "head_sha": "beef", "status": "completed",
+            "conclusion": "failure", "name": "CI", "created_at": "t", "updated_at": "t"}])
+    runs = WATCHER._runs_for_sha("beef", "2000-01-01T00:00:00Z", "o/n", str(tmp_path))
+    assert runs[0]["id"] == 1 and runs[0]["head_sha"] == "beef" and runs[0]["conclusion"] == "failure"
+
+
+def test_runs_for_sha_clean_when_gh_absent(tmp_path):
+    empty = tmp_path / "e"; empty.mkdir(); os.environ["PATH"] = str(empty)
+    assert WATCHER._runs_for_sha("beef", "2000-01-01T00:00:00Z", "o/n", str(tmp_path)) == []
+
+
+@pytest.mark.parametrize("run,armed_at,keep", [
+    ({"status": "in_progress", "updated_at": "1999-01-01T00:00:00Z"}, "2026-08-23T00:00:00Z", True),
+    ({"status": "queued", "updated_at": ""}, "2026-08-23T00:00:00Z", True),
+    ({"status": "completed", "updated_at": "2026-08-23T10:00:00Z"}, "2026-08-23T00:00:00Z", True),
+    ({"status": "completed", "updated_at": "2020-01-01T00:00:00Z"}, "2026-08-23T00:00:00Z", False),
+    ({"status": "completed", "updated_at": ""}, "2026-08-23T00:00:00Z", True),  # unknown -> watch
+])
+def test_observed_this_watch(run, armed_at, keep):
+    assert WATCHER._observed_this_watch(run, armed_at) is keep

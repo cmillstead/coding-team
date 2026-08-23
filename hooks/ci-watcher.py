@@ -30,7 +30,7 @@ import re
 import subprocess
 import sys
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 HOME = Path(os.path.expanduser("~"))
@@ -42,6 +42,7 @@ RUN_APPEAR_POLL = 6
 POLL_INTERVAL = 15
 WATCH_CAP = 20 * 60
 GH_TIMEOUT = 30
+PREFILTER_HOURS = 6  # coarse server floor to bound pagination — NOT the selection key
 FAILED_CONCLUSIONS = {"failure", "cancelled", "timed_out"}
 
 MODE_PUSH = "push"
@@ -72,6 +73,91 @@ def _gh(args, nwo, cwd):
     if result.returncode != 0:
         return None
     return result.stdout
+
+
+def _prefilter_floor(armed_at):
+    """Coarse `created >=` floor (armed_at - PREFILTER_HOURS) to bound the API result
+    set. Selection correctness is head_sha + status + `updated_at`, not this floor."""
+    try:
+        dt = datetime.fromisoformat(armed_at.replace("Z", "+00:00")) - timedelta(hours=PREFILTER_HOURS)
+        return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+    except ValueError:
+        return armed_at
+
+
+def _observed_this_watch(run, armed_at):
+    """Bounded recency guard: an in-flight (queued/in_progress) run is ALWAYS this
+    trigger's concern. A completed run is skipped ONLY if it completed BEFORE the
+    watch began (updated_at < armed_at) — i.e. it is a prior result, not ours.
+    Unknown updated_at -> watch (fail toward alerting on an observed run)."""
+    if run.get("status") != "completed":
+        return True
+    updated = str(run.get("updated_at", ""))
+    if not updated:
+        return True
+    return updated >= armed_at
+
+
+def _parse_runs(raw_runs):
+    return [
+        {"id": r.get("id") if "id" in r else r.get("databaseId"),
+         "head_sha": r.get("head_sha") or r.get("headSha"),
+         "status": r.get("status"), "conclusion": r.get("conclusion"),
+         "name": r.get("name") or r.get("workflowName"),
+         "created_at": r.get("created_at") or r.get("createdAt"),
+         "updated_at": r.get("updated_at") or r.get("updatedAt")}
+        for r in raw_runs
+    ]
+
+
+def _gh_api_runs(query, cwd):
+    """Paginated NDJSON of runs via `gh api --paginate --jq '.workflow_runs[]'`, or None."""
+    try:
+        result = subprocess.run(["gh", "api", "--paginate", "--jq", ".workflow_runs[]", query],
+                                capture_output=True, text=True, timeout=GH_TIMEOUT, cwd=cwd)
+    except (subprocess.SubprocessError, OSError):
+        return None
+    if result.returncode != 0:
+        return None
+    rows = []
+    for line in result.stdout.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            rows.append(json.loads(line))
+        except (json.JSONDecodeError, ValueError):
+            continue
+    return _parse_runs(rows)
+
+
+def _runs_for_sha(head_sha, armed_at, nwo, cwd):
+    """Runs whose head commit == head_sha. Server-side head_sha filter + coarse
+    created prefilter; fallback to `gh run list` (capped 200, client-filtered)."""
+    if nwo:
+        query = (f"repos/{nwo}/actions/runs?head_sha={head_sha}"
+                 f"&created=%3E%3D{_prefilter_floor(armed_at)}&per_page=100")
+        runs = _gh_api_runs(query, cwd)
+        if runs is not None:
+            return runs
+    out = _gh(["run", "list", "-L", "200", "--json",
+               "databaseId,headSha,status,conclusion,createdAt,updatedAt,workflowName"], nwo, cwd)
+    if not out:
+        return []
+    try:
+        rows = json.loads(out)
+    except (json.JSONDecodeError, ValueError):
+        return []
+    return [r for r in _parse_runs(rows) if r["head_sha"] == head_sha]
+
+
+def _active_runs(nwo, armed_at, cwd):
+    """Safe-broad discovery: recent runs for the repo (no head_sha filter). Used when
+    the pushed SHA can't be pinned — watch what's active/recent rather than nothing."""
+    if not nwo:
+        return []
+    query = f"repos/{nwo}/actions/runs?created=%3E%3D{_prefilter_floor(armed_at)}&per_page=100"
+    return _gh_api_runs(query, cwd) or []
 
 
 def _parse_iso_z(value):
