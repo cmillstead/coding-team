@@ -243,11 +243,13 @@ def _notify_desktop(title, message):
         pass
 
 
-def _write_marker(run, nwo, branch, failed_jobs):
+def _write_marker(run, nwo, branch, failed_jobs, broad=False):
     """Durably publish a failure marker. Tries the primary dir (with a retry), then a
     system-temp fallback dir; atomic within each (temp + os.replace). Returns True if
     EITHER succeeds; False only if BOTH fail (caller then fires a last-resort notify).
-    A detected failure is never silently lost."""
+    A detected failure is never silently lost. `broad` records that this was a
+    safe-broad watch (the run may be unrelated to the user's push) so inject can
+    phrase the note without overclaiming attribution."""
     try:
         run_id = int(run.get("id"))   # coerce: the filename is str(run_id) — never a
     except (TypeError, ValueError):   # traversal / injection from an attacker-shaped id.
@@ -256,7 +258,7 @@ def _write_marker(run, nwo, branch, failed_jobs):
         "run_id": run_id, "repo": nwo or "(cwd repo)", "branch": branch,
         "workflow": run.get("name", ""), "conclusion": run.get("conclusion", ""),
         "run_url": f"https://github.com/{nwo}/actions/runs/{run_id}" if nwo else "",
-        "failed_jobs": failed_jobs,
+        "failed_jobs": failed_jobs, "broad": bool(broad),
         "detected_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
     }
     payload = json.dumps(marker, indent=2)
@@ -335,7 +337,7 @@ def main():
                     label = nwo or "repo"
                     _notify_desktop("CI FAILED - action needed",
                                     f"{label} @ {branch}: {run.get('name') or 'run'} ({run.get('conclusion')})")
-                    if not _write_marker(run, nwo, branch, failed):   # A-4 durable
+                    if not _write_marker(run, nwo, branch, failed, broad):   # A-4 durable
                         _notify_desktop("CI FAILED (marker write failed)",
                                         f"{label}: inspect gh run {run.get('id')} manually")
                     return

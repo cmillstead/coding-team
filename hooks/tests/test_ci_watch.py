@@ -785,3 +785,20 @@ def test_main_merge_broad_when_no_merge_commit(tmp_path):  # --auto / not-yet-me
             runview=json.dumps({"jobs": []}))
     run_watcher_main(tmp_path, ["deadbeef"], mode="merge", selector="42")
     assert len(list(d.glob("*.json"))) == 1   # safe-broad watch caught the active failing run
+
+
+# --- Cleanup 11: broad-mode wording does not overclaim "a push you made" ----
+
+def test_format_marker_broad_wording():
+    broad = INJECT._format_marker({"repo": "o/n", "branch": "main", "failed_jobs": [], "broad": True})
+    precise = INJECT._format_marker({"repo": "o/n", "branch": "main", "failed_jobs": [], "broad": False})
+    assert "push you made" not in broad                    # broad run may be unrelated
+    assert "related to your recent activity" in broad
+    assert "push you made" in precise                      # precise still attributes to the push
+
+
+def test_write_marker_records_broad_flag(tmp_path):
+    _use_dirs(tmp_path)
+    assert WATCHER._write_marker({"id": 3, "conclusion": "failure"}, "o/n", "m", [], broad=True) is True
+    marker = json.loads((WATCHER.FAILURES_DIR / "3.json").read_text())
+    assert marker["broad"] is True
