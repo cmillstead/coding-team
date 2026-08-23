@@ -308,18 +308,47 @@ This deploys hooks to `~/.claude/hooks/`, agents to `~/.claude/agents/`, rules t
 
 ### Hook execution path
 
-`~/.claude/settings.json` does not register the 11 individual hook scripts directly. It registers **4 dispatchers**, each consolidating the per-event hook set into a single matcher="" entry that routes internally by tool name (or, for SessionStart, by subprocess):
+`~/.claude/settings.json` does not register the individual hook scripts directly. It registers **4 dispatchers**, each consolidating the per-event hook set into a single matcher="" entry that routes internally by tool name (or, for SessionStart, by subprocess):
 
 | Dispatcher | Event | Routes to |
 |---|---|---|
 | `pretooluse-dispatcher.py` | PreToolUse | `paul-apply-agent-guard.py` (blocking — PAUL plan-review gate, Agent branch, runs first), `write-guard.py` (blocking — instruction-file edit guard), `git-safety-guard.py` (blocking — force-push/main-branch guard), `codesight-hooks.py` (prompt injection) |
-| `posttooluse-dispatcher.py` | PostToolUse | `loop-detection.py`, `lint-warning-enforcer.py`, `coding-team-lifecycle.py`, `codesight-hooks.py`, `builder-self-check.py` |
-| `prompt-dispatcher.py` | UserPromptSubmit | `paul-apply-review-guard.py` (PAUL plan-review gate, `/paul:apply` prompts, runs first), then the prompt-time hook set, run in-process via `runpy` (not subprocessed) |
+| `posttooluse-dispatcher.py` | PostToolUse | `loop-detection.py`, `lint-warning-enforcer.py`, `ci-watch-arm.py` (arms the post-push CI watcher), `coding-team-lifecycle.py`, `codesight-hooks.py`, `builder-self-check.py` |
+| `prompt-dispatcher.py` | UserPromptSubmit | `paul-apply-review-guard.py` (PAUL plan-review gate, `/paul:apply` prompts, runs first), then the prompt-time hook set (including `ci-watch-inject.py`, which surfaces post-push CI-failure markers), run in-process via `runpy` (not subprocessed) |
 | `session-start-dispatcher.py` | SessionStart | `hook-health-check.py`, `deploy-drift-check.py`, `ci-orphan-detector.sh`, and other session-start checks, each run as its own subprocess in its own interpreter |
 
 Blocking hooks (`write-guard.py`, `git-safety-guard.py`) have their stdout/exit code forwarded verbatim by the dispatcher — no rewriting or re-serialization, so the block decision reaches Claude Code byte-identical to running the handler directly.
 
 Shared utilities live in `hooks/_lib/`: `event.py`, `git.py`, `graduated_checks.py`, `output.py`, `state.py`, and `suppression.py` are used across multiple hooks; `compound_allow.py` (compound-command allowlist evaluation), `c5_detect.py` (C5-tier risk signal detection), and `active_plan.py` (active plan file resolution) back the dispatcher routing logic specifically.
+
+### Post-push CI watcher (ci-watch)
+
+After a `git push`, `gh pr create`, or `gh pr merge`, `ci-watch-arm.py` — using LOCAL git only,
+so it returns in well under 100ms and never stalls the turn — resolves the commit SHA(s) pushed
+(every refspec source, `--all`/`--tags`/`--mirror`/`--repo=`), the current HEAD (`gh pr create`),
+or, for a `gh pr merge`, just the PR selector + repo, plus the repo the runs live in (the pushed
+remote, or `gh -R`), and fire-and-forgets a detached `ci-watcher.py`. Every `gh` (network) call —
+including resolving the PR merge-commit SHA — happens in that detached watcher, never in arm.
+
+**Bounded contract.** Within a ~20-minute window the watcher watches the Actions runs it can see
+for those SHAs and alerts on GitHub's **run conclusion** (no workflow-YAML parsing). It never
+suppresses or mislabels a failure it observes and never reports a false green. It is NOT a
+completeness oracle: runs that first appear, re-run, or chain AFTER the window are unseen — and
+never falsely reported green. Ambiguous push/merge forms fall back to a safe-broad watch (current
+HEAD + active in-window runs for the repo) rather than watching nothing or the wrong SHA.
+
+Alerting conclusions: everything except `success`, `neutral`, `skipped` — i.e. `failure`,
+`timed_out`, `startup_failure`, `action_required`, `cancelled`, `stale`, and any unknown value.
+**`cancelled`/`stale` alert on purpose:** a cancelled run can still contain a failed job, so
+never-miss on an observed run beats the rare over-alert on a superseded push. Markers are written
+atomically (with a temp-dir fallback if the primary is unwritable) and surfaced into Claude's next
+turn, then consumed; a corrupt/bad-schema marker becomes a non-consuming warning.
+
+Fail-safe limitations (unseen, never false-green): late/chained/after-window re-runs (GitHub allows
+re-runs for up to 30 days); merge-queue runs; `gh pr merge --auto`; `push.default=matching` bare
+push; per-step continue-on-error beyond the run conclusion.
+
+Disable entirely with `CT_CI_WATCH_DISABLE=1`.
 
 ### Full pipeline only
 
@@ -442,6 +471,9 @@ hooks/                            # Claude Code hooks, deployed to ~/.claude/hoo
   paul-apply-review-guard.py      #   Path A fence — blocks /paul:apply when no fresh Codex PASS exists
   write-guard.py                  #   blocks orchestrator edits to instruction files during Phase 5
   ci-orphan-detector.sh           #   SessionStart — flags open PRs with failing CI, stale local branches, and checkouts parked on merged branches
+  ci-watch-arm.py                 #   PostToolUse(Bash) — after a push/PR-create/PR-merge, arms a detached CI watcher
+  ci-watcher.py                   #   detached bounded watcher (spawned by ci-watch-arm.py) — alerts on GitHub's run conclusion
+  ci-watch-inject.py              #   UserPromptSubmit — surfaces post-push CI-failure markers into the next turn
   _lib/                           #   shared hook utilities
     __init__.py
     event.py                      #     event parsing

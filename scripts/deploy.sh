@@ -157,7 +157,10 @@ if [ -f "$SETTINGS" ]; then
     UNREGISTERED=0
     for hook in "$CLAUDE_DIR"/hooks/*.py "$CLAUDE_DIR"/hooks/*.sh; do
         hookname=$(basename "$hook")
-        if [ "$hookname" = "__init__.py" ] || [ "$hookname" = "_lib" ]; then
+        # ci-watcher.py is a SPAWNED helper: ci-watch-arm.py fire-and-forgets it as
+        # a detached process, so it is intentionally absent from settings.json and
+        # every dispatcher. Skip it here so the verifier does not warn.
+        if [ "$hookname" = "__init__.py" ] || [ "$hookname" = "_lib" ] || [ "$hookname" = "ci-watcher.py" ]; then
             continue
         fi
         if grep -q "$hookname" "$SETTINGS"; then
