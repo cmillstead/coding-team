@@ -1284,6 +1284,41 @@ class TestPostToolUseCapture:
         finally:
             os.chdir(old_cwd)
 
+    def test_post_tool_use_does_not_record_commit(self, run_hook, make_event, tmp_state_dir):
+        """PostToolUse recording gate excludes commit/push: a `git commit` whose
+        MESSAGE contains a verification token (`pytest`) must NOT be appended to
+        the verification state, so it cannot self-satisfy a later commit's
+        checklist. Pins the second recording gate (is_commit_or_push at
+        _handle_post_tool_use).
+
+        Non-vacuous: the message contains `pytest`, so is_verification(command)
+        is True; WITHOUT the is_commit_or_push guard, _handle_post_tool_use would
+        append the commit command. The `tool_result` key routes the event to the
+        PostToolUse branch (main() discriminates on `"tool_result" in ev`), which
+        is the gate under test.
+        """
+        # Seed a prior state so there is a file to read back and a baseline count.
+        _seed_verification_state(tmp_state_dir, test_exit_code=None, lint_exit_code=None)
+        session_hash = hashlib.sha256(tmp_state_dir.encode()).hexdigest()[:12]
+        state_file = Path(f"/tmp/claude-verification-{session_hash}.json")
+        before = json.loads(state_file.read_text())["verifications"]
+
+        # PostToolUse event: the `tool_result` key routes to _handle_post_tool_use.
+        commit_command = 'git commit -m "test: add pytest coverage"'
+        event = make_event("Bash", command=commit_command,
+                           tool_result={"stdout": "", "exit_code": 0})
+        result = run_hook("git-safety-guard.py", event)
+        assert result.returncode == 0, f"hook crashed: stderr={result.stderr!r}"
+
+        after = json.loads(state_file.read_text())["verifications"]
+        # The commit command must NOT have been appended as a verification.
+        assert all("git commit" not in v["command"] for v in after), (
+            f"commit was recorded as a verification: {after!r}"
+        )
+        assert len(after) == len(before), (
+            f"state length changed (commit recorded?): before={len(before)}, after={len(after)}"
+        )
+
 
 # ---------------------------------------------------------------------------
 # Helpers for submodule-pointer (gitlink) tests
@@ -3482,6 +3517,53 @@ class TestMakeCheckSatisfiesChecklist:
         finally:
             os.chdir(old_cwd)
 
+    def test_make_test_alone_still_blocks_on_missing_lint(self, run_hook, make_event, tmp_state_dir, tmp_path):
+        """`make test` satisfies has_tests but NOT has_lint -> commit still BLOCKS
+        on missing lint. Pins the asymmetric make-token behavior so a regex
+        regression that collapsed (?:check|test) or widened make\\s+test to satisfy
+        lint would be caught."""
+        session_hash = hashlib.sha256(tmp_state_dir.encode()).hexdigest()[:12]
+        state_file = Path(f"/tmp/claude-verification-{session_hash}.json")
+        now = time.time()
+        state_file.write_text(json.dumps({
+            "verifications": [{"command": "make test", "time": now, "exit_code": None}],
+            "last_updated": now,
+        }))
+        _init_feature_repo(tmp_path)
+        old_cwd = os.getcwd()
+        os.chdir(tmp_path)
+        try:
+            event = make_event("Bash", command='git commit -m "feat: add feature"')
+            result = run_hook("git-safety-guard.py", event)
+            assert result.parsed is not None, f"expected block JSON, got: {result.stdout!r}"
+            assert result.parsed["decision"] == "block"
+            # blocks specifically on lint (tests are satisfied by `make test`)
+            assert "lint" in result.parsed["reason"].lower()
+        finally:
+            os.chdir(old_cwd)
+
+    def test_make_lint_alone_still_blocks_on_missing_tests(self, run_hook, make_event, tmp_state_dir, tmp_path):
+        """`make lint` satisfies has_lint but NOT has_tests -> commit still BLOCKS
+        on missing tests."""
+        session_hash = hashlib.sha256(tmp_state_dir.encode()).hexdigest()[:12]
+        state_file = Path(f"/tmp/claude-verification-{session_hash}.json")
+        now = time.time()
+        state_file.write_text(json.dumps({
+            "verifications": [{"command": "make lint", "time": now, "exit_code": None}],
+            "last_updated": now,
+        }))
+        _init_feature_repo(tmp_path)
+        old_cwd = os.getcwd()
+        os.chdir(tmp_path)
+        try:
+            event = make_event("Bash", command='git commit -m "feat: add feature"')
+            result = run_hook("git-safety-guard.py", event)
+            assert result.parsed is not None, f"expected block JSON, got: {result.stdout!r}"
+            assert result.parsed["decision"] == "block"
+            assert "test" in result.parsed["reason"].lower()
+        finally:
+            os.chdir(old_cwd)
+
 
 class TestRecencyWindowNotEvictedByChurn:
     """Defect 2 (TRK-176): the blunt [-20:] count cap at both write sites evicted
@@ -3533,6 +3615,31 @@ class TestRecencyWindowNotEvictedByChurn:
         os.chdir(tmp_path)
         try:
             event = make_event("Bash", command='git commit -m "feat: untested change"')
+            result = run_hook("git-safety-guard.py", event)
+            assert result.parsed is not None, f"expected block JSON, got: {result.stdout!r}"
+            assert result.parsed["decision"] == "block"
+            assert "NOT run" in result.parsed["reason"] or "MUST run" in result.parsed["reason"]
+        finally:
+            os.chdir(old_cwd)
+
+    def test_out_of_window_verification_does_not_satisfy_checklist(self, run_hook, make_event, tmp_state_dir, tmp_path):
+        """A verification older than RECENCY_WINDOW_SECONDS (30 min) must NOT
+        satisfy the checklist. Seeds a `make check` at now-1801 (just outside the
+        window) as the ONLY entry -> commit still BLOCKS. Pins the age boundary /
+        the < RECENCY_WINDOW_SECONDS comparator against a constant or comparator
+        mutation."""
+        session_hash = hashlib.sha256(tmp_state_dir.encode()).hexdigest()[:12]
+        state_file = Path(f"/tmp/claude-verification-{session_hash}.json")
+        now = time.time()
+        state_file.write_text(json.dumps({
+            "verifications": [{"command": "make check", "time": now - 1801, "exit_code": None}],
+            "last_updated": now,
+        }))
+        _init_feature_repo(tmp_path)
+        old_cwd = os.getcwd()
+        os.chdir(tmp_path)
+        try:
+            event = make_event("Bash", command='git commit -m "feat: add feature"')
             result = run_hook("git-safety-guard.py", event)
             assert result.parsed is not None, f"expected block JSON, got: {result.stdout!r}"
             assert result.parsed["decision"] == "block"
