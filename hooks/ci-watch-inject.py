@@ -23,10 +23,12 @@ import re
 import stat
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 _CONTROL_CHARS = re.compile(r"[\x00-\x1f\x7f]")
 _SANITIZE_LIMIT = 200
+MALFORMED_MAX_AGE = 30 * 60   # seconds; a bad marker older than this is aged out
 
 HOME = Path(os.path.expanduser("~"))
 FAILURES_DIR = HOME / ".claude" / "ci-watch" / "failures"
@@ -37,6 +39,25 @@ FAILURES_DIR = HOME / ".claude" / "ci-watch" / "failures"
 FALLBACK_DIR = Path(tempfile.gettempdir()) / f"ci-watch-failures-{os.getuid()}"
 
 READ_CAP = 65536   # bytes; a marker larger than this is a plant, not a real marker
+
+
+def _handle_bad(path, message, notes):
+    """A bad (unsafe/unreadable/malformed) marker: age it out SILENTLY once it is
+    older than MALFORMED_MAX_AGE (so a permanently-broken file does not warn on every
+    prompt forever — mirrors the arm-side STALE_LOCK sweep); otherwise warn and leave
+    it in place. lstat (not stat) so a symlink's own mtime is used and it is never
+    followed."""
+    try:
+        aged = time.time() - path.lstat().st_mtime > MALFORMED_MAX_AGE
+    except OSError:
+        aged = False
+    if aged:
+        try:
+            path.unlink()
+        except OSError:
+            pass
+        return
+    notes.append(message)
 
 
 def _read_marker_bytes(path):
@@ -125,22 +146,22 @@ def main():
         try:
             raw = _read_marker_bytes(path)
             if raw is None:
-                notes.append(f"[ci-watch] WARNING: unsafe marker {path.name} (symlink / non-regular "
-                             f"/ foreign / oversized) — skipped, left in place; inspect {path.parent}.")
+                _handle_bad(path, f"[ci-watch] WARNING: unsafe marker {path.name} (symlink / "
+                            f"non-regular / foreign / oversized) — skipped; inspect {path.parent}.", notes)
                 continue
             marker = json.loads(raw.decode("utf-8"))
             formatted = _format_marker(marker)
         except (OSError, UnicodeDecodeError, json.JSONDecodeError, ValueError):
-            notes.append(f"[ci-watch] WARNING: unreadable marker {path.name} — left in place; "
-                         f"inspect {path.parent}.")
+            _handle_bad(path, f"[ci-watch] WARNING: unreadable marker {path.name} — left in "
+                        f"place; inspect {path.parent}.", notes)
             continue
         except Exception:  # noqa: BLE001 - one malformed marker must not suppress the rest
-            notes.append(f"[ci-watch] WARNING: malformed marker {path.name} — left in place; "
-                         f"inspect {path.parent}.")
+            _handle_bad(path, f"[ci-watch] WARNING: malformed marker {path.name} — left in "
+                        f"place; inspect {path.parent}.", notes)
             continue
         if formatted is None:
-            notes.append(f"[ci-watch] WARNING: malformed marker {path.name} (bad schema) — left "
-                         f"in place; inspect {path.parent}.")
+            _handle_bad(path, f"[ci-watch] WARNING: malformed marker {path.name} (bad schema) — "
+                        f"left in place; inspect {path.parent}.", notes)
             continue
         notes.append(formatted)
         consumed.append(path)

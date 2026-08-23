@@ -694,3 +694,26 @@ def test_write_marker_skips_non_int_run_id(tmp_path):
     result = WATCHER._write_marker({"id": "7; rm -rf", "conclusion": "failure"}, "o/n", "m", [])
     assert result is False                                      # skipped (unsafe id)
     assert list(WATCHER.FAILURES_DIR.glob("*.json")) == []     # no file written
+
+
+# --- Fix 6: age out permanently-malformed markers --------------------------
+
+def test_inject_ages_out_old_malformed_marker(tmp_path, capsys):
+    _use_dirs(tmp_path)
+    INJECT.FAILURES_DIR.mkdir(parents=True)
+    bad = INJECT.FAILURES_DIR / "3.json"
+    bad.write_text("{ corrupt")
+    old = time.time() - (INJECT.MALFORMED_MAX_AGE + 60)
+    os.utime(bad, (old, old))
+    INJECT.main()
+    assert not bad.exists()                                 # aged out (no perpetual warning)
+
+
+def test_inject_keeps_fresh_malformed_marker(tmp_path, capsys):
+    _use_dirs(tmp_path)
+    INJECT.FAILURES_DIR.mkdir(parents=True)
+    bad = INJECT.FAILURES_DIR / "3.json"
+    bad.write_text("{ corrupt")
+    INJECT.main()
+    out = capsys.readouterr().out
+    assert bad.exists() and "WARNING" in out and "3.json" in out   # fresh -> warned + retained
