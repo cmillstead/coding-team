@@ -7,7 +7,6 @@ import os
 import stat
 import subprocess
 import sys
-import time
 
 import pytest
 
@@ -36,14 +35,32 @@ _SNAPSHOT = {
 }
 
 
+@pytest.fixture(scope="session", autouse=True)
+def _stub_desktop_notifier(tmp_path_factory):
+    """Put a no-op `osascript` on PATH for the WHOLE session so the watcher's
+    _notify_desktop never fires a REAL macOS desktop notification during tests.
+    A real on-PATH stub executable (not a mock/patch): write-guard compliant.
+    Session-scoped + autouse so it is applied before the per-function
+    _restore_state fixture snapshots os.environ, hence inherited by every test."""
+    bin_dir = tmp_path_factory.mktemp("notify-stub")
+    osascript = bin_dir / "osascript"
+    osascript.write_text("#!/bin/sh\nexit 0\n")
+    osascript.chmod(osascript.stat().st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
+    os.environ["PATH"] = f"{bin_dir}{os.pathsep}" + os.environ["PATH"]
+    yield
+
+
 @pytest.fixture(autouse=True)
 def _restore_state():
-    env = dict(os.environ); cwd = os.getcwd()
+    env = dict(os.environ)
+    cwd = os.getcwd()
     saved = {(m, n): getattr(m, n, None) for m, names in _SNAPSHOT.items() for n in names}
     try:
         yield
     finally:
-        os.environ.clear(); os.environ.update(env); os.chdir(cwd)
+        os.environ.clear()
+        os.environ.update(env)
+        os.chdir(cwd)
         for (mod, name), value in saved.items():
             setattr(mod, name, value)
 
@@ -90,10 +107,16 @@ def _emit_gh(bin_dir, *, sequenced, npolls=0):
                 "if 'api' in a: print((d/'api.ndjson').read_text())\n" + common)
     gh.write_text("#!/usr/bin/env python3\n" + body)
     gh.chmod(gh.stat().st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
+    # A no-op osascript alongside gh so the watcher's _notify_desktop resolves the
+    # stub (never a REAL macOS notification) even from this bin dir.
+    osascript = bin_dir / "osascript"
+    osascript.write_text("#!/bin/sh\nexit 0\n")
+    osascript.chmod(osascript.stat().st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
 
 
 def init_repo(tmp_path, *, origin="git@github.com:o/n.git"):
-    r = tmp_path / "repo"; r.mkdir()
+    r = tmp_path / "repo"
+    r.mkdir()
     env = ["-c", "user.email=t@t", "-c", "user.name=t"]
     subprocess.run(["git", "-C", str(r), "init", "-q"], check=True)
     subprocess.run(["git", "-C", str(r), "remote", "add", "origin", origin], check=True)
@@ -109,16 +132,21 @@ def divergent_repo(tmp_path):
     subprocess.run(["git", "-C", str(repo), "tag", "v1"], check=True)
     subprocess.run(["git", "-C", str(repo), "checkout", "-q", "feat/x"], check=True)
     subprocess.run(["git", "-C", str(repo), *env, "commit", "--allow-empty", "-qm", "f"], check=True)
-    sha = lambda ref: subprocess.run(["git", "-C", str(repo), "rev-parse", ref],
-                                     capture_output=True, text=True).stdout.strip()
+
+    def sha(ref):
+        return subprocess.run(["git", "-C", str(repo), "rev-parse", ref],
+                              capture_output=True, text=True).stdout.strip()
+
     return repo, sha
 
 
 def run_watcher_main(tmp_path, shas, *, nwo="o/n", armed_at="2000-01-01T00:00:00Z",
                      branch="feat/x", broad="0"):
-    lock = tmp_path / "x.lock"; lock.write_text("{}")
+    lock = tmp_path / "x.lock"
+    lock.write_text("{}")
     argv = [str(WATCHER_PATH), str(tmp_path), branch, ",".join(shas), str(lock), nwo, armed_at, broad]
-    old = sys.argv; sys.argv = argv
+    old = sys.argv
+    sys.argv = argv
     try:
         WATCHER.main()
     finally:
@@ -151,7 +179,9 @@ def test_runs_for_sha_parses_ndjson_and_keeps_headsha(tmp_path):
 
 
 def test_runs_for_sha_clean_when_gh_absent(tmp_path):
-    empty = tmp_path / "e"; empty.mkdir(); os.environ["PATH"] = str(empty)
+    empty = tmp_path / "e"
+    empty.mkdir()
+    os.environ["PATH"] = str(empty)
     assert WATCHER._runs_for_sha("beef", "2000-01-01T00:00:00Z", "o/n", str(tmp_path)) == []
 
 
@@ -171,8 +201,10 @@ def test_observed_this_watch(run, armed_at, keep):
 # --------------------------------------------------------------------------
 
 def _use_dirs(tmp_path):
-    WATCHER.FAILURES_DIR = tmp_path / "f"; WATCHER.FALLBACK_DIR = tmp_path / "fb"
-    INJECT.FAILURES_DIR = tmp_path / "f"; INJECT.FALLBACK_DIR = tmp_path / "fb"
+    WATCHER.FAILURES_DIR = tmp_path / "f"
+    WATCHER.FALLBACK_DIR = tmp_path / "fb"
+    INJECT.FAILURES_DIR = tmp_path / "f"
+    INJECT.FALLBACK_DIR = tmp_path / "fb"
     return tmp_path / "f"
 
 
@@ -182,13 +214,17 @@ def _run(id, sha, status, concl, upd="2026-08-23T10:00:00Z"):
 
 
 def test_watcher_never_opens_workflow_files(tmp_path):  # R3-13 behavioral trap
-    repo = tmp_path / "repo"; wf = repo / ".github" / "workflows"; wf.mkdir(parents=True)
+    repo = tmp_path / "repo"
+    wf = repo / ".github" / "workflows"
+    wf.mkdir(parents=True)
     (wf / "ci.yml").write_text("name: CI\njobs:\n  test:\n    runs-on: x\n")
     opened = []
     sys.addaudithook(lambda ev, a: opened.append(str(a[0]))
                      if ev == "open" and a and ".github/workflows" in str(a[0]) else None)
-    WATCHER.FAILURES_DIR = tmp_path / "f"; WATCHER.POLL_INTERVAL = 0
-    WATCHER.WATCH_CAP = 0.05; WATCHER.GRACE_AFTER_TERMINAL = 0
+    WATCHER.FAILURES_DIR = tmp_path / "f"
+    WATCHER.POLL_INTERVAL = 0
+    WATCHER.WATCH_CAP = 0.05
+    WATCHER.GRACE_AFTER_TERMINAL = 0
     stub_gh(tmp_path / "bin", api_runs=[{"id": 1, "head_sha": "beef", "status": "completed",
             "conclusion": "success", "name": "CI", "created_at": "t", "updated_at": "t"}])
     run_watcher_main(repo, ["beef"])
@@ -196,7 +232,9 @@ def test_watcher_never_opens_workflow_files(tmp_path):  # R3-13 behavioral trap
 
 
 def test_main_green_then_red_same_sha_alerts(tmp_path):  # MANDATORY D2 falsifier
-    d = _use_dirs(tmp_path); WATCHER.POLL_INTERVAL = 0; WATCHER.GRACE_AFTER_TERMINAL = 0
+    d = _use_dirs(tmp_path)
+    WATCHER.POLL_INTERVAL = 0
+    WATCHER.GRACE_AFTER_TERMINAL = 0
     stub_gh(tmp_path / "bin", api_runs=[_run(1, "beef", "completed", "success"),
             _run(2, "beef", "completed", "failure")],
             runview=json.dumps({"jobs": [{"name": "pytest", "conclusion": "failure"}]}))
@@ -206,7 +244,9 @@ def test_main_green_then_red_same_sha_alerts(tmp_path):  # MANDATORY D2 falsifie
 
 
 def test_main_multi_sha_waits_for_all(tmp_path):  # never false-green on an unobserved SHA
-    d = _use_dirs(tmp_path); WATCHER.POLL_INTERVAL = 0; WATCHER.GRACE_AFTER_TERMINAL = 0
+    d = _use_dirs(tmp_path)
+    WATCHER.POLL_INTERVAL = 0
+    WATCHER.GRACE_AFTER_TERMINAL = 0
     # poll1: only SHA-A observed (green, terminal); SHA-B has no run yet.
     # poll2: SHA-B appears RED. Must alert (exit clock must not have fired on poll1).
     stub_gh_sequence(tmp_path / "bin", api_run_polls=[
@@ -218,7 +258,9 @@ def test_main_multi_sha_waits_for_all(tmp_path):  # never false-green on an unob
 
 
 def test_main_late_chained_run_within_grace(tmp_path):
-    d = _use_dirs(tmp_path); WATCHER.POLL_INTERVAL = 0; WATCHER.GRACE_AFTER_TERMINAL = 999
+    d = _use_dirs(tmp_path)
+    WATCHER.POLL_INTERVAL = 0
+    WATCHER.GRACE_AFTER_TERMINAL = 999
     stub_gh_sequence(tmp_path / "bin", api_run_polls=[
         [_run(1, "beef", "completed", "success")],
         [_run(1, "beef", "completed", "success"), _run(2, "beef", "completed", "failure")]],
@@ -228,7 +270,9 @@ def test_main_late_chained_run_within_grace(tmp_path):
 
 
 def test_main_stuck_run_does_not_starve(tmp_path):
-    d = _use_dirs(tmp_path); WATCHER.POLL_INTERVAL = 0; WATCHER.GRACE_AFTER_TERMINAL = 0
+    d = _use_dirs(tmp_path)
+    WATCHER.POLL_INTERVAL = 0
+    WATCHER.GRACE_AFTER_TERMINAL = 0
     stub_gh(tmp_path / "bin", api_runs=[_run(1, "beef", "in_progress", None),
             _run(2, "beef", "completed", "failure")], runview=json.dumps({"jobs": []}))
     run_watcher_main(tmp_path, ["beef"])
@@ -236,7 +280,9 @@ def test_main_stuck_run_does_not_starve(tmp_path):
 
 
 def test_main_broad_watches_active_runs(tmp_path):  # safe-broad
-    d = _use_dirs(tmp_path); WATCHER.POLL_INTERVAL = 0; WATCHER.GRACE_AFTER_TERMINAL = 0
+    d = _use_dirs(tmp_path)
+    WATCHER.POLL_INTERVAL = 0
+    WATCHER.GRACE_AFTER_TERMINAL = 0
     # HEAD sha 'zzz' has no run; broad discovery finds an active repo run that fails.
     stub_gh(tmp_path / "bin", api_runs=[_run(9, "other", "completed", "failure")],
             runview=json.dumps({"jobs": []}))
@@ -245,16 +291,22 @@ def test_main_broad_watches_active_runs(tmp_path):  # safe-broad
 
 
 def test_main_all_green_writes_no_marker(tmp_path):
-    d = _use_dirs(tmp_path); WATCHER.POLL_INTERVAL = 0; WATCHER.GRACE_AFTER_TERMINAL = 0
+    d = _use_dirs(tmp_path)
+    WATCHER.POLL_INTERVAL = 0
+    WATCHER.GRACE_AFTER_TERMINAL = 0
     stub_gh(tmp_path / "bin", api_runs=[_run(1, "beef", "completed", "success")])
     run_watcher_main(tmp_path, ["beef"])
     assert list(d.glob("*.json")) == []
 
 
 def test_main_no_gh_exits_clean(tmp_path):
-    _use_dirs(tmp_path); WATCHER.POLL_INTERVAL = 0; WATCHER.WATCH_CAP = 0.2
+    _use_dirs(tmp_path)
+    WATCHER.POLL_INTERVAL = 0
+    WATCHER.WATCH_CAP = 0.2
     WATCHER.GRACE_AFTER_TERMINAL = 0
-    empty = tmp_path / "e"; empty.mkdir(); os.environ["PATH"] = str(empty)
+    empty = tmp_path / "e"
+    empty.mkdir()
+    os.environ["PATH"] = str(empty)
     run_watcher_main(tmp_path, ["beef"])   # returns (bounded), no raise
 
 
@@ -281,5 +333,36 @@ def test_write_marker_falls_back_when_primary_unwritable(tmp_path):  # A-4
 
 def test_write_marker_false_only_when_both_fail(tmp_path):
     _use_dirs(tmp_path)
-    (tmp_path / "f").write_text("x"); (tmp_path / "fb").write_text("x")   # both unwritable
+    (tmp_path / "f").write_text("x")
+    (tmp_path / "fb").write_text("x")   # both unwritable
     assert WATCHER._write_marker({"id": 1, "conclusion": "failure"}, "o/n", "m", []) is False
+
+
+# --------------------------------------------------------------------------
+# Task 5: inject scans both dirs, consume-after-output, bad-schema isolation
+# --------------------------------------------------------------------------
+
+def test_inject_scans_both_dirs_ordering_and_isolation(tmp_path, capsys):
+    _use_dirs(tmp_path)
+    INJECT.FAILURES_DIR.mkdir(parents=True)
+    INJECT.FALLBACK_DIR.mkdir(parents=True)
+    (INJECT.FAILURES_DIR / "1.json").write_text(json.dumps(
+        {"repo": "o/n", "branch": "main", "run_url": "u", "failed_jobs": ["j"]}))
+    (INJECT.FALLBACK_DIR / "2.json").write_text(json.dumps(
+        {"repo": "o/n", "branch": "dev", "run_url": "v", "failed_jobs": []}))  # fallback surfaced too
+    (INJECT.FAILURES_DIR / "3.json").write_text("{ corrupt")
+    (INJECT.FAILURES_DIR / "4.json").write_text(json.dumps({"nope": 1}))       # bad schema
+    INJECT.main()
+    out = capsys.readouterr().out
+    assert "o/n @ main" not in out  # (format uses different wording; assert the identifiers)
+    assert "main" in out and "dev" in out                                       # both good surfaced
+    assert "WARNING" in out and "3.json" in out and "4.json" in out             # both bad warned
+    assert not (INJECT.FAILURES_DIR / "1.json").exists()
+    assert not (INJECT.FALLBACK_DIR / "2.json").exists()
+    assert (INJECT.FAILURES_DIR / "3.json").exists() and (INJECT.FAILURES_DIR / "4.json").exists()
+
+
+def test_disable_escape_hatch(run_hook, make_event):
+    os.environ["CT_CI_WATCH_DISABLE"] = "1"
+    assert run_hook("ci-watch-arm.py", make_event("Bash", command="git push")).stdout.strip() == ""
+    assert run_hook("ci-watch-inject.py", {"tool_name": "UserPromptSubmit"}).stdout.strip() == ""
