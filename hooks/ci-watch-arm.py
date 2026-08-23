@@ -177,6 +177,24 @@ def _gh_repo_override(command):
 
 _PUSH_VALUE_OPTS = frozenset({"-o", "--push-option", "--receive-pack", "--exec", "--recurse-submodules"})
 _AMBIGUOUS_PUSH_FLAGS = frozenset({"--branches", "--mirror"})   # --mirror is precise-able but treat broad-safe
+_DELETE_PUSH_FLAGS = frozenset({"--delete", "-d"})
+_DRY_RUN_PUSH_FLAGS = frozenset({"--dry-run", "-n"})
+MAX_LOCAL_REFS = 3   # arm resolves at most this many refs locally; more -> safe-broad
+
+
+def _is_dry_run_push(command):
+    """True when the push is a `--dry-run`/`-n` push: nothing is actually sent, so
+    arm must NOT spawn a watcher (it would occupy a slot and could false-attribute an
+    already-running same-SHA failure)."""
+    if git_invocations is None:
+        return False
+    try:
+        for subcommand, args in git_invocations(command):
+            if subcommand == "push" and any(a in _DRY_RUN_PUSH_FLAGS for a in args):
+                return True
+    except Exception:  # noqa: BLE001
+        return False
+    return False
 
 
 def _url_to_nwo(url):
@@ -342,6 +360,8 @@ def _resolve_target(command, mode):
 
     # MODE_PUSH (git push OR gh pr create). nwo = gh -R override, else the ACTUAL
     # pushed remote. Ambiguous forms -> safe-broad.
+    if _is_dry_run_push(command):
+        return None  # --dry-run pushed nothing: do not arm
     nwo = _gh_repo_override(command) or _push_remote_nwo(repo_root, command)
     if _is_ambiguous_push(command):
         return repo_root, branch, head, armed_at, nwo, "1", MODE_PUSH, "-"

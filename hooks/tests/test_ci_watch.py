@@ -841,3 +841,14 @@ def test_classify_trigger_gh_must_be_command_head(cmd, expected):
 def test_pr_selector_ignores_non_head_gh():
     assert ARM._pr_selector("echo gh pr merge 42") is None
     assert ARM._pr_selector("gh pr merge 42") == "42"
+
+
+# --- Finding 3: --dry-run pushes nothing -> do not arm ---------------------
+
+def test_dry_run_push_does_not_arm(tmp_path):
+    repo, _ = init_repo(tmp_path)
+    os.chdir(repo)
+    assert ARM._resolve_target("git push --dry-run origin main", ARM.MODE_PUSH) is None
+    assert ARM._resolve_target("git push -n", ARM.MODE_PUSH) is None
+    # a real push still resolves a target
+    assert ARM._resolve_target("git push origin feat/x", ARM.MODE_PUSH) is not None
