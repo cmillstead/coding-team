@@ -7,6 +7,7 @@ import os
 import stat
 import subprocess
 import sys
+import threading
 import time
 
 import pytest
@@ -922,3 +923,41 @@ def test_reported_branch_falls_back_to_current_for_bare_push(tmp_path):
     os.chdir(repo)
     got = ARM._resolve_target("git push", ARM.MODE_PUSH)
     assert got is not None and got[1] == "feat/x"
+
+
+# --- Finding 5: atomic exclusive arm-lock create (no TOCTOU) ----------------
+
+def test_arm_lock_created_atomically_0600(tmp_path):
+    _use_armed(tmp_path)
+    _stub_watcher(tmp_path)
+    old = os.umask(0)
+    try:
+        assert ARM._arm(str(tmp_path), "x", {"f" * 40}, "t", "o/n", "0", ARM.MODE_PUSH) is True
+    finally:
+        os.umask(old)
+    lock = list(ARM.ARMED_DIR.glob("*.lock"))[0]
+    assert stat.S_IMODE(os.stat(lock).st_mode) == 0o600   # O_CREAT|O_EXCL|O_WRONLY, 0o600
+
+
+def test_arm_concurrent_same_target_spawns_once(tmp_path):
+    _use_armed(tmp_path)
+    _stub_watcher(tmp_path)
+    ARM.ARMED_DIR.mkdir(parents=True)
+    shas = {"f" * 40}
+    results = []
+    guard = threading.Lock()
+    barrier = threading.Barrier(6)
+
+    def worker():
+        barrier.wait()   # release all six together to maximize the race window
+        outcome = ARM._arm(str(tmp_path), "x", shas, "t", "o/n", "0", ARM.MODE_PUSH)
+        with guard:
+            results.append(outcome)
+
+    threads = [threading.Thread(target=worker) for _ in range(6)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    assert results.count(True) == 1                            # exactly one atomic winner
+    assert len(list(ARM.ARMED_DIR.glob("*.lock"))) == 1

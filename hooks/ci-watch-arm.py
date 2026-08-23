@@ -464,8 +464,6 @@ def _arm(repo_root, branch, target_shas, armed_at, nwo, broad, mode, selector="-
     shas_csv = ",".join(sorted(target_shas))
     lock_key = f"{shas_csv}|{mode}|{selector}"
     lock = ARMED_DIR / _lock_name(nwo_arg, repo_root, lock_key)
-    if lock.exists():
-        return False  # already armed for this target: idempotent no-op
     try:
         armed_count = len(list(ARMED_DIR.glob("*.lock")))
     except OSError:
@@ -474,14 +472,29 @@ def _arm(repo_root, branch, target_shas, armed_at, nwo, broad, mode, selector="-
         return False  # too many concurrent watchers already: do not pile on
     if not WATCHER.exists():
         return False
+    payload = json.dumps({
+        "repo_root": repo_root, "branch": branch, "target_shas": sorted(target_shas),
+        "armed_at": armed_at, "nwo": nwo_arg, "broad": broad, "mode": mode,
+        "selector": selector,
+        "lock_written_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+    })
+    # ATOMIC exclusive create: O_EXCL means exactly ONE of two concurrent sessions
+    # wins the same-target lock (no check-then-write TOCTOU), so idempotency and the
+    # MAX_ARMED_WATCHERS cap hold under concurrency. An existing lock -> already armed.
     try:
-        lock.write_text(json.dumps({
-            "repo_root": repo_root, "branch": branch, "target_shas": sorted(target_shas),
-            "armed_at": armed_at, "nwo": nwo_arg, "broad": broad, "mode": mode,
-            "selector": selector,
-            "lock_written_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-        }), encoding="utf-8")
+        fd = os.open(str(lock), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+    except FileExistsError:
+        return False  # already armed for this target: idempotent no-op
     except OSError:
+        return False
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(payload)
+    except OSError:
+        try:
+            lock.unlink()
+        except OSError:
+            pass
         return False
     try:
         devnull = open(os.devnull, "wb")
