@@ -3482,3 +3482,60 @@ class TestMakeCheckSatisfiesChecklist:
         finally:
             os.chdir(old_cwd)
 
+
+class TestRecencyWindowNotEvictedByChurn:
+    """Defect 2 (TRK-176): the blunt [-20:] count cap at both write sites evicted
+    a still-in-window verification under churn. When >20 verification commands ran
+    inside the 30-min window (e.g. a concurrent implementer running repeated
+    ruff+pytest cycles), the genuine pytest pass was dropped while later ruff
+    entries stayed -> has_tests flipped False -> false 'tests not run' block. The
+    30-min recency window must be the real bound; under realistic churn no
+    in-window entry is evicted."""
+
+    def test_in_window_pytest_survives_churn(self, run_hook, make_event, tmp_state_dir, tmp_path):
+        _init_feature_repo(tmp_path)
+        old_cwd = os.getcwd()
+        os.chdir(tmp_path)
+        try:
+            # 1) record a real pytest pass through the hook's OWN write path
+            #    (seeding state directly would not exercise the write-time cap).
+            run_hook("git-safety-guard.py", make_event("Bash", command="pytest tests/"))
+            # 2) 25 DISTINCT lint runs -- distinct so the 5s already_tracked dedup
+            #    does not collapse them; identical commands would record only once.
+            for i in range(25):
+                run_hook("git-safety-guard.py",
+                         make_event("Bash", command=f"ruff check mod{i}.py"))
+            # 3) commit: pytest is now >20 entries back. Old [-20:] cap evicted it
+            #    (only ruff remains -> has_tests False -> BLOCK). Window prune keeps
+            #    all 26 in-window entries -> pytest survives -> ALLOW.
+            event = make_event("Bash", command='git commit -m "feat: add feature"')
+            result = run_hook("git-safety-guard.py", event)
+            assert result.returncode == 0, f"hook must exit 0; stderr={result.stderr!r}"
+            assert result.stdout.strip() == "", (
+                "in-window pytest pass must survive >20-entry churn -> silent allow; "
+                f"got block: {result.stdout!r}"
+            )
+        finally:
+            os.chdir(old_cwd)
+
+    def test_zero_verifications_still_blocks(self, run_hook, make_event, tmp_state_dir, tmp_path):
+        """(c) Negative control (guard purpose intact): a commit with ZERO recent
+        verifications is STILL BLOCKED after the pruning change. This is a
+        SCOPE-REGRESSION GUARD -- GREEN before AND after the fix (the pre-fix hook
+        already blocks a no-verification commit), so it is exempt from the RED-first
+        rule, exactly like the precedent at lines ~957-962 in this file."""
+        session_hash = hashlib.sha256(tmp_state_dir.encode()).hexdigest()[:12]
+        state_file = Path(f"/tmp/claude-verification-{session_hash}.json")
+        if state_file.exists():
+            state_file.unlink()
+        _init_feature_repo(tmp_path)
+        old_cwd = os.getcwd()
+        os.chdir(tmp_path)
+        try:
+            event = make_event("Bash", command='git commit -m "feat: untested change"')
+            result = run_hook("git-safety-guard.py", event)
+            assert result.parsed is not None, f"expected block JSON, got: {result.stdout!r}"
+            assert result.parsed["decision"] == "block"
+            assert "NOT run" in result.parsed["reason"] or "MUST run" in result.parsed["reason"]
+        finally:
+            os.chdir(old_cwd)
