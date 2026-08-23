@@ -47,6 +47,16 @@ FAILED_CONCLUSIONS = {"failure", "cancelled", "timed_out"}
 MODE_PUSH = "push"
 MODE_MERGE = "merge"
 
+# GitHub's run conclusion already folds job-level continue-on-error into the result,
+# so the run conclusion is the whole observed-failure decision. Only success/neutral/
+# skipped are benign. cancelled/stale ALERT (a cancelled run can hide a failed job).
+# Anything not in NON_ALERTING (incl. unknown/None) alerts — fail toward alerting.
+NON_ALERTING = frozenset({"success", "neutral", "skipped"})
+
+
+def _is_alerting_conclusion(conclusion):
+    return conclusion not in NON_ALERTING
+
 
 def _gh(args, nwo, cwd):
     """Run a gh command, returning stdout, or None on any error/timeout."""
