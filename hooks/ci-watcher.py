@@ -14,11 +14,14 @@ it OBSERVES (no workflow-YAML parsing) — never suppressing/mislabelling an
 observed failure and never reporting a false green. Runs that first appear,
 re-run, or chain AFTER the window are out of scope (unseen, never green).
 
-Arg contract (7 positional):
-  repo_root branch target_shas_csv lock_path nwo armed_at broad
-where target_shas_csv is the sorted pushed/merged SHAs (HEAD included in broad
-mode), nwo is the repo the runs live in, armed_at is the ISO-8601 Z arm time
-(the recency guard for completed runs), and broad is "1"/"0".
+Arg contract (9 positional):
+  repo_root branch target_shas_csv lock_path nwo armed_at broad mode selector
+where target_shas_csv is the sorted pushed SHAs (for a merge it is only the local
+HEAD lock-anchor — the watcher resolves the real merge-commit SHA from `selector`),
+nwo is the repo the runs live in, armed_at is the ISO-8601 Z arm time (the recency
+guard for completed runs), broad is "1"/"0", mode is "push"/"merge", and selector
+is the PR selector for a merge ("-" otherwise). Args 8-9 are optional for
+back-compat (absent -> mode "push").
 """
 
 import json
@@ -46,6 +49,9 @@ GH_TIMEOUT = 30
 PREFILTER_HOURS = 6  # coarse server floor to bound pagination — NOT the selection key
 MARKER_WRITE_RETRIES = 2
 
+MODE_PUSH = "push"
+MODE_MERGE = "merge"
+
 # GitHub's run conclusion already folds job-level continue-on-error into the result,
 # so the run conclusion is the whole observed-failure decision. Only success/neutral/
 # skipped are benign. cancelled/stale ALERT (a cancelled run can hide a failed job).
@@ -71,6 +77,59 @@ def _gh(args, nwo, cwd):
     if result.returncode != 0:
         return None
     return result.stdout
+
+
+def _gh_json(args, nwo, cwd):
+    """Run a gh command and return its parsed JSON (dict/list), or None on any
+    error / non-JSON output. Dedupes the gh-json boilerplate shared by the merge
+    helpers below."""
+    out = _gh(args, nwo, cwd)
+    if out is None:
+        return None
+    try:
+        return json.loads(out)
+    except (json.JSONDecodeError, ValueError):
+        return None
+
+
+def _merge_commit_sha(cwd, nwo, selector):
+    """The merge-commit SHA of the PR via `gh pr view <selector> --json mergeCommit`,
+    or None (not yet merged / --auto / gh error). Runs in the DETACHED watcher, never
+    in arm, so the user's turn is never blocked on this network call."""
+    args = ["pr", "view"]
+    if selector:
+        args.append(str(selector))
+    args += ["--json", "mergeCommit"]
+    data = _gh_json(args, nwo, cwd)
+    commit = data.get("mergeCommit") if isinstance(data, dict) else None
+    if isinstance(commit, dict) and isinstance(commit.get("oid"), str) and commit["oid"]:
+        return commit["oid"]
+    return None
+
+
+def _pr_base_branch(cwd, nwo, selector):
+    """gh pr view <selector> --json baseRefName -> base branch name, or None."""
+    args = ["pr", "view"]
+    if selector:
+        args.append(str(selector))
+    args += ["--json", "baseRefName"]
+    data = _gh_json(args, nwo, cwd)
+    if isinstance(data, dict):
+        name = data.get("baseRefName")
+        if isinstance(name, str) and name:
+            return name
+    return None
+
+
+def _gh_default_branch(cwd, nwo):
+    """gh repo view --json defaultBranchRef -> branch name, or None."""
+    data = _gh_json(["repo", "view", "--json", "defaultBranchRef"], nwo, cwd)
+    ref = data.get("defaultBranchRef") if isinstance(data, dict) else None
+    if isinstance(ref, dict):
+        name = ref.get("name")
+        if isinstance(name, str) and name:
+            return name
+    return None
 
 
 def _prefilter_floor(armed_at):
@@ -227,13 +286,31 @@ def main():
     if len(args) < 7:
         return
     repo_root, branch, shas_csv, armed_lock, nwo_arg, armed_at, broad_arg = args[:7]
+    mode = args[7] if len(args) >= 8 and args[7] else MODE_PUSH
+    selector = args[8] if len(args) >= 9 else "-"
     nwo = None if nwo_arg == "-" else nwo_arg
     broad = broad_arg == "1"
     cwd = repo_root if os.path.isdir(repo_root) else os.getcwd()
     target_shas = [s for s in shas_csv.split(",") if s]
     armed_lock_path = Path(armed_lock)
     try:
-        if not target_shas:
+        if mode == MODE_MERGE:
+            # The gh-dependent merge resolution happens HERE (detached), never in
+            # arm, so arm stays local-git-only and sub-100ms.
+            sel = None if selector in ("-", "") else selector
+            base = _pr_base_branch(cwd, nwo, sel) or _gh_default_branch(cwd, nwo)
+            if base:
+                branch = base
+            merge_sha = _merge_commit_sha(cwd, nwo, sel)
+            if merge_sha:
+                target_shas = [merge_sha]
+                broad = False
+            else:
+                # not-yet-merged / --auto: the local HEAD is the STALE pre-merge sha,
+                # so watch a safe-broad set instead of matching it.
+                target_shas = []
+                broad = True
+        if not target_shas and not broad:
             return
         deadline = time.time() + WATCH_CAP
         seen_ids = set()

@@ -144,10 +144,11 @@ def divergent_repo(tmp_path):
 
 
 def run_watcher_main(tmp_path, shas, *, nwo="o/n", armed_at="2000-01-01T00:00:00Z",
-                     branch="feat/x", broad="0"):
+                     branch="feat/x", broad="0", mode="push", selector="-"):
     lock = tmp_path / "x.lock"
     lock.write_text("{}")
-    argv = [str(WATCHER_PATH), str(tmp_path), branch, ",".join(shas), str(lock), nwo, armed_at, broad]
+    argv = [str(WATCHER_PATH), str(tmp_path), branch, ",".join(shas), str(lock),
+            nwo, armed_at, broad, mode, selector]
     old = sys.argv
     sys.argv = argv
     try:
@@ -473,20 +474,27 @@ def test_lock_name_includes_repo_identity(tmp_path):  # A-1
     assert ARM._lock_name("o/n", "/r", "a" + ",b") != ARM._lock_name("o/n", "/r", "a" + ",c")
 
 
-def test_resolve_target_merge(tmp_path):
+def test_resolve_target_merge_is_local_only(tmp_path):
+    # Post-fix-4: arm resolves a merge with LOCAL git only (nwo from -R, selector,
+    # mode) and threads them to the watcher; it does NOT resolve the merge SHA here.
     repo, _ = init_repo(tmp_path)
     os.chdir(repo)
-    stub_gh(tmp_path / "bin", prview=json.dumps({"mergeCommit": {"oid": "a" * 40}, "baseRefName": "main"}))
     got = ARM._resolve_target("gh pr merge 42 -R other/repo --squash", ARM.MODE_MERGE)
-    assert got and got[2] == {"a" * 40} and got[1] == "main" and got[4] == "other/repo" and got[5] == "0"
+    assert got is not None
+    assert got[4] == "other/repo" and got[5] == "0"        # nwo (from -R), broad "0"
+    assert got[6] == ARM.MODE_MERGE and got[7] == "42"     # mode, selector
+    head = subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"],
+                          capture_output=True, text=True).stdout.strip()
+    assert got[2] == {head}                                # local HEAD lock-anchor only
 
 
-def test_resolve_target_merge_broad_when_no_commit(tmp_path):  # safe-broad, incl --auto
+def test_resolve_target_merge_current_branch_pr(tmp_path):
     repo, _ = init_repo(tmp_path)
     os.chdir(repo)
-    stub_gh(tmp_path / "bin", prview=json.dumps({"mergeCommit": None}))
-    got = ARM._resolve_target("gh pr merge 42 --auto", ARM.MODE_MERGE)
-    assert got and got[5] == "1"                        # broad watch (sees nothing in-window -> exits)
+    got = ARM._resolve_target("gh pr merge --auto", ARM.MODE_MERGE)   # no selector
+    assert got is not None
+    assert got[6] == ARM.MODE_MERGE and got[7] == "-"      # current-branch PR -> "-"
+    assert got[4] == "o/n"                                 # nwo from origin (local parse)
 
 
 # --------------------------------------------------------------------------
@@ -730,3 +738,50 @@ def test_arm_caps_concurrent_watchers(tmp_path):
     result = ARM._arm(str(tmp_path), "x", {"e" * 40}, "t", "o/n", "0", ARM.MODE_PUSH)
     assert result is False                                             # refused above the ceiling
     assert len(list(ARM.ARMED_DIR.glob("*.lock"))) == ARM.MAX_ARMED_WATCHERS   # no new lock/spawn
+
+
+# --- Fix 4: arm stays local-git-only; watcher resolves the merge SHA -------
+
+def test_arm_merge_makes_no_network_gh_call(tmp_path):
+    repo, _ = init_repo(tmp_path)
+    os.chdir(repo)
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    sentinel = tmp_path / "gh_called"
+    gh = bindir / "gh"
+    gh.write_text(f"#!/bin/sh\ntouch {sentinel}\nexit 0\n")
+    gh.chmod(gh.stat().st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
+    os.environ["PATH"] = f"{bindir}{os.pathsep}" + os.environ["PATH"]
+    got = ARM._resolve_target("gh pr merge 42 -R other/repo", ARM.MODE_MERGE)
+    assert got is not None
+    assert got[6] == ARM.MODE_MERGE and got[7] == "42"     # mode, selector threaded to the watcher
+    assert got[4] == "other/repo"                          # nwo from -R, parsed locally
+    assert not sentinel.exists()                           # NO blocking gh network call in arm
+
+
+def test_main_merge_resolves_sha_in_watcher(tmp_path):  # Fix 4 end-to-end
+    d = _use_dirs(tmp_path)
+    WATCHER.POLL_INTERVAL = 0
+    WATCHER.GRACE_AFTER_TERMINAL = 0
+    merge_sha = "c" * 40
+    stub_gh(tmp_path / "bin",
+            api_runs=[_run(1, merge_sha, "completed", "failure")],
+            prview=json.dumps({"mergeCommit": {"oid": merge_sha}, "baseRefName": "main"}),
+            runview=json.dumps({"jobs": []}))
+    run_watcher_main(tmp_path, ["deadbeef"], mode="merge", selector="42")
+    markers = [json.loads(p.read_text()) for p in d.glob("*.json")]
+    assert len(markers) == 1
+    assert markers[0]["run_id"] == 1          # watched the resolved merge-commit run
+    assert markers[0]["branch"] == "main"     # base branch resolved in the watcher
+
+
+def test_main_merge_broad_when_no_merge_commit(tmp_path):  # --auto / not-yet-merged
+    d = _use_dirs(tmp_path)
+    WATCHER.POLL_INTERVAL = 0
+    WATCHER.GRACE_AFTER_TERMINAL = 0
+    stub_gh(tmp_path / "bin",
+            api_runs=[_run(9, "somesha", "completed", "failure")],
+            prview=json.dumps({"mergeCommit": None}),
+            runview=json.dumps({"jobs": []}))
+    run_watcher_main(tmp_path, ["deadbeef"], mode="merge", selector="42")
+    assert len(list(d.glob("*.json"))) == 1   # safe-broad watch caught the active failing run

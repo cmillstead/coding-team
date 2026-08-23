@@ -6,33 +6,33 @@ push, a PR-create, or a PR-merge, resolves what the watcher must attach to, and
 fire-and-forgets a DETACHED ci-watcher.py process. Returns in well under 100ms
 and NEVER blocks the push (side-effect-only; emits no decision).
 
-Two attach strategies, keyed on the trigger type (see harness decision
-ci-watch-merge-staleness-2026-07-09):
+Arm is LOCAL-GIT-ONLY and side-effect-only, so it returns in well under 100ms and
+never blocks the turn: every gh (network) call happens in the detached watcher.
 
-  - push / pr-create -> mode "push". Resolve the LOCAL HEAD sha + current
-    branch; the watcher matches the Actions run by that headSha. Correct because
-    you send HEAD and the run is FOR HEAD.
+Two attach strategies, keyed on the trigger type:
 
-  - pr-merge -> mode "merge". Local HEAD is STALE at merge time: the merge
-    commit is created on the REMOTE base branch and local main has not been
-    pulled, so it still points at the pre-merge sha. Matching that stale headSha
-    attaches to the OLD (pre-merge) run and false-alarms its old conclusion.
-    Instead we capture the arm TIMESTAMP (UTC ISO-8601 Z) and resolve the merge
-    BASE branch (the PR baseRefName when a PR number is in the command, else the
-    repo default branch); the watcher selects the NEWEST run on that base branch
-    created STRICTLY AFTER the arm time, ignoring any pre-arm/stale run.
+  - push / pr-create -> mode "push". Resolve the LOCAL pushed source SHA(s) +
+    current branch + the pushed-remote nwo; the watcher matches the Actions run
+    by head_sha (with the `updated_at >= armed_at` recency guard).
+
+  - pr-merge -> mode "merge". The local HEAD is STALE at merge time (the merge
+    commit is created on the remote base branch), so arm does NOT match on it.
+    Arm parses only the PR selector + repo override locally and passes them to the
+    watcher; the WATCHER resolves the merge-commit SHA (gh pr view) and matches by
+    that SHA, or falls back to a safe-broad watch when the merge commit does not
+    yet exist (--auto / not-yet-merged).
 
 Structural replacement for the memory note feedback_monitor_ci_after_push.md,
 which depended on Claude remembering to watch CI. See harness decision
 post-push-ci-watch-2026-07-09.
 
 Idempotency + cleanup:
-  - Armed-lock ~/.claude/ci-watch/armed/<repo>-<key>.lock prevents double-arming
-    the same target. For push/pr-create the key is the HEAD sha; for pr-merge
-    (where the local sha is stale/shared across merges) the key is the arm
-    timestamp. The watcher removes its own lock on exit.
+  - Armed-lock ~/.claude/ci-watch/armed/<repo>-<digest>.lock prevents
+    double-arming the same target. The digest keys on repo identity (nwo +
+    repo_root) + the sorted SHA set + mode + selector for BOTH modes, so distinct
+    repos/targets/merges never collide. The watcher removes its own lock on exit.
   - On each invocation, stale armed-locks older than STALE_LOCK_SECS (orphaned
-    watchers) are swept.
+    watchers) are swept, and arming is refused above MAX_ARMED_WATCHERS.
 
 Escape hatch: CT_CI_WATCH_DISABLE=1 -> no-op.
 """
@@ -62,7 +62,9 @@ WATCHER = Path(__file__).resolve().parent / "ci-watcher.py"
 STALE_LOCK_SECS = 30 * 60
 MAX_ARMED_WATCHERS = 8   # ceiling on concurrent detached watchers; refuse to arm above it
 
-# Trigger modes passed to the watcher as its 6th positional arg.
+# Trigger modes. The watcher's 9 positional args are, in order:
+#   repo_root, branch, shas_csv, lock, nwo, armed_at, broad, mode, selector
+# so `mode` is the 8th and `selector` the 9th (NOT the 6th).
 MODE_PUSH = "push"
 MODE_MERGE = "merge"
 
@@ -158,98 +160,6 @@ def _gh_repo_override(command):
             if token.startswith("--repo="):
                 return token.split("=", 1)[1]
             cursor += 1
-    return None
-
-
-def _merge_commit_sha(repo_root, nwo, selector):
-    """The merge commit SHA of the PR via `gh pr view <selector> --json mergeCommit`,
-    or None (not yet merged / --auto / gh error)."""
-    cmd = ["gh", "pr", "view"]
-    if selector:
-        cmd.append(str(selector))
-    cmd += ["--json", "mergeCommit"]
-    if nwo:
-        cmd += ["--repo", nwo]
-    try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=6, cwd=repo_root)
-    except (subprocess.SubprocessError, OSError):
-        return None
-    if result.returncode != 0:
-        return None
-    try:
-        data = json.loads(result.stdout)
-    except (json.JSONDecodeError, ValueError):
-        return None
-    commit = data.get("mergeCommit") if isinstance(data, dict) else None
-    if isinstance(commit, dict) and isinstance(commit.get("oid"), str) and commit["oid"]:
-        return commit["oid"]
-    return None
-
-
-def _is_ci_triggering(command):
-    """True if the bash command triggers GitHub Actions (push / PR create / merge)."""
-    return _classify_trigger(command) is not None
-
-
-def _default_branch(repo_root, nwo):
-    """Resolve the repo default branch (best-effort). None if unresolvable.
-
-    Prefers the local remote HEAD symbolic ref (no network); falls back to
-    gh repo view --json defaultBranchRef.
-    """
-    ref = _git_out(repo_root, ["symbolic-ref", "refs/remotes/origin/HEAD"])
-    if ref:
-        # e.g. refs/remotes/origin/main -> main
-        name = ref.rsplit("/", 1)[-1]
-        if name:
-            return name
-    return _gh_default_branch(repo_root, nwo)
-
-
-def _gh_default_branch(repo_root, nwo):
-    """gh repo view --json defaultBranchRef -> branch name, or None."""
-    cmd = ["gh", "repo", "view", "--json", "defaultBranchRef"]
-    if nwo:
-        cmd += ["--repo", nwo]
-    try:
-        r = subprocess.run(cmd, capture_output=True, text=True, timeout=6,
-                           cwd=repo_root)
-    except (subprocess.SubprocessError, OSError):
-        return None
-    if r.returncode != 0:
-        return None
-    try:
-        data = json.loads(r.stdout)
-    except (json.JSONDecodeError, ValueError):
-        return None
-    ref = data.get("defaultBranchRef") if isinstance(data, dict) else None
-    if isinstance(ref, dict):
-        name = ref.get("name")
-        if isinstance(name, str) and name:
-            return name
-    return None
-
-
-def _pr_base_branch(repo_root, nwo, pr_number):
-    """gh pr view <n> --json baseRefName -> base branch name, or None."""
-    cmd = ["gh", "pr", "view", str(pr_number), "--json", "baseRefName"]
-    if nwo:
-        cmd += ["--repo", nwo]
-    try:
-        r = subprocess.run(cmd, capture_output=True, text=True, timeout=6,
-                           cwd=repo_root)
-    except (subprocess.SubprocessError, OSError):
-        return None
-    if r.returncode != 0:
-        return None
-    try:
-        data = json.loads(r.stdout)
-    except (json.JSONDecodeError, ValueError):
-        return None
-    if isinstance(data, dict):
-        name = data.get("baseRefName")
-        if isinstance(name, str) and name:
-            return name
     return None
 
 
@@ -390,9 +300,10 @@ def _push_remote_nwo(repo_root, command):
 def _resolve_target(command, mode):
     """Resolve what the watcher must attach to for command under mode.
 
-    Returns the 6-tuple (repo_root, branch, target_shas, armed_at, nwo, broad) or
-    None. target_shas is a set of the pushed/merged SHAs (HEAD in broad mode); nwo
-    is the repo the runs live in; broad is "1"/"0".
+    Returns the 8-tuple (repo_root, branch, target_shas, armed_at, nwo, broad, mode,
+    selector) or None. LOCAL-GIT-ONLY — no gh calls (arm must stay sub-100ms). For a
+    merge, target_shas is just the local HEAD lock-anchor and `selector` carries the
+    PR selector; the detached watcher resolves the actual merge-commit SHA.
     """
     if resolve_command_target_dir is None or resolve_repo_root is None:
         target_dir = os.getcwd()
@@ -404,33 +315,28 @@ def _resolve_target(command, mode):
         return None
 
     armed_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    branch = _git_out(repo_root, ["branch", "--show-current"]) or "-"
+    head = _sha_set(repo_root, ["HEAD"])
 
     if mode == MODE_MERGE:
+        # LOCAL-ONLY (sub-100ms, never blocks the turn): resolving the merge-commit
+        # SHA and base branch needs gh, so the WATCHER does that (detached). Arm
+        # only parses the repo override + selector locally and passes them through.
+        # HEAD is just the lock anchor — the watcher ignores it for matching, since
+        # the local HEAD is the STALE pre-merge sha.
         nwo = _gh_repo_override(command) or _nwo(repo_root)
-        selector = _pr_selector(command)
-        merge_sha = _merge_commit_sha(repo_root, nwo, selector)
-        head = _sha_set(repo_root, ["HEAD"])
-        if not merge_sha:
-            # ambiguous / --auto / not-yet-merged -> safe-broad (never nothing).
-            branch = (_pr_base_branch(repo_root, nwo, selector) if selector else None) \
-                or _default_branch(repo_root, nwo) or "-"
-            return repo_root, branch, head, armed_at, nwo, "1"
-        base = (_pr_base_branch(repo_root, nwo, selector) if selector else None) \
-            or _default_branch(repo_root, nwo) or "-"
-        return repo_root, base, {merge_sha}, armed_at, nwo, "0"
+        selector = _pr_selector(command) or "-"
+        return repo_root, branch, head, armed_at, nwo, "0", MODE_MERGE, selector
 
     # MODE_PUSH (git push OR gh pr create). nwo = gh -R override, else the ACTUAL
     # pushed remote. Ambiguous forms -> safe-broad.
     nwo = _gh_repo_override(command) or _push_remote_nwo(repo_root, command)
-    head = _sha_set(repo_root, ["HEAD"])
     if _is_ambiguous_push(command):
-        branch = _git_out(repo_root, ["branch", "--show-current"]) or "-"
-        return repo_root, branch, head, armed_at, nwo, "1"
+        return repo_root, branch, head, armed_at, nwo, "1", MODE_PUSH, "-"
     shas = _pushed_source_shas(repo_root, command) or head    # gh pr create -> HEAD (R3-2)
     if not shas:
         return None
-    branch = _git_out(repo_root, ["branch", "--show-current"]) or "-"
-    return repo_root, branch, shas, armed_at, nwo, "0"
+    return repo_root, branch, shas, armed_at, nwo, "0", MODE_PUSH, "-"
 
 
 def _repo_root_fallback(directory):
@@ -485,12 +391,13 @@ def _lock_name(nwo, repo_root, key):
     return f"{slug}-{digest}.lock"
 
 
-def _arm(repo_root, branch, target_shas, armed_at, nwo, broad, mode):
+def _arm(repo_root, branch, target_shas, armed_at, nwo, broad, mode, selector="-"):
     """Write the idempotency lock and spawn the detached watcher. Returns bool.
 
-    The lock digest keys on repo identity + the full sorted SHA set, so concurrent
-    watches on different repos (or different SHA sets) never collide. The watcher is
-    spawned with the unified 7-positional contract and removes its own lock on exit.
+    The lock digest keys on repo identity + the sorted SHA set + mode + selector, so
+    two concurrent PR merges (distinct selectors) from the same HEAD never collide.
+    The watcher is spawned with the unified 9-positional contract (…, mode, selector)
+    and removes its own lock on exit.
     """
     try:
         ARMED_DIR.mkdir(parents=True, exist_ok=True)
@@ -498,7 +405,8 @@ def _arm(repo_root, branch, target_shas, armed_at, nwo, broad, mode):
         return False
     nwo_arg = nwo or "-"
     shas_csv = ",".join(sorted(target_shas))
-    lock = ARMED_DIR / _lock_name(nwo_arg, repo_root, shas_csv)
+    lock_key = f"{shas_csv}|{mode}|{selector}"
+    lock = ARMED_DIR / _lock_name(nwo_arg, repo_root, lock_key)
     if lock.exists():
         return False  # already armed for this target: idempotent no-op
     try:
@@ -513,6 +421,7 @@ def _arm(repo_root, branch, target_shas, armed_at, nwo, broad, mode):
         lock.write_text(json.dumps({
             "repo_root": repo_root, "branch": branch, "target_shas": sorted(target_shas),
             "armed_at": armed_at, "nwo": nwo_arg, "broad": broad, "mode": mode,
+            "selector": selector,
             "lock_written_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         }), encoding="utf-8")
     except OSError:
@@ -521,7 +430,7 @@ def _arm(repo_root, branch, target_shas, armed_at, nwo, broad, mode):
         devnull = open(os.devnull, "wb")
         subprocess.Popen(
             [sys.executable, str(WATCHER), repo_root, branch, shas_csv, str(lock),
-             nwo_arg, armed_at, broad],
+             nwo_arg, armed_at, broad, mode, selector],
             stdin=subprocess.DEVNULL, stdout=devnull, stderr=devnull,
             start_new_session=True, cwd=repo_root,
         )
@@ -561,8 +470,8 @@ def main():
     target = _resolve_target(command, mode)
     if target is None:
         return  # not in a git repo / cannot resolve: nothing to watch
-    repo_root, branch, target_shas, armed_at, nwo, broad = target
-    _arm(repo_root, branch, target_shas, armed_at, nwo, broad, mode)
+    repo_root, branch, target_shas, armed_at, nwo, broad, resolved_mode, selector = target
+    _arm(repo_root, branch, target_shas, armed_at, nwo, broad, resolved_mode, selector)
     # Side-effect-only handler: emit no decision, never block the push.
 
 
