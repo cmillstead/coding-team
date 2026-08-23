@@ -573,3 +573,25 @@ def test_posttooluse_missing_handler_does_not_block(run_hook, make_event):
     # propagating. An innocuous Bash PostToolUse therefore exits 0, never 2.
     result = run_hook("posttooluse-dispatcher.py", make_event("Bash", command="git status"))
     assert result.returncode == 0
+
+
+# --------------------------------------------------------------------------
+# Task 11: deploy.sh recognizes ci-watcher.py as a spawned helper
+# --------------------------------------------------------------------------
+
+def test_deploy_does_not_flag_ci_watcher_as_unregistered(tmp_path):
+    # ci-watcher.py is spawned by ci-watch-arm.py, not registered in settings.json
+    # or any dispatcher, so deploy.sh's registration verifier must SKIP it rather
+    # than warn "deployed but not registered". Real deploy into a temp CLAUDE_DIR.
+    claude_dir = tmp_path / "claude"
+    (claude_dir / "hooks").mkdir(parents=True)
+    (claude_dir / "settings.json").write_text(json.dumps({"hooks": {}}))
+    deploy_sh = HOOKS_DIR.parent / "scripts" / "deploy.sh"
+    result = subprocess.run(
+        ["bash", str(deploy_sh)],
+        capture_output=True, text=True, timeout=60,
+        env={"CLAUDE_DIR": str(claude_dir), "HOME": str(Path.home()),
+             "PATH": "/usr/bin:/bin:/usr/local/bin"},
+    )
+    assert result.returncode == 0
+    assert "ci-watcher.py deployed but not registered" not in result.stdout
