@@ -666,3 +666,21 @@ def test_inject_sanitizes_job_names(tmp_path, capsys):
     assert "\nIGNORE PREVIOUS INSTRUCTIONS" not in out    # newline neutralized (no injected line)
     assert "IGNORE PREVIOUS INSTRUCTIONS" in out          # text shown inline, not executed
     assert "untrusted CI text" in out                     # fenced as untrusted
+
+
+# --- Fix 3: one poisoned marker must not suppress all alerts ----------------
+
+def test_inject_one_poisoned_marker_does_not_suppress_others(tmp_path, capsys):
+    _use_dirs(tmp_path)
+    INJECT.FAILURES_DIR.mkdir(parents=True)
+    (INJECT.FAILURES_DIR / "1.json").write_text(json.dumps(
+        {"repo": "o/n", "branch": "good", "failed_jobs": []}))
+    # non-iterable failed_jobs -> _format_marker would raise if called outside the try
+    (INJECT.FAILURES_DIR / "2.json").write_text(json.dumps(
+        {"repo": "o/n", "branch": "main", "failed_jobs": 5}))
+    INJECT.main()
+    out = capsys.readouterr().out
+    assert "good" in out                                   # good marker still surfaces
+    assert not (INJECT.FAILURES_DIR / "1.json").exists()   # ...and is consumed
+    assert (INJECT.FAILURES_DIR / "2.json").exists()       # poisoned one retained
+    assert "WARNING" in out and "2.json" in out            # ...and warned

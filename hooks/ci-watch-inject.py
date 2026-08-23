@@ -119,6 +119,9 @@ def main():
     notes = []
     consumed = []
     for path in markers:
+        # _format_marker runs INSIDE the per-marker try: a single schema-valid-but-
+        # bad-type marker (e.g. non-iterable failed_jobs) must never propagate and
+        # suppress every other alert — it becomes a non-consuming warning instead.
         try:
             raw = _read_marker_bytes(path)
             if raw is None:
@@ -126,11 +129,15 @@ def main():
                              f"/ foreign / oversized) — skipped, left in place; inspect {path.parent}.")
                 continue
             marker = json.loads(raw.decode("utf-8"))
+            formatted = _format_marker(marker)
         except (OSError, UnicodeDecodeError, json.JSONDecodeError, ValueError):
             notes.append(f"[ci-watch] WARNING: unreadable marker {path.name} — left in place; "
                          f"inspect {path.parent}.")
             continue
-        formatted = _format_marker(marker)
+        except Exception:  # noqa: BLE001 - one malformed marker must not suppress the rest
+            notes.append(f"[ci-watch] WARNING: malformed marker {path.name} — left in place; "
+                         f"inspect {path.parent}.")
+            continue
         if formatted is None:
             notes.append(f"[ci-watch] WARNING: malformed marker {path.name} (bad schema) — left "
                          f"in place; inspect {path.parent}.")
