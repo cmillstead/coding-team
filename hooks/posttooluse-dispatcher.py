@@ -5,7 +5,7 @@ Consolidates the per-tool PostToolUse entries from settings.json into a single
 matcher="" entry that routes internally by tool_name.
 
 Current PostToolUse topology (before consolidation):
-  - Bash                   → loop-detection.py, lint-warning-enforcer.py
+  - Bash                   → loop-detection.py, lint-warning-enforcer.py, ci-watch-arm.py
   - Skill                  → coding-team-lifecycle.py
   - Write|Edit             → codesight-hooks.py (reindex), builder-self-check.py
   - mcp__codesight__query  → codesight-hooks.py (usage logging)
@@ -51,6 +51,12 @@ LINT_WARNING_ENFORCER = str(HOOKS / "lint-warning-enforcer.py")
 CODING_TEAM_LIFECYCLE = str(HOOKS / "coding-team-lifecycle.py")
 CODESIGHT_HOOKS = str(HOOKS / "codesight-hooks.py")
 BUILDER_SELF_CHECK = str(HOOKS / "builder-self-check.py")
+CI_WATCH_ARM = str(HOOKS / "ci-watch-arm.py")
+
+# Bash PostToolUse handler chain (registration order). ci-watch-arm.py is
+# side-effect-only (arms the detached CI watcher; emits no decision), so it runs
+# last, after the loop/lint handlers that may emit advisories or block.
+BASH_HANDLERS = [LOOP_DETECTION, LINT_WARNING_ENFORCER, CI_WATCH_ARM]
 
 
 def _skip_names() -> set[str]:
@@ -150,6 +156,15 @@ def _run_and_emit(handlers: list[str], payload: str, skip: set[str]) -> None:
     for script in handlers:
         if _is_skipped(script, skip):
             continue
+        if not Path(script).exists():
+            # A registered handler that is not on disk (e.g. not yet deployed) must
+            # NOT wedge the session: `python3 <missing>` exits 2, which would
+            # otherwise be misread below as an intentional exit-2 block. Skip it.
+            print(
+                f"posttooluse-dispatcher: handler not found, skipping: {Path(script).name}",
+                file=sys.stderr,
+            )
+            continue
         stdout, stderr, rc = _run_handler([sys.executable, script], payload)
         if rc == 2:
             # Exit-2 block: propagate verbatim — first such handler wins.
@@ -198,7 +213,7 @@ def main() -> None:
     tool_name = event.get("tool_name", "")
 
     if tool_name == "Bash":
-        _run_and_emit([LOOP_DETECTION, LINT_WARNING_ENFORCER], payload, skip)
+        _run_and_emit(BASH_HANDLERS, payload, skip)
 
     elif tool_name == "Skill":
         _run_and_emit([CODING_TEAM_LIFECYCLE], payload, skip)

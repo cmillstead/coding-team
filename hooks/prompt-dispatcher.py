@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """UserPromptSubmit hook dispatcher (D195).
 
-Runs all 8 UserPromptSubmit hooks in a single Python process via runpy.run_path,
-preserving registration order and byte-identical output vs 8 separate subprocesses.
+Runs the registered UserPromptSubmit hooks in a single Python process via
+runpy.run_path, preserving registration order and byte-identical output vs the
+equivalent separate subprocesses.
 
 Per-hook loop contract (Codex-revised spec, §"Per-hook loop contract"):
   - Read real stdin once into `payload`.
@@ -30,7 +31,7 @@ import runpy
 import sys
 from pathlib import Path
 
-# Registration order — MUST be preserved (spec §"The 8 hooks").
+# Registration order — MUST be preserved (spec §"The hooks").
 HOOK_PATHS: list[str] = [
     "/Users/cevin/.claude/hooks/paul-apply-review-guard.py",   # Path A fence — MUST be first
     "/Users/cevin/src/engram/.base/hooks/active-hook.py",
@@ -41,6 +42,7 @@ HOOK_PATHS: list[str] = [
     "/Users/cevin/.claude/hooks/session-capture-check.py",
     "/Users/cevin/.claude/hooks/proactive-recall.py",
     "/Users/cevin/.claude/hooks/mid-session-recall.py",
+    "/Users/cevin/.claude/hooks/ci-watch-inject.py",   # post-push CI watcher — surfaces markers
 ]
 
 

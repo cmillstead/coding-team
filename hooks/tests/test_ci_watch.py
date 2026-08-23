@@ -26,6 +26,8 @@ def _load(basename, modname):
 ARM = _load("ci-watch-arm.py", "ci_watch_arm")
 WATCHER = _load("ci-watcher.py", "ci_watcher")
 INJECT = _load("ci-watch-inject.py", "ci_watch_inject")
+POD = _load("posttooluse-dispatcher.py", "ci_watch_pod")
+PD = _load("prompt-dispatcher.py", "ci_watch_pd")
 WATCHER_PATH = HOOKS_DIR / "ci-watcher.py"
 
 _SNAPSHOT = {
@@ -544,3 +546,30 @@ def test_sweep_removes_only_stale_locks(tmp_path):
     os.utime(stale, (old, old))
     ARM._sweep_stale_locks()
     assert {p.name for p in ARM.ARMED_DIR.glob("*.lock")} == {"fresh.lock"}
+
+
+# --------------------------------------------------------------------------
+# Task 10: dispatcher wiring (runtime module config, not source text)
+# --------------------------------------------------------------------------
+
+def test_posttooluse_bash_chain_includes_ci_watch_arm():
+    assert Path(POD.CI_WATCH_ARM).name == "ci-watch-arm.py"
+    assert POD.CI_WATCH_ARM in POD.BASH_HANDLERS
+    # arm runs after the loop/lint handlers (side-effect-only, emits no decision).
+    assert POD.BASH_HANDLERS[-1] == POD.CI_WATCH_ARM
+
+
+def test_prompt_dispatcher_wires_inject_last_and_guard_first():
+    assert Path(PD.HOOK_PATHS[0]).name == "paul-apply-review-guard.py"   # Path A fence stays first
+    assert Path(PD.HOOK_PATHS[-1]).name == "ci-watch-inject.py"           # inject appended last
+    # no duplicate registration:
+    assert [p for p in PD.HOOK_PATHS if Path(p).name == "ci-watch-inject.py"] == [PD.HOOK_PATHS[-1]]
+
+
+def test_posttooluse_missing_handler_does_not_block(run_hook, make_event):
+    # A registered Bash handler that is not on disk (ci-watch-arm.py is not deployed
+    # to ~/.claude/hooks in this checkout) must NOT be misread as an exit-2 block:
+    # `python3 <missing>` exits 2, which the dispatcher now skips rather than
+    # propagating. An innocuous Bash PostToolUse therefore exits 0, never 2.
+    result = run_hook("posttooluse-dispatcher.py", make_event("Bash", command="git status"))
+    assert result.returncode == 0
