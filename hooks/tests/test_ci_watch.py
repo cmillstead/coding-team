@@ -164,3 +164,122 @@ def test_runs_for_sha_clean_when_gh_absent(tmp_path):
 ])
 def test_observed_this_watch(run, armed_at, keep):
     assert WATCHER._observed_this_watch(run, armed_at) is keep
+
+
+# --------------------------------------------------------------------------
+# Task 4: the bounded watch loop (multi-SHA, safe-broad, grace, durable emit)
+# --------------------------------------------------------------------------
+
+def _use_dirs(tmp_path):
+    WATCHER.FAILURES_DIR = tmp_path / "f"; WATCHER.FALLBACK_DIR = tmp_path / "fb"
+    INJECT.FAILURES_DIR = tmp_path / "f"; INJECT.FALLBACK_DIR = tmp_path / "fb"
+    return tmp_path / "f"
+
+
+def _run(id, sha, status, concl, upd="2026-08-23T10:00:00Z"):
+    return {"id": id, "head_sha": sha, "status": status, "conclusion": concl,
+            "name": "W", "created_at": upd, "updated_at": upd}
+
+
+def test_watcher_never_opens_workflow_files(tmp_path):  # R3-13 behavioral trap
+    repo = tmp_path / "repo"; wf = repo / ".github" / "workflows"; wf.mkdir(parents=True)
+    (wf / "ci.yml").write_text("name: CI\njobs:\n  test:\n    runs-on: x\n")
+    opened = []
+    sys.addaudithook(lambda ev, a: opened.append(str(a[0]))
+                     if ev == "open" and a and ".github/workflows" in str(a[0]) else None)
+    WATCHER.FAILURES_DIR = tmp_path / "f"; WATCHER.POLL_INTERVAL = 0
+    WATCHER.WATCH_CAP = 0.05; WATCHER.GRACE_AFTER_TERMINAL = 0
+    stub_gh(tmp_path / "bin", api_runs=[{"id": 1, "head_sha": "beef", "status": "completed",
+            "conclusion": "success", "name": "CI", "created_at": "t", "updated_at": "t"}])
+    run_watcher_main(repo, ["beef"])
+    assert opened == []
+
+
+def test_main_green_then_red_same_sha_alerts(tmp_path):  # MANDATORY D2 falsifier
+    d = _use_dirs(tmp_path); WATCHER.POLL_INTERVAL = 0; WATCHER.GRACE_AFTER_TERMINAL = 0
+    stub_gh(tmp_path / "bin", api_runs=[_run(1, "beef", "completed", "success"),
+            _run(2, "beef", "completed", "failure")],
+            runview=json.dumps({"jobs": [{"name": "pytest", "conclusion": "failure"}]}))
+    lock = run_watcher_main(tmp_path, ["beef"])
+    m = [json.loads(p.read_text()) for p in d.glob("*.json")]
+    assert len(m) == 1 and m[0]["run_id"] == 2 and not lock.exists()
+
+
+def test_main_multi_sha_waits_for_all(tmp_path):  # never false-green on an unobserved SHA
+    d = _use_dirs(tmp_path); WATCHER.POLL_INTERVAL = 0; WATCHER.GRACE_AFTER_TERMINAL = 0
+    # poll1: only SHA-A observed (green, terminal); SHA-B has no run yet.
+    # poll2: SHA-B appears RED. Must alert (exit clock must not have fired on poll1).
+    stub_gh_sequence(tmp_path / "bin", api_run_polls=[
+        [_run(1, "aaa", "completed", "success")],
+        [_run(1, "aaa", "completed", "success"), _run(2, "bbb", "completed", "failure")]],
+        runview=json.dumps({"jobs": []}))
+    run_watcher_main(tmp_path, ["aaa", "bbb"])
+    assert [json.loads(p.read_text())["run_id"] for p in d.glob("*.json")] == [2]
+
+
+def test_main_late_chained_run_within_grace(tmp_path):
+    d = _use_dirs(tmp_path); WATCHER.POLL_INTERVAL = 0; WATCHER.GRACE_AFTER_TERMINAL = 999
+    stub_gh_sequence(tmp_path / "bin", api_run_polls=[
+        [_run(1, "beef", "completed", "success")],
+        [_run(1, "beef", "completed", "success"), _run(2, "beef", "completed", "failure")]],
+        runview=json.dumps({"jobs": []}))
+    run_watcher_main(tmp_path, ["beef"])
+    assert [json.loads(p.read_text())["run_id"] for p in d.glob("*.json")] == [2]
+
+
+def test_main_stuck_run_does_not_starve(tmp_path):
+    d = _use_dirs(tmp_path); WATCHER.POLL_INTERVAL = 0; WATCHER.GRACE_AFTER_TERMINAL = 0
+    stub_gh(tmp_path / "bin", api_runs=[_run(1, "beef", "in_progress", None),
+            _run(2, "beef", "completed", "failure")], runview=json.dumps({"jobs": []}))
+    run_watcher_main(tmp_path, ["beef"])
+    assert len(list(d.glob("*.json"))) == 1
+
+
+def test_main_broad_watches_active_runs(tmp_path):  # safe-broad
+    d = _use_dirs(tmp_path); WATCHER.POLL_INTERVAL = 0; WATCHER.GRACE_AFTER_TERMINAL = 0
+    # HEAD sha 'zzz' has no run; broad discovery finds an active repo run that fails.
+    stub_gh(tmp_path / "bin", api_runs=[_run(9, "other", "completed", "failure")],
+            runview=json.dumps({"jobs": []}))
+    run_watcher_main(tmp_path, ["zzz"], broad="1")
+    assert len(list(d.glob("*.json"))) == 1
+
+
+def test_main_all_green_writes_no_marker(tmp_path):
+    d = _use_dirs(tmp_path); WATCHER.POLL_INTERVAL = 0; WATCHER.GRACE_AFTER_TERMINAL = 0
+    stub_gh(tmp_path / "bin", api_runs=[_run(1, "beef", "completed", "success")])
+    run_watcher_main(tmp_path, ["beef"])
+    assert list(d.glob("*.json")) == []
+
+
+def test_main_no_gh_exits_clean(tmp_path):
+    _use_dirs(tmp_path); WATCHER.POLL_INTERVAL = 0; WATCHER.WATCH_CAP = 0.2
+    WATCHER.GRACE_AFTER_TERMINAL = 0
+    empty = tmp_path / "e"; empty.mkdir(); os.environ["PATH"] = str(empty)
+    run_watcher_main(tmp_path, ["beef"])   # returns (bounded), no raise
+
+
+# --------------------------------------------------------------------------
+# Task 4 (cont.): durable atomic marker (retry + fallback, returns bool)
+# --------------------------------------------------------------------------
+
+def test_write_marker_atomic_true(tmp_path):
+    _use_dirs(tmp_path)
+    assert WATCHER._write_marker({"id": 55, "head_sha": "b", "name": "CI", "conclusion": "failure"},
+                                 "o/n", "main", ["pytest"]) is True
+    d = WATCHER.FAILURES_DIR
+    assert sorted(p.name for p in d.glob("*")) == ["55.json"]
+    m = json.loads((d / "55.json").read_text())
+    assert m["run_url"] == "https://github.com/o/n/actions/runs/55" and m["failed_jobs"] == ["pytest"]
+
+
+def test_write_marker_falls_back_when_primary_unwritable(tmp_path):  # A-4
+    _use_dirs(tmp_path)
+    (tmp_path / "f").write_text("i am a file")          # primary dir path is a file -> mkdir fails
+    assert WATCHER._write_marker({"id": 7, "conclusion": "failure"}, "o/n", "m", []) is True
+    assert (WATCHER.FALLBACK_DIR / "7.json").exists()   # written to fallback, not lost
+
+
+def test_write_marker_false_only_when_both_fail(tmp_path):
+    _use_dirs(tmp_path)
+    (tmp_path / "f").write_text("x"); (tmp_path / "fb").write_text("x")   # both unwritable
+    assert WATCHER._write_marker({"id": 1, "conclusion": "failure"}, "o/n", "m", []) is False

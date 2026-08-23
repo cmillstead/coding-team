@@ -1,34 +1,31 @@
 #!/usr/bin/env python3
-"""Detached background CI watcher (Verify + Correct tier).
+"""Detached bounded CI watcher (Verify + Correct tier).
 
 Spawned fire-and-forget by ci-watch-arm.py after a CI-triggering git/gh command.
-Waits for the matching GitHub Actions run to complete, and on a GENUINE job
-failure (a job that is NOT continue-on-error) fires a macOS desktop notification
-AND writes a marker file that ci-watch-inject.py surfaces into the next Claude
-turn. Runs as an independent process: it must NEVER block the push and NEVER
-raise into the caller. All failures degrade to a clean silent exit. See harness
-decisions post-push-ci-watch-2026-07-09 and ci-watch-merge-staleness-2026-07-09.
+Within a bounded (~20-minute) window it watches the GitHub Actions runs it can
+see for the pushed/merged SHA(s) and, on any OBSERVED run whose run-level
+conclusion is not benign (see NON_ALERTING), fires a macOS desktop notification
+AND durably writes a marker file that ci-watch-inject.py surfaces into the next
+Claude turn. Runs as an independent process: it must NEVER block the push and
+NEVER raise into the caller. All failures degrade to a clean silent exit.
 
-Run-selection depends on the arm MODE (6th positional arg):
+Bounded contract: it faithfully reports GitHub's run-level conclusion for any run
+it OBSERVES (no workflow-YAML parsing) — never suppressing/mislabelling an
+observed failure and never reporting a false green. Runs that first appear,
+re-run, or chain AFTER the window are out of scope (unseen, never green).
 
-  - mode "push" (push / pr-create): match the run whose headSha equals the
-    just-sent HEAD sha. Correct because the run is FOR that HEAD.
-
-  - mode "merge" (pr-merge): the local HEAD sha is STALE (the merge commit is
-    made on the remote base branch; local main was not pulled), so headSha
-    matching would attach to the OLD pre-merge run and false-alarm. Instead
-    select the NEWEST run on the base branch whose createdAt is STRICTLY AFTER
-    the arm timestamp (7th positional arg), ignoring any pre-arm/stale run.
-
-Back-compat: a watcher spawned by an older arm (5 args, no mode/armed_at)
-defaults to mode "push" and headSha matching.
+Arg contract (7 positional):
+  repo_root branch target_shas_csv lock_path nwo armed_at broad
+where target_shas_csv is the sorted pushed/merged SHAs (HEAD included in broad
+mode), nwo is the repo the runs live in, armed_at is the ISO-8601 Z arm time
+(the recency guard for completed runs), and broad is "1"/"0".
 """
 
 import json
 import os
-import re
 import subprocess
 import sys
+import tempfile
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -36,17 +33,14 @@ from pathlib import Path
 HOME = Path(os.path.expanduser("~"))
 CI_WATCH_DIR = HOME / ".claude" / "ci-watch"
 FAILURES_DIR = CI_WATCH_DIR / "failures"
+FALLBACK_DIR = Path(tempfile.gettempdir()) / "ci-watch-failures"
 
-RUN_APPEAR_CAP = 90
-RUN_APPEAR_POLL = 6
 POLL_INTERVAL = 15
 WATCH_CAP = 20 * 60
+GRACE_AFTER_TERMINAL = 90
 GH_TIMEOUT = 30
 PREFILTER_HOURS = 6  # coarse server floor to bound pagination — NOT the selection key
-FAILED_CONCLUSIONS = {"failure", "cancelled", "timed_out"}
-
-MODE_PUSH = "push"
-MODE_MERGE = "merge"
+MARKER_WRITE_RETRIES = 2
 
 # GitHub's run conclusion already folds job-level continue-on-error into the result,
 # so the run conclusion is the whole observed-failure decision. Only success/neutral/
@@ -160,165 +154,17 @@ def _active_runs(nwo, armed_at, cwd):
     return _gh_api_runs(query, cwd) or []
 
 
-def _parse_iso_z(value):
-    """Parse a GitHub ISO-8601 Z timestamp to an aware datetime, or None.
-
-    Accepts "2026-07-09T15:55:26Z" (and the +00:00 variant). Returns None for
-    missing / malformed / non-string input so callers can skip it safely.
-    """
-    if not isinstance(value, str) or not value:
-        return None
+def _failed_job_names(run_id, nwo, cwd):
+    """Enrichment only: the names of failed jobs for run_id (never the alert
+    decision, which is the run conclusion). Empty on any error."""
+    out = _gh(["run", "view", str(run_id), "--json", "jobs"], nwo, cwd)
+    if not out:
+        return []
     try:
-        return datetime.fromisoformat(value.replace("Z", "+00:00"))
-    except ValueError:
-        return None
-
-
-def _continue_on_error_jobs(repo_root):
-    """Collect job keys marked continue-on-error: true across the repo workflows.
-
-    Dependency-free line scan (no PyYAML: this runs detached under an unknown
-    interpreter). Records the most recent jobs-level job key and, when a
-    continue-on-error: true line appears more indented than that key, adds it.
-    Scans every workflow file: a MISSED continue-on-error job would false-alert
-    (the worse outcome), so we err toward catching them all. engram => security,
-    guardrails.
-    """
-    ignore = set()
-    wf_dir = Path(repo_root) / ".github" / "workflows"
-    if not wf_dir.is_dir():
-        return ignore
-    job_key_re = re.compile(r"^(\s+)([A-Za-z0-9_-]+):\s*$")
-    coe_true_re = re.compile(r"^\s+continue-on-error:\s*true\s*(#.*)?$")
-    files = sorted(wf_dir.glob("*.yml")) + sorted(wf_dir.glob("*.yaml"))
-    for wf in files:
-        try:
-            lines = wf.read_text(encoding="utf-8").splitlines()
-        except OSError:
-            continue
-        in_jobs = False
-        jobs_indent = 0
-        current_job = None
-        current_job_indent = 0
-        for raw in lines:
-            line = raw.replace(chr(9), "  ")
-            stripped = line.strip()
-            if not stripped or stripped.startswith("#"):
-                continue
-            indent = len(line) - len(line.lstrip())
-            if not in_jobs:
-                if stripped == "jobs:":
-                    in_jobs = True
-                    jobs_indent = indent
-                continue
-            if indent <= jobs_indent and stripped.endswith(":") and stripped != "jobs:":
-                break
-            m = job_key_re.match(line)
-            if m and len(m.group(1)) == jobs_indent + 2:
-                current_job = m.group(2)
-                current_job_indent = indent
-                continue
-            if current_job and coe_true_re.match(line) and indent > current_job_indent:
-                ignore.add(current_job)
-    return ignore
-
-
-def _find_run_id(head_sha, branch, nwo, cwd):
-    """Poll gh run list until a run for head_sha appears. None on timeout.
-
-    Used for mode push (push / pr-create), where the run is FOR the just-sent
-    HEAD sha.
-    """
-    deadline = time.time() + RUN_APPEAR_CAP
-    while time.time() < deadline:
-        out = _gh(
-            ["run", "list", "--branch", branch, "--limit", "20",
-             "--json", "databaseId,headSha,status"],
-            nwo, cwd,
-        )
-        if out:
-            try:
-                runs = json.loads(out)
-            except (json.JSONDecodeError, ValueError):
-                runs = []
-            for run in runs:
-                if str(run.get("headSha", "")) == head_sha:
-                    return int(run["databaseId"])
-        time.sleep(RUN_APPEAR_POLL)
-    return None
-
-
-def _find_run_after(branch, armed_at, nwo, cwd):
-    """Poll gh run list for the NEWEST run on branch created after armed_at.
-
-    Used for mode merge. armed_at is a UTC ISO-8601 Z timestamp captured at arm
-    time. Any run whose createdAt is at/before armed_at is a pre-merge/stale run
-    and is IGNORED. Among the post-arm runs the newest by createdAt wins (the
-    merge-commit run). Returns its databaseId, or None on timeout / no post-arm
-    run yet. If armed_at cannot be parsed, returns None (fail safe: no false
-    attach) rather than degrading to headSha matching on a stale sha.
-    """
-    armed_dt = _parse_iso_z(armed_at)
-    if armed_dt is None:
-        return None
-    deadline = time.time() + RUN_APPEAR_CAP
-    while time.time() < deadline:
-        out = _gh(
-            ["run", "list", "--branch", branch, "--limit", "20",
-             "--json", "databaseId,headSha,status,createdAt"],
-            nwo, cwd,
-        )
-        if out:
-            try:
-                runs = json.loads(out)
-            except (json.JSONDecodeError, ValueError):
-                runs = []
-            best_id = None
-            best_dt = None
-            for run in runs:
-                created = _parse_iso_z(run.get("createdAt"))
-                if created is None or created <= armed_dt:
-                    continue  # pre-arm / stale / unparseable -> ignore
-                if best_dt is None or created > best_dt:
-                    best_dt = created
-                    try:
-                        best_id = int(run["databaseId"])
-                    except (KeyError, TypeError, ValueError):
-                        best_id = None
-            if best_id is not None:
-                return best_id
-        time.sleep(RUN_APPEAR_POLL)
-    return None
-
-
-def _poll_to_completion(run_id, nwo, cwd, deadline):
-    """Poll gh run view until status==completed or deadline. Return final view."""
-    while time.time() < deadline:
-        out = _gh(
-            ["run", "view", str(run_id), "--json", "status,conclusion,jobs"],
-            nwo, cwd,
-        )
-        if out:
-            try:
-                view = json.loads(out)
-            except (json.JSONDecodeError, ValueError):
-                view = None
-            if view and view.get("status") == "completed":
-                return view
-        time.sleep(POLL_INTERVAL)
-    return None
-
-
-def _genuine_failures(view, ignore):
-    """Return jobs that genuinely failed (excluding continue-on-error jobs)."""
-    failed = []
-    for job in view.get("jobs", []):
-        name = job.get("name", "")
-        if name in ignore:
-            continue
-        if job.get("conclusion") in FAILED_CONCLUSIONS:
-            failed.append(job)
-    return failed
+        data = json.loads(out)
+    except (json.JSONDecodeError, ValueError):
+        return []
+    return [j.get("name", "") for j in data.get("jobs", []) if j.get("conclusion") == "failure"]
 
 
 def _notify_desktop(title, message):
@@ -334,67 +180,86 @@ def _notify_desktop(title, message):
         pass
 
 
-def _write_marker(run_id, nwo, branch, failed_jobs):
-    """Write a failure marker JSON that ci-watch-inject.py surfaces + consumes."""
-    try:
-        FAILURES_DIR.mkdir(parents=True, exist_ok=True)
-    except OSError:
-        return
-    repo_disp = nwo or "(cwd repo)"
-    url = failed_jobs[0].get("url", "") if failed_jobs else ""
-    run_url = re.sub(r"/job/\d+$", "", url) if url else ""
+def _write_marker(run, nwo, branch, failed_jobs):
+    """Durably publish a failure marker. Tries the primary dir (with a retry), then a
+    system-temp fallback dir; atomic within each (temp + os.replace). Returns True if
+    EITHER succeeds; False only if BOTH fail (caller then fires a last-resort notify).
+    A detected failure is never silently lost."""
+    run_id = run.get("id")
     marker = {
-        "run_id": run_id,
-        "repo": repo_disp,
-        "branch": branch,
-        "run_url": run_url,
-        "failed_jobs": [
-            {"name": j.get("name", ""), "conclusion": j.get("conclusion", ""),
-             "url": j.get("url", "")}
-            for j in failed_jobs
-        ],
+        "run_id": run_id, "repo": nwo or "(cwd repo)", "branch": branch,
+        "workflow": run.get("name", ""), "conclusion": run.get("conclusion", ""),
+        "run_url": f"https://github.com/{nwo}/actions/runs/{run_id}" if nwo else "",
+        "failed_jobs": failed_jobs,
         "detected_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
     }
-    marker_path = FAILURES_DIR / (str(run_id) + ".json")
-    try:
-        marker_path.write_text(json.dumps(marker, indent=2), encoding="utf-8")
-    except OSError:
-        pass
+    payload = json.dumps(marker, indent=2)
+    targets = [FAILURES_DIR] * (1 + MARKER_WRITE_RETRIES) + [FALLBACK_DIR]
+    for target in targets:
+        try:
+            target.mkdir(parents=True, exist_ok=True)
+            tmp_path = target / (str(run_id) + ".json.tmp")
+            final_path = target / (str(run_id) + ".json")
+            tmp_path.write_text(payload, encoding="utf-8")
+            os.replace(tmp_path, final_path)
+            return True
+        except OSError:
+            continue
+    return False
 
 
 def main():
     args = sys.argv[1:]
-    if len(args) < 5:
+    if len(args) < 7:
         return
-    repo_root, branch, head_sha, armed_lock, nwo_arg = args[:5]
-    # Args 6-7 (mode, armed_at) are optional for back-compat with an older arm
-    # that spawned only 5 args; absence defaults to headSha matching (push).
-    mode = args[5] if len(args) >= 6 and args[5] else MODE_PUSH
-    armed_at = args[6] if len(args) >= 7 else "-"
+    repo_root, branch, shas_csv, armed_lock, nwo_arg, armed_at, broad_arg = args[:7]
     nwo = None if nwo_arg == "-" else nwo_arg
+    broad = broad_arg == "1"
     cwd = repo_root if os.path.isdir(repo_root) else os.getcwd()
+    target_shas = [s for s in shas_csv.split(",") if s]
     armed_lock_path = Path(armed_lock)
     try:
+        if not target_shas:
+            return
         deadline = time.time() + WATCH_CAP
-        if mode == MODE_MERGE:
-            # Base-branch + post-arm-timestamp selection (stale local sha ignored).
-            run_id = _find_run_after(branch, armed_at, nwo, cwd)
-        else:
-            run_id = _find_run_id(head_sha, branch, nwo, cwd)
-        if run_id is None:
-            return  # no workflow / no matching run: clean silent exit
-        view = _poll_to_completion(run_id, nwo, cwd, deadline)
-        if view is None:
-            return  # hit the 20-min cap without completion: give up silently
-        ignore = _continue_on_error_jobs(repo_root)
-        failed = _genuine_failures(view, ignore)
-        if not failed:
-            return  # green (or only continue-on-error jobs red): nothing to do
-        names = ", ".join(j.get("name", "?") for j in failed)
-        repo_label = nwo or "repo"
-        message = repo_label + " @ " + branch + ": " + names
-        _notify_desktop("CI FAILED - action needed", message)
-        _write_marker(run_id, nwo, branch, failed)
+        seen_ids = set()
+        observed_shas = set()
+        terminal_since = None
+        while time.time() < deadline:
+            raw = []
+            for sha in target_shas:
+                raw.extend(_runs_for_sha(sha, armed_at, nwo, cwd))
+            if broad:
+                raw.extend(_active_runs(nwo, armed_at, cwd))
+            in_window = [r for r in raw if _observed_this_watch(r, armed_at)]  # bounded predicate
+            by_id = {r["id"]: r for r in in_window if r.get("id") is not None}  # run-id dedup
+            runs = list(by_id.values())
+            if set(by_id) - seen_ids:                       # a NEW run appeared
+                seen_ids |= set(by_id)
+                terminal_since = None                       # reset grace clock
+            observed_shas |= {r["head_sha"] for r in runs if r.get("head_sha") in target_shas}
+            for run in runs:                                # round-robin; emit first failure
+                if run.get("status") == "completed" and _is_alerting_conclusion(run.get("conclusion")):
+                    failed = _failed_job_names(run.get("id"), nwo, cwd)
+                    label = nwo or "repo"
+                    _notify_desktop("CI FAILED - action needed",
+                                    f"{label} @ {branch}: {run.get('name') or 'run'} ({run.get('conclusion')})")
+                    if not _write_marker(run, nwo, branch, failed):   # A-4 durable
+                        _notify_desktop("CI FAILED (marker write failed)",
+                                        f"{label}: inspect gh run {run.get('id')} manually")
+                    return
+            # Multi-SHA: don't start the exit clock until every pushed SHA is observed
+            # (broad mode can't assert per-SHA completeness, so it exits on drain+grace).
+            shas_complete = broad or observed_shas >= set(target_shas)
+            all_terminal = shas_complete and bool(runs) and all(r.get("status") == "completed" for r in runs)
+            if all_terminal:
+                if terminal_since is None:
+                    terminal_since = time.time()
+                elif time.time() - terminal_since > GRACE_AFTER_TERMINAL:
+                    return
+            else:
+                terminal_since = None
+            time.sleep(POLL_INTERVAL)
     finally:
         try:
             armed_lock_path.unlink()
