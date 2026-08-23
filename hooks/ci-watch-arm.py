@@ -347,24 +347,19 @@ def _git_out(where, args, use_C=True):
     """Run git in where, return stripped stdout or None."""
     cmd = ["git", "-C", where, *args]
     try:
-        r = subprocess.run(cmd, capture_output=True, text=True, timeout=3)
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=3)
     except (subprocess.SubprocessError, OSError):
         return None
-    if r.returncode != 0:
+    if result.returncode != 0:
         return None
-    out = r.stdout.strip()
+    out = result.stdout.strip()
     return out or None
 
 
 def _nwo(repo_root):
     """Best-effort owner/name from the origin remote; None to let gh infer."""
     url = _git_out(repo_root, ["remote", "get-url", "origin"])
-    if not url:
-        return None
-    m = re.search(r"[:/]([^/:]+)/([^/]+?)(?:\.git)?$", url)
-    if not m:
-        return None
-    return m.group(1) + "/" + m.group(2)
+    return _url_to_nwo(url) if url else None
 
 
 def _sweep_stale_locks():
