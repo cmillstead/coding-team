@@ -595,3 +595,59 @@ def test_deploy_does_not_flag_ci_watcher_as_unregistered(tmp_path):
     )
     assert result.returncode == 0
     assert "ci-watcher.py deployed but not registered" not in result.stdout
+
+
+# ==========================================================================
+# Review round (audit + QA + harden): security-first fixes
+# ==========================================================================
+
+# --- Fix 1: secure fallback dir + safe marker reads ------------------------
+
+def test_inject_skips_symlink_marker(tmp_path, capsys):
+    _use_dirs(tmp_path)
+    INJECT.FAILURES_DIR.mkdir(parents=True)
+    secret = tmp_path / "evil.json"
+    secret.write_text(json.dumps({"repo": "o/n", "branch": "main", "failed_jobs": []}))
+    (INJECT.FAILURES_DIR / "9.json").symlink_to(secret)   # attacker plants a symlink
+    INJECT.main()
+    out = capsys.readouterr().out
+    assert (INJECT.FAILURES_DIR / "9.json").is_symlink()   # retained, not consumed
+    assert "o/n on main" not in out                        # not surfaced as trusted
+
+
+def test_inject_skips_oversized_marker(tmp_path, capsys):
+    _use_dirs(tmp_path)
+    INJECT.FAILURES_DIR.mkdir(parents=True)
+    big = INJECT.FAILURES_DIR / "8.json"
+    big.write_text(json.dumps({"repo": "o/n", "branch": "main", "failed_jobs": [], "pad": "x" * 200000}))
+    INJECT.main()
+    out = capsys.readouterr().out
+    assert big.exists()                                    # retained (skipped)
+    assert "o/n on main" not in out
+
+
+def test_inject_skips_fifo_and_does_not_hang(tmp_path, capsys):
+    _use_dirs(tmp_path)
+    INJECT.FALLBACK_DIR.mkdir(parents=True)
+    fifo = INJECT.FALLBACK_DIR / "7.json"
+    os.mkfifo(fifo)
+    INJECT.FAILURES_DIR.mkdir(parents=True)
+    (INJECT.FAILURES_DIR / "1.json").write_text(json.dumps(
+        {"repo": "o/n", "branch": "dev", "failed_jobs": []}))
+    INJECT.main()   # must return (no hang on the FIFO)
+    out = capsys.readouterr().out
+    assert "dev" in out
+    assert fifo.exists()                                   # FIFO retained, not consumed
+    assert not (INJECT.FAILURES_DIR / "1.json").exists()   # good marker consumed
+
+
+def test_write_marker_fallback_dir_is_private(tmp_path):
+    _use_dirs(tmp_path)
+    (tmp_path / "f").write_text("x")                       # primary unwritable -> fallback used
+    old = os.umask(0)
+    try:
+        assert WATCHER._write_marker({"id": 5, "conclusion": "failure"}, "o/n", "m", []) is True
+    finally:
+        os.umask(old)
+    mode = stat.S_IMODE(os.stat(WATCHER.FALLBACK_DIR).st_mode)
+    assert mode & 0o077 == 0                               # no group/other access

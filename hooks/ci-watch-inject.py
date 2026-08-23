@@ -19,13 +19,41 @@ Escape hatch: CT_CI_WATCH_DISABLE=1 -> no-op.
 
 import json
 import os
+import stat
 import sys
 import tempfile
 from pathlib import Path
 
 HOME = Path(os.path.expanduser("~"))
 FAILURES_DIR = HOME / ".claude" / "ci-watch" / "failures"
-FALLBACK_DIR = Path(tempfile.gettempdir()) / "ci-watch-failures"
+# uid-scoped fallback (matches ci-watcher.py). The temp root is world-writable, so
+# markers here are read defensively (see _read_marker_bytes): never follow a symlink,
+# never open a FIFO/device (would hang the prompt), never trust a foreign-owned file,
+# and cap the read so an attacker cannot balloon memory.
+FALLBACK_DIR = Path(tempfile.gettempdir()) / f"ci-watch-failures-{os.getuid()}"
+
+READ_CAP = 65536   # bytes; a marker larger than this is a plant, not a real marker
+
+
+def _read_marker_bytes(path):
+    """Read a marker's bytes SAFELY, or return None if it is not a trustworthy
+    regular file. Opens with O_NOFOLLOW (a symlink final component -> OSError) and
+    O_NONBLOCK (a FIFO opens immediately instead of hanging), then fstats the fd to
+    require a regular file owned by us, and caps the read at READ_CAP. Any OSError
+    propagates to the caller, which warns and leaves the file in place."""
+    fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW)
+    try:
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode):
+            return None                      # FIFO / dir / device / socket
+        if info.st_uid != os.getuid():
+            return None                      # planted by another uid
+        chunk = os.read(fd, READ_CAP + 1)
+    finally:
+        os.close(fd)
+    if len(chunk) > READ_CAP:
+        return None                          # oversized -> treat as a plant
+    return chunk
 
 
 def _format_marker(marker):
@@ -66,8 +94,13 @@ def main():
     consumed = []
     for path in markers:
         try:
-            marker = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError, ValueError):
+            raw = _read_marker_bytes(path)
+            if raw is None:
+                notes.append(f"[ci-watch] WARNING: unsafe marker {path.name} (symlink / non-regular "
+                             f"/ foreign / oversized) — skipped, left in place; inspect {path.parent}.")
+                continue
+            marker = json.loads(raw.decode("utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError, ValueError):
             notes.append(f"[ci-watch] WARNING: unreadable marker {path.name} — left in place; "
                          f"inspect {path.parent}.")
             continue

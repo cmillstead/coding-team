@@ -33,7 +33,11 @@ from pathlib import Path
 HOME = Path(os.path.expanduser("~"))
 CI_WATCH_DIR = HOME / ".claude" / "ci-watch"
 FAILURES_DIR = CI_WATCH_DIR / "failures"
-FALLBACK_DIR = Path(tempfile.gettempdir()) / "ci-watch-failures"
+# uid-scoped fallback under the temp root: a shared world-writable /tmp path read
+# in-process every prompt is a plant target (FIFO hang / symlink / poisoned marker),
+# so the dir name carries the uid and is created 0o700 (owner-only). The inject
+# read side additionally rejects symlinks/non-regular/foreign/oversized files.
+FALLBACK_DIR = Path(tempfile.gettempdir()) / f"ci-watch-failures-{os.getuid()}"
 
 POLL_INTERVAL = 15
 WATCH_CAP = 20 * 60
@@ -197,7 +201,14 @@ def _write_marker(run, nwo, branch, failed_jobs):
     targets = [FAILURES_DIR] * (1 + MARKER_WRITE_RETRIES) + [FALLBACK_DIR]
     for target in targets:
         try:
-            target.mkdir(parents=True, exist_ok=True)
+            if target == FALLBACK_DIR:
+                # The fallback lives in a shared temp root: create it owner-only and
+                # enforce 0o700 even if it pre-exists. A dir we cannot own (planted by
+                # another uid) fails the chmod -> we do NOT write into it (fail closed).
+                target.mkdir(parents=True, exist_ok=True, mode=0o700)
+                os.chmod(target, 0o700)
+            else:
+                target.mkdir(parents=True, exist_ok=True)
             tmp_path = target / (str(run_id) + ".json.tmp")
             final_path = target / (str(run_id) + ".json")
             tmp_path.write_text(payload, encoding="utf-8")
