@@ -60,6 +60,7 @@ CI_WATCH_DIR = HOME / ".claude" / "ci-watch"
 ARMED_DIR = CI_WATCH_DIR / "armed"
 WATCHER = Path(__file__).resolve().parent / "ci-watcher.py"
 STALE_LOCK_SECS = 30 * 60
+MAX_ARMED_WATCHERS = 8   # ceiling on concurrent detached watchers; refuse to arm above it
 
 # Trigger modes passed to the watcher as its 6th positional arg.
 MODE_PUSH = "push"
@@ -500,6 +501,12 @@ def _arm(repo_root, branch, target_shas, armed_at, nwo, broad, mode):
     lock = ARMED_DIR / _lock_name(nwo_arg, repo_root, shas_csv)
     if lock.exists():
         return False  # already armed for this target: idempotent no-op
+    try:
+        armed_count = len(list(ARMED_DIR.glob("*.lock")))
+    except OSError:
+        armed_count = 0
+    if armed_count >= MAX_ARMED_WATCHERS:
+        return False  # too many concurrent watchers already: do not pile on
     if not WATCHER.exists():
         return False
     try:

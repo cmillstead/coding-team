@@ -717,3 +717,16 @@ def test_inject_keeps_fresh_malformed_marker(tmp_path, capsys):
     INJECT.main()
     out = capsys.readouterr().out
     assert bad.exists() and "WARNING" in out and "3.json" in out   # fresh -> warned + retained
+
+
+# --- Fix 7: cap concurrent detached watchers -------------------------------
+
+def test_arm_caps_concurrent_watchers(tmp_path):
+    _use_armed(tmp_path)
+    _stub_watcher(tmp_path)
+    ARM.ARMED_DIR.mkdir(parents=True)
+    for i in range(ARM.MAX_ARMED_WATCHERS):
+        (ARM.ARMED_DIR / f"other-{i}.lock").write_text("{}")
+    result = ARM._arm(str(tmp_path), "x", {"e" * 40}, "t", "o/n", "0", ARM.MODE_PUSH)
+    assert result is False                                             # refused above the ceiling
+    assert len(list(ARM.ARMED_DIR.glob("*.lock"))) == ARM.MAX_ARMED_WATCHERS   # no new lock/spawn
