@@ -382,3 +382,58 @@ def test_disable_escape_hatch(run_hook, make_event):
 ])
 def test_classify_trigger(cmd, expected):
     assert ARM._classify_trigger(cmd) == expected
+
+
+# --------------------------------------------------------------------------
+# Task 7: push resolution (every source SHA, real remote, safe-broad fallback)
+# --------------------------------------------------------------------------
+
+def test_pushed_source_shas(tmp_path):
+    repo, sha = divergent_repo(tmp_path)
+    HEAD, MAIN, V1 = sha("HEAD"), sha("main"), sha("v1")
+    assert HEAD != MAIN
+
+    def f(c):
+        return ARM._pushed_source_shas(str(repo), c)
+
+    assert f("git push") == {HEAD}
+    assert f("git push origin main") == {MAIN}
+    assert f("git push --repo=origin main") == {MAIN}
+    assert f("git push origin main feat/x") == {MAIN, HEAD}
+    assert f("git push --tags") == {V1}
+    assert f("git push --all") == {HEAD, MAIN}
+    assert f("git push --mirror") == {HEAD, MAIN, V1}
+    assert f("gh pr create --fill") == set()
+
+
+def test_is_ambiguous_push(tmp_path):
+    f = ARM._is_ambiguous_push
+    assert f("git push origin main") is False and f("git push") is False
+    assert f("git push --branches") is True
+    assert f("git push origin 'refs/heads/*:refs/heads/*'") is True
+    assert f("git push origin :") is True
+
+
+def test_push_remote_nwo_non_origin(tmp_path):  # A-2
+    repo, _ = init_repo(tmp_path, origin="git@github.com:client/api.git")
+    subprocess.run(["git", "-C", str(repo), "remote", "add", "upstream",
+                    "https://github.com/upstream-org/api.git"], check=True)
+
+    def f(c):
+        return ARM._push_remote_nwo(str(repo), c)
+
+    assert f("git push") == "client/api"
+    assert f("git push upstream main") == "upstream-org/api"
+    assert f("git push git@github.com:other/repo.git main") == "other/repo"
+
+
+def test_resolve_target_push_pr_create_and_ambiguous(tmp_path):
+    repo, sha = divergent_repo(tmp_path)
+    os.chdir(repo)
+    stub_gh(tmp_path / "bin")   # no gh needed for push
+    r1 = ARM._resolve_target("git push origin main feat/x", ARM.MODE_PUSH)
+    assert r1 and r1[2] == {sha("main"), sha("HEAD")} and r1[5] == "0"   # (…, broad="0")
+    r2 = ARM._resolve_target("gh pr create --fill", ARM.MODE_PUSH)       # R3-2 reachable
+    assert r2 and r2[2] == {sha("HEAD")}
+    r3 = ARM._resolve_target("git push --branches", ARM.MODE_PUSH)       # safe-broad
+    assert r3 and r3[5] == "1" and sha("HEAD") in r3[2]                  # broad; HEAD anchored

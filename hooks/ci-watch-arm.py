@@ -216,18 +216,147 @@ def _pr_base_branch(repo_root, nwo, pr_number):
     return None
 
 
+_PUSH_VALUE_OPTS = frozenset({"-o", "--push-option", "--receive-pack", "--exec", "--recurse-submodules"})
+_AMBIGUOUS_PUSH_FLAGS = frozenset({"--branches", "--mirror"})   # --mirror is precise-able but treat broad-safe
+
+
+def _url_to_nwo(url):
+    match = re.search(r"[:/]([^/:]+)/([^/]+?)(?:\.git)?$", url or "")
+    return f"{match.group(1)}/{match.group(2)}" if match else None
+
+
+def _sha_set(repo_root, refs):
+    out = set()
+    for ref in refs:
+        sha = _git_out(repo_root, ["rev-parse", ref])
+        if sha:
+            out.add(sha)
+    return out
+
+
+def _local_refs(repo_root, prefix):
+    listing = _git_out(repo_root, ["for-each-ref", prefix, "--format=%(objectname)"])
+    return [line for line in listing.split() if line] if listing else []
+
+
+def _push_args(command):
+    """(remote, refspecs, all_flag, tags_flag, mirror_flag) for the push invocation,
+    or None if there is no push subcommand. --repo overrides the positional remote."""
+    if git_invocations is None:
+        return None
+    try:
+        invocations = git_invocations(command)
+    except Exception:  # noqa: BLE001
+        return None
+    for subcommand, args in invocations:
+        if subcommand != "push":
+            continue
+        remote = None
+        repo_opt = all_flag = tags_flag = mirror_flag = False
+        positionals = []
+        cursor = 0
+        while cursor < len(args):
+            token = args[cursor]
+            if token == "--all":
+                all_flag = True
+                cursor += 1
+                continue
+            if token == "--tags":
+                tags_flag = True
+                cursor += 1
+                continue
+            if token == "--mirror":
+                mirror_flag = True
+                cursor += 1
+                continue
+            if token == "--repo":
+                repo_opt = True
+                remote = args[cursor + 1] if cursor + 1 < len(args) else None
+                cursor += 2
+                continue
+            if token.startswith("--repo="):
+                repo_opt = True
+                remote = token.split("=", 1)[1]
+                cursor += 1
+                continue
+            if token in _PUSH_VALUE_OPTS:
+                cursor += 2
+                continue
+            if token.startswith("-"):
+                cursor += 1
+                continue
+            positionals.append(token)
+            cursor += 1
+        refspecs = positionals if repo_opt else positionals[1:]
+        if remote is None and positionals and not repo_opt:
+            remote = positionals[0]
+        return remote, refspecs, all_flag, tags_flag, mirror_flag
+    return None
+
+
+def _pushed_source_shas(repo_root, command):
+    """Local commit SHAs a `git push` sends. Empty when there is no push subcommand
+    (e.g. gh pr create) so the caller can fall back to HEAD."""
+    parsed = _push_args(command)
+    if parsed is None:
+        return set()
+    _remote, refspecs, all_flag, tags_flag, mirror_flag = parsed
+    refs = []
+    if mirror_flag:
+        refs += _local_refs(repo_root, "refs/")
+    if all_flag:
+        refs += _local_refs(repo_root, "refs/heads")
+    if tags_flag:
+        refs += _local_refs(repo_root, "refs/tags")
+    for refspec in refspecs:
+        src = refspec.lstrip("+").split(":")[0]
+        if src:
+            refs.append(src)
+    if not refs:
+        refs = ["HEAD"]
+    return _sha_set(repo_root, refs)
+
+
+def _is_ambiguous_push(command):
+    """True when the push form cannot be precisely enumerated -> safe-broad watch."""
+    parsed = _push_args(command)
+    if parsed is None:
+        return False
+    _remote, refspecs, _all, _tags, _mirror = parsed
+    if git_invocations is None:
+        return True
+    try:
+        for _sub, args in git_invocations(command):
+            if any(a in _AMBIGUOUS_PUSH_FLAGS for a in args):
+                return True
+    except Exception:  # noqa: BLE001
+        return True
+    for refspec in refspecs:
+        if refspec in (":", "::") or "*" in refspec:
+            return True
+    return False
+
+
+def _push_remote_nwo(repo_root, command):
+    """owner/name of the ACTUAL pushed remote (A-2): the --repo value, else the first
+    positional, else origin; a URL is parsed directly, a name resolved via git remote."""
+    parsed = _push_args(command)
+    remote = parsed[0] if parsed else None
+    if not remote:
+        return _nwo(repo_root)
+    if ":" in remote or remote.endswith(".git") or remote.count("/") >= 2:
+        return _url_to_nwo(remote) or _nwo(repo_root)
+    url = _git_out(repo_root, ["remote", "get-url", remote])
+    return (_url_to_nwo(url) if url else None) or _nwo(repo_root)
+
+
 def _resolve_target(command, mode):
     """Resolve what the watcher must attach to for command under mode.
 
-    Returns (repo_root, branch, head_sha, armed_at) or None.
-
-    For MODE_PUSH the branch is the current local branch and head_sha is the
-    local HEAD sha (the watcher matches by headSha). armed_at is "-" (unused).
-
-    For MODE_MERGE the branch is the merge BASE branch (PR baseRefName if a PR
-    number is present, else the repo default branch), head_sha is "-" (the local
-    sha is stale and MUST NOT be used), and armed_at is the current UTC ISO-8601
-    timestamp (the watcher selects the newest run created after it).
+    Returns the 6-tuple (repo_root, branch, target_shas, armed_at, nwo, broad) or
+    None. target_shas is a set of the pushed/merged SHAs (HEAD in broad mode); nwo
+    is the repo the runs live in; broad is "1"/"0". The MODE_MERGE branch is
+    completed in Task 8.
     """
     if resolve_command_target_dir is None or resolve_repo_root is None:
         target_dir = os.getcwd()
@@ -237,6 +366,8 @@ def _resolve_target(command, mode):
         repo_root = resolve_repo_root(target_dir) or _repo_root_fallback(target_dir)
     if not repo_root:
         return None
+
+    armed_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
     if mode == MODE_MERGE:
         nwo = _nwo(repo_root)
@@ -248,15 +379,20 @@ def _resolve_target(command, mode):
             base = _default_branch(repo_root, nwo)
         if not base:
             return None
-        armed_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
         return repo_root, base, "-", armed_at
 
-    # MODE_PUSH: local HEAD sha + current branch (unchanged, correct path).
-    branch = _git_out(repo_root, ["branch", "--show-current"])
-    head_sha = _git_out(repo_root, ["rev-parse", "HEAD"])
-    if not branch or not head_sha:
+    # MODE_PUSH (git push OR gh pr create). nwo = the ACTUAL pushed remote
+    # (Task 8 layers a gh -R override on top). Ambiguous forms -> safe-broad.
+    nwo = _push_remote_nwo(repo_root, command)
+    head = _sha_set(repo_root, ["HEAD"])
+    if _is_ambiguous_push(command):
+        branch = _git_out(repo_root, ["branch", "--show-current"]) or "-"
+        return repo_root, branch, head, armed_at, nwo, "1"
+    shas = _pushed_source_shas(repo_root, command) or head    # gh pr create -> HEAD (R3-2)
+    if not shas:
         return None
-    return repo_root, branch, head_sha, "-"
+    branch = _git_out(repo_root, ["branch", "--show-current"]) or "-"
+    return repo_root, branch, shas, armed_at, nwo, "0"
 
 
 def _repo_root_fallback(directory):
