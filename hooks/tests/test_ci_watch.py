@@ -366,3 +366,19 @@ def test_disable_escape_hatch(run_hook, make_event):
     os.environ["CT_CI_WATCH_DISABLE"] = "1"
     assert run_hook("ci-watch-arm.py", make_event("Bash", command="git push")).stdout.strip() == ""
     assert run_hook("ci-watch-inject.py", {"tool_name": "UserPromptSubmit"}).stdout.strip() == ""
+
+
+# --------------------------------------------------------------------------
+# Task 6: classifier via the shared tokenizer (glued separators + option values)
+# --------------------------------------------------------------------------
+
+@pytest.mark.parametrize("cmd,expected", [
+    ("git push", "push"), ("git -C /repo push", "push"), ("git --exec-path=/x push", "push"),
+    ("gh pr create --fill", "pr-create"), ("gh pr merge 42 --squash", "pr-merge"),
+    ("gh -R o/n pr merge 42", "pr-merge"),                # -R value before subcommand
+    ("gh pr merge 42&&echo", "pr-merge"),                 # A-3 glued separator
+    ("gh pr create&&git push", "pr-create"),
+    ("git commit -m x", None), ("gh pr view 42", None), ("ls", None),
+])
+def test_classify_trigger(cmd, expected):
+    assert ARM._classify_trigger(cmd) == expected

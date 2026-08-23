@@ -48,10 +48,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 try:
-    from _lib.git import resolve_command_target_dir, resolve_repo_root
+    from _lib.git import (git_invocations, has_git_subcommand,
+                          resolve_command_target_dir, resolve_repo_root, _split_glued_separators)
 except Exception:  # noqa: BLE001 - handler must never crash the dispatcher
-    resolve_command_target_dir = None
-    resolve_repo_root = None
+    git_invocations = has_git_subcommand = resolve_command_target_dir = resolve_repo_root = None
+    _split_glued_separators = None
 
 HOME = Path(os.path.expanduser("~"))
 CI_WATCH_DIR = HOME / ".claude" / "ci-watch"
@@ -63,28 +64,66 @@ STALE_LOCK_SECS = 30 * 60
 MODE_PUSH = "push"
 MODE_MERGE = "merge"
 
+_SHELL_SEPARATORS = frozenset({"&&", "||", ";", "|", "&"})
+_GH_VALUE_OPTS = frozenset({"-R", "--repo", "-b", "--body", "-F", "--body-file",
+                            "--match-head-commit", "-t", "--subject", "-A", "--author-email"})
+
+
+def _gh_tokens(command):
+    """Tokenize a command for the gh path, normalizing GLUED shell separators via the
+    same routine the git parser uses (`gh pr merge 42&&echo` -> ...'42','&&','echo')."""
+    normalized = _split_glued_separators(command) if _split_glued_separators else command
+    try:
+        return shlex.split(normalized)
+    except ValueError:
+        return normalized.split()
+
+
+def _gh_segment(tokens, gh_index):
+    segment = []
+    for following in tokens[gh_index + 1:]:
+        if following in _SHELL_SEPARATORS:
+            break
+        segment.append(following)
+    return segment
+
+
+def _gh_positionals(segment):
+    positionals = []
+    cursor = 0
+    while cursor < len(segment):
+        token = segment[cursor]
+        if token in _GH_VALUE_OPTS:
+            cursor += 2
+            continue
+        if token.startswith("-"):
+            cursor += 1
+            continue
+        positionals.append(token)
+        cursor += 1
+    return positionals
+
 
 def _classify_trigger(command):
     """Classify a CI-triggering command as push, pr-create, or pr-merge.
 
     Returns one of "push", "pr-create", "pr-merge", or None (not CI-triggering).
-    A push and a pr-create both take the headSha-match path (MODE_PUSH); only a
-    pr-merge takes the timestamp/base-branch path (MODE_MERGE).
+    The gh path is glued-separator-aware and skips option VALUES (so `-R o/n`
+    before the subcommand doesn't shift the positional grammar); push detection
+    reuses the shared git parser. A push and a pr-create both take the headSha
+    path (MODE_PUSH); only a pr-merge takes the merge path (MODE_MERGE).
     """
-    try:
-        tokens = shlex.split(command)
-    except ValueError:
-        tokens = command.split()
-    for i, tok in enumerate(tokens):
-        base = tok.rsplit("/", 1)[-1]
-        rest = tokens[i + 1:]
-        nonflag = [t for t in rest if not t.startswith("-")]
-        if base == "git" and nonflag[:1] == ["push"]:
-            return "push"
-        if base == "gh" and nonflag[:2] == ["pr", "create"]:
+    tokens = _gh_tokens(command)
+    for index, tok in enumerate(tokens):
+        if tok.rsplit("/", 1)[-1] != "gh":
+            continue
+        positionals = _gh_positionals(_gh_segment(tokens, index))
+        if positionals[:2] == ["pr", "create"]:
             return "pr-create"
-        if base == "gh" and nonflag[:2] == ["pr", "merge"]:
+        if positionals[:2] == ["pr", "merge"]:
             return "pr-merge"
+    if has_git_subcommand is not None and has_git_subcommand(command, "push"):
+        return "push"
     return None
 
 
