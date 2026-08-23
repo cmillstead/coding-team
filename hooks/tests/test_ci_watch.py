@@ -304,7 +304,7 @@ def test_main_all_green_writes_no_marker(tmp_path):
 
 
 def test_main_no_gh_exits_clean(tmp_path):
-    _use_dirs(tmp_path)
+    d = _use_dirs(tmp_path)
     WATCHER.POLL_INTERVAL = 0
     WATCHER.WATCH_CAP = 0.2
     WATCHER.GRACE_AFTER_TERMINAL = 0
@@ -312,6 +312,7 @@ def test_main_no_gh_exits_clean(tmp_path):
     empty.mkdir()
     os.environ["PATH"] = str(empty)
     run_watcher_main(tmp_path, ["beef"])   # returns (bounded), no raise
+    assert list(d.glob("*.json")) == []    # gh absent -> no run observed -> no marker
 
 
 # --------------------------------------------------------------------------
@@ -802,3 +803,19 @@ def test_write_marker_records_broad_flag(tmp_path):
     assert WATCHER._write_marker({"id": 3, "conclusion": "failure"}, "o/n", "m", [], broad=True) is True
     marker = json.loads((WATCHER.FAILURES_DIR / "3.json").read_text())
     assert marker["broad"] is True
+
+
+# --- Test gap 12: producer -> consumer marker schema, end to end -----------
+
+def test_write_marker_then_inject_end_to_end(tmp_path, capsys):
+    _use_dirs(tmp_path)   # points BOTH the watcher and inject at the same temp dirs
+    assert WATCHER._write_marker(
+        {"id": 77, "name": "CI", "conclusion": "failure"}, "o/n", "main", ["pytest"]) is True
+    marker_path = WATCHER.FAILURES_DIR / "77.json"
+    assert marker_path.exists()
+    INJECT.main()
+    out = capsys.readouterr().out
+    assert "o/n on main" in out                    # repo + branch surfaced
+    assert "pytest" in out                         # failed job surfaced
+    assert "actions/runs/77" in out                # run_url schema (producer -> consumer)
+    assert not marker_path.exists()                # consumed after surfacing
