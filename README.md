@@ -323,10 +323,12 @@ Shared utilities live in `hooks/_lib/`: `event.py`, `git.py`, `graduated_checks.
 
 ### Post-push CI watcher (ci-watch)
 
-After a `git push`, `gh pr create`, or `gh pr merge`, `ci-watch-arm.py` resolves the commit
-SHA(s) pushed (every refspec source, `--all`/`--tags`/`--mirror`/`--repo=`), the current HEAD
-(`gh pr create`), or the PR merge commit (`gh pr merge`), plus the repo the runs live in (the
-pushed remote, or `gh -R`), and fire-and-forgets a detached `ci-watcher.py`.
+After a `git push`, `gh pr create`, or `gh pr merge`, `ci-watch-arm.py` — using LOCAL git only,
+so it returns in well under 100ms and never stalls the turn — resolves the commit SHA(s) pushed
+(every refspec source, `--all`/`--tags`/`--mirror`/`--repo=`), the current HEAD (`gh pr create`),
+or, for a `gh pr merge`, just the PR selector + repo, plus the repo the runs live in (the pushed
+remote, or `gh -R`), and fire-and-forgets a detached `ci-watcher.py`. Every `gh` (network) call —
+including resolving the PR merge-commit SHA — happens in that detached watcher, never in arm.
 
 **Bounded contract.** Within a ~20-minute window the watcher watches the Actions runs it can see
 for those SHAs and alerts on GitHub's **run conclusion** (no workflow-YAML parsing). It never
