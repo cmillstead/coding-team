@@ -108,18 +108,29 @@ def _gh_positionals(segment):
     return positionals
 
 
+def _is_gh_head(tokens, index):
+    """True iff tokens[index] is a `gh` token in COMMAND-HEAD position — the start
+    of a shell segment (index 0 or right after a shell separator). Mirrors the git
+    parser's head detection so `echo gh pr merge 42` (gh in argument position) is
+    never treated as a real gh command."""
+    if tokens[index].rsplit("/", 1)[-1] != "gh":
+        return False
+    return index == 0 or tokens[index - 1] in _SHELL_SEPARATORS
+
+
 def _classify_trigger(command):
     """Classify a CI-triggering command as push, pr-create, or pr-merge.
 
     Returns one of "push", "pr-create", "pr-merge", or None (not CI-triggering).
-    The gh path is glued-separator-aware and skips option VALUES (so `-R o/n`
-    before the subcommand doesn't shift the positional grammar); push detection
-    reuses the shared git parser. A push and a pr-create both take the headSha
-    path (MODE_PUSH); only a pr-merge takes the merge path (MODE_MERGE).
+    The gh path requires `gh` to be the command HEAD of a shell segment, is
+    glued-separator-aware, and skips option VALUES (so `-R o/n` before the
+    subcommand doesn't shift the positional grammar); push detection reuses the
+    shared git parser. A push and a pr-create both take the headSha path
+    (MODE_PUSH); only a pr-merge takes the merge path (MODE_MERGE).
     """
     tokens = _gh_tokens(command)
-    for index, tok in enumerate(tokens):
-        if tok.rsplit("/", 1)[-1] != "gh":
+    for index, _tok in enumerate(tokens):
+        if not _is_gh_head(tokens, index):
             continue
         positionals = _gh_positionals(_gh_segment(tokens, index))
         if positionals[:2] == ["pr", "create"]:
@@ -134,10 +145,11 @@ def _classify_trigger(command):
 def _pr_selector(command):
     """The PR selector argument of a `gh pr merge <selector>` command (a number,
     URL, or branch), or None when the merge targets the current branch's PR. Uses
-    the glued-separator-aware tokenizer and skips gh option VALUES."""
+    the glued-separator-aware tokenizer, requires `gh` command-head position, and
+    skips gh option VALUES."""
     tokens = _gh_tokens(command)
-    for index, tok in enumerate(tokens):
-        if tok.rsplit("/", 1)[-1] != "gh":
+    for index, _tok in enumerate(tokens):
+        if not _is_gh_head(tokens, index):
             continue
         positionals = _gh_positionals(_gh_segment(tokens, index))
         if positionals[:2] == ["pr", "merge"]:
@@ -146,10 +158,10 @@ def _pr_selector(command):
 
 
 def _gh_repo_override(command):
-    """The `-R`/`--repo` owner/name override on a gh command, or None."""
+    """The `-R`/`--repo` owner/name override on a gh command (command-head), or None."""
     tokens = _gh_tokens(command)
-    for index, tok in enumerate(tokens):
-        if tok.rsplit("/", 1)[-1] != "gh":
+    for index, _tok in enumerate(tokens):
+        if not _is_gh_head(tokens, index):
             continue
         segment = _gh_segment(tokens, index)
         cursor = 0

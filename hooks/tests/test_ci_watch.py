@@ -819,3 +819,25 @@ def test_write_marker_then_inject_end_to_end(tmp_path, capsys):
     assert "pytest" in out                         # failed job surfaced
     assert "actions/runs/77" in out                # run_url schema (producer -> consumer)
     assert not marker_path.exists()                # consumed after surfacing
+
+
+# ==========================================================================
+# Codex post-exec round: arm command/refspec parsing + locking
+# ==========================================================================
+
+# --- Finding 4: gh must be the command HEAD of a shell segment -------------
+
+@pytest.mark.parametrize("cmd,expected", [
+    ("echo gh pr merge 42", None),          # gh in argument position -> not a real merge
+    ("echo gh pr create", None),
+    ("gh pr merge 42", "pr-merge"),         # real command head
+    ("gh pr create --fill", "pr-create"),
+    ("false && gh pr merge 42", "pr-merge"),  # head after a separator
+])
+def test_classify_trigger_gh_must_be_command_head(cmd, expected):
+    assert ARM._classify_trigger(cmd) == expected
+
+
+def test_pr_selector_ignores_non_head_gh():
+    assert ARM._pr_selector("echo gh pr merge 42") is None
+    assert ARM._pr_selector("gh pr merge 42") == "42"
