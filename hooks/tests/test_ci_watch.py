@@ -684,3 +684,13 @@ def test_inject_one_poisoned_marker_does_not_suppress_others(tmp_path, capsys):
     assert not (INJECT.FAILURES_DIR / "1.json").exists()   # ...and is consumed
     assert (INJECT.FAILURES_DIR / "2.json").exists()       # poisoned one retained
     assert "WARNING" in out and "2.json" in out            # ...and warned
+
+
+# --- Fix 5: watcher marker filename from a coerced int run id --------------
+
+def test_write_marker_skips_non_int_run_id(tmp_path):
+    _use_dirs(tmp_path)
+    WATCHER.FAILURES_DIR.mkdir(parents=True, exist_ok=True)
+    result = WATCHER._write_marker({"id": "7; rm -rf", "conclusion": "failure"}, "o/n", "m", [])
+    assert result is False                                      # skipped (unsafe id)
+    assert list(WATCHER.FAILURES_DIR.glob("*.json")) == []     # no file written

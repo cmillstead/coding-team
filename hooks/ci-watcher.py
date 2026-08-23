@@ -189,7 +189,10 @@ def _write_marker(run, nwo, branch, failed_jobs):
     system-temp fallback dir; atomic within each (temp + os.replace). Returns True if
     EITHER succeeds; False only if BOTH fail (caller then fires a last-resort notify).
     A detected failure is never silently lost."""
-    run_id = run.get("id")
+    try:
+        run_id = int(run.get("id"))   # coerce: the filename is str(run_id) — never a
+    except (TypeError, ValueError):   # traversal / injection from an attacker-shaped id.
+        return False
     marker = {
         "run_id": run_id, "repo": nwo or "(cwd repo)", "branch": branch,
         "workflow": run.get("name", ""), "conclusion": run.get("conclusion", ""),
