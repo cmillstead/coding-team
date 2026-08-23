@@ -1113,7 +1113,7 @@ def _extract_exit_code(tool_result) -> int | None:
 def _handle_post_tool_use(ev: dict) -> None:
     """PostToolUse: capture exit codes from verification commands."""
     command = event.get_command(ev)
-    if not command or not is_verification(command):
+    if not command or not is_verification(command) or is_commit_or_push(command):
         return
 
     tool_result = ev.get("tool_result", "")
@@ -1183,7 +1183,7 @@ def main():
     # Wrapped fail-open: if state.py or /tmp raises any exception (restricted sandbox,
     # unexpected exception type), swallow it and continue — verification tracking is
     # best-effort; a crash here must never deny the command being intercepted.
-    if is_verification(command):
+    if is_verification(command) and not is_commit_or_push(command):
         try:
             state_file = state.get_state_file("claude-verification")
             st = state.load_state(state_file, {"verifications": [], "last_updated": time.time()})
@@ -1299,11 +1299,11 @@ def main():
                   if time.time() - v["time"] < 1800]
 
         has_tests = any(
-            re.search(r'test|jest|vitest|pytest|cargo\s+test|go\s+test|bash\s+-n', v["command"])
+            re.search(r'test|jest|vitest|pytest|cargo\s+test|go\s+test|bash\s+-n|make\s+(?:check|test)', v["command"])
             for v in recent
         )
         has_lint = any(
-            re.search(r'lint|eslint|tsc|mypy|ruff|clippy|bash\s+-n|shellcheck', v["command"])
+            re.search(r'lint|eslint|tsc|mypy|ruff|clippy|bash\s+-n|shellcheck|make\s+(?:check|lint)', v["command"])
             for v in recent
         )
 

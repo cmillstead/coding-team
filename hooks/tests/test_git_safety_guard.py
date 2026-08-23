@@ -3419,3 +3419,66 @@ class TestHeadAnchoredMentionsAllowed:
             assert "ambiguous working directory" not in reason
             assert "verification" not in reason
 
+
+
+class TestMakeCheckSatisfiesChecklist:
+    """Defect 1 (TRK-176): `make check` IS recorded by VERIFICATION_PATTERNS,
+    but the checklist's has_tests/has_lint regexes never matched the literal
+    string 'make check' (it contains neither 'test' nor a lint token), so a repo
+    whose canonical verification is `make check` was falsely blocked. The fix adds
+    `make` as a SUBSTRING token (like the existing pytest/ruff tokens) and excludes
+    commit/push from being recorded, so a commit's own message cannot self-satisfy
+    its checklist."""
+
+    def test_make_check_satisfies_checklist(self, run_hook, make_event, tmp_state_dir, tmp_path):
+        """(a) A genuine recorded `make check` run satisfies BOTH has_tests and
+        has_lint -> the commit is silently ALLOWED."""
+        session_hash = hashlib.sha256(tmp_state_dir.encode()).hexdigest()[:12]
+        state_file = Path(f"/tmp/claude-verification-{session_hash}.json")
+        now = time.time()
+        state_file.write_text(json.dumps({
+            "verifications": [
+                {"command": "make check", "time": now, "exit_code": None},
+            ],
+            "last_updated": now,
+        }))
+        _init_feature_repo(tmp_path)
+        old_cwd = os.getcwd()
+        os.chdir(tmp_path)
+        try:
+            event = make_event("Bash", command='git commit -m "feat: add feature"')
+            result = run_hook("git-safety-guard.py", event)
+            assert result.returncode == 0, f"hook must exit 0; stderr={result.stderr!r}"
+            assert result.stdout.strip() == "", (
+                "make check should satisfy BOTH has_tests and has_lint -> silent allow; "
+                f"got: {result.stdout!r}"
+            )
+        finally:
+            os.chdir(old_cwd)
+
+    def test_commit_message_make_check_does_not_self_satisfy(self, run_hook, make_event, tmp_state_dir, tmp_path):
+        """(d) SCOPE-REGRESSION GUARD (GREEN before AND after the fix, like (c)):
+        the commit command's OWN message contains 'make check'. PRE-fix it blocks
+        because `make check` is not recognized by the checklist at all; POST-fix it
+        blocks because commit/push are excluded from being recorded as
+        verifications (is_commit_or_push at BOTH recording gates). Because the two
+        Defect-1 changes land as ONE atomic edit, the live hook never passes
+        through a state where `make` is recognized but commit/push is not yet
+        excluded -- so this commit is NEVER able to self-satisfy its own checklist.
+        Exempt from the RED-first rule, exactly like the precedent at ~957-962."""
+        session_hash = hashlib.sha256(tmp_state_dir.encode()).hexdigest()[:12]
+        state_file = Path(f"/tmp/claude-verification-{session_hash}.json")
+        if state_file.exists():
+            state_file.unlink()
+        _init_feature_repo(tmp_path)
+        old_cwd = os.getcwd()
+        os.chdir(tmp_path)
+        try:
+            event = make_event("Bash", command='git commit -m "fix: recognize make check"')
+            result = run_hook("git-safety-guard.py", event)
+            assert result.parsed is not None, f"expected block JSON, got: {result.stdout!r}"
+            assert result.parsed["decision"] == "block"
+            assert "NOT run" in result.parsed["reason"] or "MUST run" in result.parsed["reason"]
+        finally:
+            os.chdir(old_cwd)
+
