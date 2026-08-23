@@ -437,3 +437,50 @@ def test_resolve_target_push_pr_create_and_ambiguous(tmp_path):
     assert r2 and r2[2] == {sha("HEAD")}
     r3 = ARM._resolve_target("git push --branches", ARM.MODE_PUSH)       # safe-broad
     assert r3 and r3[5] == "1" and sha("HEAD") in r3[2]                  # broad; HEAD anchored
+
+
+# --------------------------------------------------------------------------
+# Task 8: merge selector/SHA, cross-repo lock, repo override, arm contract
+# --------------------------------------------------------------------------
+
+@pytest.mark.parametrize("cmd,expected", [
+    ("gh pr merge 42 --squash", "42"),
+    ("gh pr merge https://github.com/o/n/pull/9", "https://github.com/o/n/pull/9"),
+    ("gh pr merge my-branch", "my-branch"), ("gh pr merge --match-head-commit 1234567", None),
+    ("gh -R o/n pr merge 42", "42"), ("gh pr merge 42&&echo", "42"),   # A-3 glued
+])
+def test_pr_selector(cmd, expected):
+    assert ARM._pr_selector(cmd) == expected
+
+
+@pytest.mark.parametrize("cmd,expected", [
+    ("gh -R o/n pr merge 42", "o/n"), ("gh pr merge 42 -R other/repo", "other/repo"),
+    ("gh pr merge 42", None),
+])
+def test_gh_repo_override(cmd, expected):
+    assert ARM._gh_repo_override(cmd) == expected
+
+
+def test_lock_name_includes_repo_identity(tmp_path):  # A-1
+    shas = ",".join(sorted(["a" * 40, "b" * 40]))
+    n1 = ARM._lock_name("client/api", "/work/client/api", shas)
+    n2 = ARM._lock_name("fork/api", "/work/fork/api", shas)
+    assert n1 != n2                                     # same SHA set, different repo -> distinct
+    # and distinct sha-sets in one repo still differ:
+    assert ARM._lock_name("o/n", "/r", "a" + ",b") != ARM._lock_name("o/n", "/r", "a" + ",c")
+
+
+def test_resolve_target_merge(tmp_path):
+    repo, _ = init_repo(tmp_path)
+    os.chdir(repo)
+    stub_gh(tmp_path / "bin", prview=json.dumps({"mergeCommit": {"oid": "a" * 40}, "baseRefName": "main"}))
+    got = ARM._resolve_target("gh pr merge 42 -R other/repo --squash", ARM.MODE_MERGE)
+    assert got and got[2] == {"a" * 40} and got[1] == "main" and got[4] == "other/repo" and got[5] == "0"
+
+
+def test_resolve_target_merge_broad_when_no_commit(tmp_path):  # safe-broad, incl --auto
+    repo, _ = init_repo(tmp_path)
+    os.chdir(repo)
+    stub_gh(tmp_path / "bin", prview=json.dumps({"mergeCommit": None}))
+    got = ARM._resolve_target("gh pr merge 42 --auto", ARM.MODE_MERGE)
+    assert got and got[5] == "1"                        # broad watch (sees nothing in-window -> exits)

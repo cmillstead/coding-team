@@ -37,6 +37,7 @@ Idempotency + cleanup:
 Escape hatch: CT_CI_WATCH_DISABLE=1 -> no-op.
 """
 
+import hashlib
 import json
 import os
 import re
@@ -127,25 +128,60 @@ def _classify_trigger(command):
     return None
 
 
-def _pr_number(command):
-    """Extract the PR number argument from a gh pr merge <n> command, or None.
+def _pr_selector(command):
+    """The PR selector argument of a `gh pr merge <selector>` command (a number,
+    URL, or branch), or None when the merge targets the current branch's PR. Uses
+    the glued-separator-aware tokenizer and skips gh option VALUES."""
+    tokens = _gh_tokens(command)
+    for index, tok in enumerate(tokens):
+        if tok.rsplit("/", 1)[-1] != "gh":
+            continue
+        positionals = _gh_positionals(_gh_segment(tokens, index))
+        if positionals[:2] == ["pr", "merge"]:
+            return positionals[2] if len(positionals) > 2 else None
+    return None
 
-    The first non-flag token after the pr merge subcommand that is all digits is
-    the PR number. A merge with no number (current-branch PR) yields None.
-    """
+
+def _gh_repo_override(command):
+    """The `-R`/`--repo` owner/name override on a gh command, or None."""
+    tokens = _gh_tokens(command)
+    for index, tok in enumerate(tokens):
+        if tok.rsplit("/", 1)[-1] != "gh":
+            continue
+        segment = _gh_segment(tokens, index)
+        cursor = 0
+        while cursor < len(segment):
+            token = segment[cursor]
+            if token in ("-R", "--repo"):
+                return segment[cursor + 1] if cursor + 1 < len(segment) else None
+            if token.startswith("--repo="):
+                return token.split("=", 1)[1]
+            cursor += 1
+    return None
+
+
+def _merge_commit_sha(repo_root, nwo, selector):
+    """The merge commit SHA of the PR via `gh pr view <selector> --json mergeCommit`,
+    or None (not yet merged / --auto / gh error)."""
+    cmd = ["gh", "pr", "view"]
+    if selector:
+        cmd.append(str(selector))
+    cmd += ["--json", "mergeCommit"]
+    if nwo:
+        cmd += ["--repo", nwo]
     try:
-        tokens = shlex.split(command)
-    except ValueError:
-        tokens = command.split()
-    for i, tok in enumerate(tokens):
-        base = tok.rsplit("/", 1)[-1]
-        rest = tokens[i + 1:]
-        nonflag = [t for t in rest if not t.startswith("-")]
-        if base == "gh" and nonflag[:2] == ["pr", "merge"]:
-            for t in nonflag[2:]:
-                if t.isdigit():
-                    return t
-            return None
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=6, cwd=repo_root)
+    except (subprocess.SubprocessError, OSError):
+        return None
+    if result.returncode != 0:
+        return None
+    try:
+        data = json.loads(result.stdout)
+    except (json.JSONDecodeError, ValueError):
+        return None
+    commit = data.get("mergeCommit") if isinstance(data, dict) else None
+    if isinstance(commit, dict) and isinstance(commit.get("oid"), str) and commit["oid"]:
+        return commit["oid"]
     return None
 
 
@@ -355,8 +391,7 @@ def _resolve_target(command, mode):
 
     Returns the 6-tuple (repo_root, branch, target_shas, armed_at, nwo, broad) or
     None. target_shas is a set of the pushed/merged SHAs (HEAD in broad mode); nwo
-    is the repo the runs live in; broad is "1"/"0". The MODE_MERGE branch is
-    completed in Task 8.
+    is the repo the runs live in; broad is "1"/"0".
     """
     if resolve_command_target_dir is None or resolve_repo_root is None:
         target_dir = os.getcwd()
@@ -370,20 +405,22 @@ def _resolve_target(command, mode):
     armed_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
     if mode == MODE_MERGE:
-        nwo = _nwo(repo_root)
-        base = None
-        pr_number = _pr_number(command)
-        if pr_number is not None:
-            base = _pr_base_branch(repo_root, nwo, pr_number)
-        if not base:
-            base = _default_branch(repo_root, nwo)
-        if not base:
-            return None
-        return repo_root, base, "-", armed_at
+        nwo = _gh_repo_override(command) or _nwo(repo_root)
+        selector = _pr_selector(command)
+        merge_sha = _merge_commit_sha(repo_root, nwo, selector)
+        head = _sha_set(repo_root, ["HEAD"])
+        if not merge_sha:
+            # ambiguous / --auto / not-yet-merged -> safe-broad (never nothing).
+            branch = (_pr_base_branch(repo_root, nwo, selector) if selector else None) \
+                or _default_branch(repo_root, nwo) or "-"
+            return repo_root, branch, head, armed_at, nwo, "1"
+        base = (_pr_base_branch(repo_root, nwo, selector) if selector else None) \
+            or _default_branch(repo_root, nwo) or "-"
+        return repo_root, base, {merge_sha}, armed_at, nwo, "0"
 
-    # MODE_PUSH (git push OR gh pr create). nwo = the ACTUAL pushed remote
-    # (Task 8 layers a gh -R override on top). Ambiguous forms -> safe-broad.
-    nwo = _push_remote_nwo(repo_root, command)
+    # MODE_PUSH (git push OR gh pr create). nwo = gh -R override, else the ACTUAL
+    # pushed remote. Ambiguous forms -> safe-broad.
+    nwo = _gh_repo_override(command) or _push_remote_nwo(repo_root, command)
     head = _sha_set(repo_root, ["HEAD"])
     if _is_ambiguous_push(command):
         branch = _git_out(repo_root, ["branch", "--show-current"]) or "-"
@@ -439,37 +476,36 @@ def _sweep_stale_locks():
         return
 
 
-def _lock_name(repo_root, key):
-    """Lock filename slug from the repo name and an idempotency key.
-
-    key is the HEAD sha (push/pr-create) or the arm timestamp (pr-merge). It is
-    sanitized to filesystem-safe characters and truncated so two distinct merges
-    (distinct arm timestamps) never collide on one lock.
-    """
+def _lock_name(nwo, repo_root, key):
+    """Collision-free lock filename. The digest hashes repo IDENTITY (nwo + repo_root)
+    AND the full SHA-set key, so two repos with the same SHA set never collide (A-1)."""
     slug = re.sub(r"[^A-Za-z0-9_.-]", "_", Path(repo_root).name)
-    key_slug = re.sub(r"[^A-Za-z0-9]", "", key)[:14]
-    return slug + "-" + key_slug + ".lock"
+    digest = hashlib.sha256(f"{nwo}\0{repo_root}\0{key}".encode("utf-8")).hexdigest()[:16]
+    return f"{slug}-{digest}.lock"
 
 
-def _arm(repo_root, branch, head_sha, armed_at, mode):
-    """Write the idempotency lock and spawn the detached watcher. Returns bool."""
+def _arm(repo_root, branch, target_shas, armed_at, nwo, broad, mode):
+    """Write the idempotency lock and spawn the detached watcher. Returns bool.
+
+    The lock digest keys on repo identity + the full sorted SHA set, so concurrent
+    watches on different repos (or different SHA sets) never collide. The watcher is
+    spawned with the unified 7-positional contract and removes its own lock on exit.
+    """
     try:
         ARMED_DIR.mkdir(parents=True, exist_ok=True)
     except OSError:
         return False
-    # Idempotency key: sha for push/pr-create, arm timestamp for merge (the sha
-    # is stale and shared across merges, so it cannot key a merge lock).
-    key = armed_at if mode == MODE_MERGE else head_sha
-    lock = ARMED_DIR / _lock_name(repo_root, key)
+    nwo_arg = nwo or "-"
+    shas_csv = ",".join(sorted(target_shas))
+    lock = ARMED_DIR / _lock_name(nwo_arg, repo_root, shas_csv)
     if lock.exists():
         return False  # already armed for this target: idempotent no-op
     if not WATCHER.exists():
         return False
-    nwo = _nwo(repo_root) or "-"
     try:
         lock.write_text(json.dumps({
-            "repo_root": repo_root, "branch": branch, "head_sha": head_sha,
-            "mode": mode, "armed_at": armed_at,
+            "repo_root": repo_root, "branch": branch, "target_shas": sorted(target_shas),
+            "armed_at": armed_at, "nwo": nwo_arg, "broad": broad, "mode": mode,
             "lock_written_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         }), encoding="utf-8")
     except OSError:
@@ -477,8 +513,8 @@ def _arm(repo_root, branch, head_sha, armed_at, mode):
     try:
         devnull = open(os.devnull, "wb")
         subprocess.Popen(
-            [sys.executable, str(WATCHER), repo_root, branch, head_sha,
-             str(lock), nwo, mode, armed_at],
+            [sys.executable, str(WATCHER), repo_root, branch, shas_csv, str(lock),
+             nwo_arg, armed_at, broad],
             stdin=subprocess.DEVNULL, stdout=devnull, stderr=devnull,
             start_new_session=True, cwd=repo_root,
         )
@@ -518,8 +554,8 @@ def main():
     target = _resolve_target(command, mode)
     if target is None:
         return  # not in a git repo / cannot resolve: nothing to watch
-    repo_root, branch, head_sha, armed_at = target
-    _arm(repo_root, branch, head_sha, armed_at, mode)
+    repo_root, branch, target_shas, armed_at, nwo, broad = target
+    _arm(repo_root, branch, target_shas, armed_at, nwo, broad, mode)
     # Side-effect-only handler: emit no decision, never block the push.
 
 
