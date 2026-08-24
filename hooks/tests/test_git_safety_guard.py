@@ -1284,6 +1284,41 @@ class TestPostToolUseCapture:
         finally:
             os.chdir(old_cwd)
 
+    def test_post_tool_use_does_not_record_commit(self, run_hook, make_event, tmp_state_dir):
+        """PostToolUse recording gate excludes commit/push: a `git commit` whose
+        MESSAGE contains a verification token (`pytest`) must NOT be appended to
+        the verification state, so it cannot self-satisfy a later commit's
+        checklist. Pins the second recording gate (is_commit_or_push at
+        _handle_post_tool_use).
+
+        Non-vacuous: the message contains `pytest`, so is_verification(command)
+        is True; WITHOUT the is_commit_or_push guard, _handle_post_tool_use would
+        append the commit command. The `tool_result` key routes the event to the
+        PostToolUse branch (main() discriminates on `"tool_result" in ev`), which
+        is the gate under test.
+        """
+        # Seed a prior state so there is a file to read back and a baseline count.
+        _seed_verification_state(tmp_state_dir, test_exit_code=None, lint_exit_code=None)
+        session_hash = hashlib.sha256(tmp_state_dir.encode()).hexdigest()[:12]
+        state_file = Path(f"/tmp/claude-verification-{session_hash}.json")
+        before = json.loads(state_file.read_text())["verifications"]
+
+        # PostToolUse event: the `tool_result` key routes to _handle_post_tool_use.
+        commit_command = 'git commit -m "test: add pytest coverage"'
+        event = make_event("Bash", command=commit_command,
+                           tool_result={"stdout": "", "exit_code": 0})
+        result = run_hook("git-safety-guard.py", event)
+        assert result.returncode == 0, f"hook crashed: stderr={result.stderr!r}"
+
+        after = json.loads(state_file.read_text())["verifications"]
+        # The commit command must NOT have been appended as a verification.
+        assert all("git commit" not in v["command"] for v in after), (
+            f"commit was recorded as a verification: {after!r}"
+        )
+        assert len(after) == len(before), (
+            f"state length changed (commit recorded?): before={len(before)}, after={len(after)}"
+        )
+
 
 # ---------------------------------------------------------------------------
 # Helpers for submodule-pointer (gitlink) tests
@@ -3419,3 +3454,195 @@ class TestHeadAnchoredMentionsAllowed:
             assert "ambiguous working directory" not in reason
             assert "verification" not in reason
 
+
+
+class TestMakeCheckSatisfiesChecklist:
+    """Defect 1 (TRK-176): `make check` IS recorded by VERIFICATION_PATTERNS,
+    but the checklist's has_tests/has_lint regexes never matched the literal
+    string 'make check' (it contains neither 'test' nor a lint token), so a repo
+    whose canonical verification is `make check` was falsely blocked. The fix adds
+    `make` as a SUBSTRING token (like the existing pytest/ruff tokens) and excludes
+    commit/push from being recorded, so a commit's own message cannot self-satisfy
+    its checklist."""
+
+    def test_make_check_satisfies_checklist(self, run_hook, make_event, tmp_state_dir, tmp_path):
+        """(a) A genuine recorded `make check` run satisfies BOTH has_tests and
+        has_lint -> the commit is silently ALLOWED."""
+        session_hash = hashlib.sha256(tmp_state_dir.encode()).hexdigest()[:12]
+        state_file = Path(f"/tmp/claude-verification-{session_hash}.json")
+        now = time.time()
+        state_file.write_text(json.dumps({
+            "verifications": [
+                {"command": "make check", "time": now, "exit_code": None},
+            ],
+            "last_updated": now,
+        }))
+        _init_feature_repo(tmp_path)
+        old_cwd = os.getcwd()
+        os.chdir(tmp_path)
+        try:
+            event = make_event("Bash", command='git commit -m "feat: add feature"')
+            result = run_hook("git-safety-guard.py", event)
+            assert result.returncode == 0, f"hook must exit 0; stderr={result.stderr!r}"
+            assert result.stdout.strip() == "", (
+                "make check should satisfy BOTH has_tests and has_lint -> silent allow; "
+                f"got: {result.stdout!r}"
+            )
+        finally:
+            os.chdir(old_cwd)
+
+    def test_commit_message_make_check_does_not_self_satisfy(self, run_hook, make_event, tmp_state_dir, tmp_path):
+        """(d) SCOPE-REGRESSION GUARD (GREEN before AND after the fix, like (c)):
+        the commit command's OWN message contains 'make check'. PRE-fix it blocks
+        because `make check` is not recognized by the checklist at all; POST-fix it
+        blocks because commit/push are excluded from being recorded as
+        verifications (is_commit_or_push at BOTH recording gates). Because the two
+        Defect-1 changes land as ONE atomic edit, the live hook never passes
+        through a state where `make` is recognized but commit/push is not yet
+        excluded -- so this commit is NEVER able to self-satisfy its own checklist.
+        Exempt from the RED-first rule, exactly like the precedent at ~957-962."""
+        session_hash = hashlib.sha256(tmp_state_dir.encode()).hexdigest()[:12]
+        state_file = Path(f"/tmp/claude-verification-{session_hash}.json")
+        if state_file.exists():
+            state_file.unlink()
+        _init_feature_repo(tmp_path)
+        old_cwd = os.getcwd()
+        os.chdir(tmp_path)
+        try:
+            event = make_event("Bash", command='git commit -m "fix: recognize make check"')
+            result = run_hook("git-safety-guard.py", event)
+            assert result.parsed is not None, f"expected block JSON, got: {result.stdout!r}"
+            assert result.parsed["decision"] == "block"
+            assert "NOT run" in result.parsed["reason"] or "MUST run" in result.parsed["reason"]
+        finally:
+            os.chdir(old_cwd)
+
+    def test_make_test_alone_still_blocks_on_missing_lint(self, run_hook, make_event, tmp_state_dir, tmp_path):
+        """`make test` satisfies has_tests but NOT has_lint -> commit still BLOCKS
+        on missing lint. Pins the asymmetric make-token behavior so a regex
+        regression that collapsed (?:check|test) or widened make\\s+test to satisfy
+        lint would be caught."""
+        session_hash = hashlib.sha256(tmp_state_dir.encode()).hexdigest()[:12]
+        state_file = Path(f"/tmp/claude-verification-{session_hash}.json")
+        now = time.time()
+        state_file.write_text(json.dumps({
+            "verifications": [{"command": "make test", "time": now, "exit_code": None}],
+            "last_updated": now,
+        }))
+        _init_feature_repo(tmp_path)
+        old_cwd = os.getcwd()
+        os.chdir(tmp_path)
+        try:
+            event = make_event("Bash", command='git commit -m "feat: add feature"')
+            result = run_hook("git-safety-guard.py", event)
+            assert result.parsed is not None, f"expected block JSON, got: {result.stdout!r}"
+            assert result.parsed["decision"] == "block"
+            # blocks specifically on lint (tests are satisfied by `make test`)
+            assert "lint" in result.parsed["reason"].lower()
+        finally:
+            os.chdir(old_cwd)
+
+    def test_make_lint_alone_still_blocks_on_missing_tests(self, run_hook, make_event, tmp_state_dir, tmp_path):
+        """`make lint` satisfies has_lint but NOT has_tests -> commit still BLOCKS
+        on missing tests."""
+        session_hash = hashlib.sha256(tmp_state_dir.encode()).hexdigest()[:12]
+        state_file = Path(f"/tmp/claude-verification-{session_hash}.json")
+        now = time.time()
+        state_file.write_text(json.dumps({
+            "verifications": [{"command": "make lint", "time": now, "exit_code": None}],
+            "last_updated": now,
+        }))
+        _init_feature_repo(tmp_path)
+        old_cwd = os.getcwd()
+        os.chdir(tmp_path)
+        try:
+            event = make_event("Bash", command='git commit -m "feat: add feature"')
+            result = run_hook("git-safety-guard.py", event)
+            assert result.parsed is not None, f"expected block JSON, got: {result.stdout!r}"
+            assert result.parsed["decision"] == "block"
+            assert "test" in result.parsed["reason"].lower()
+        finally:
+            os.chdir(old_cwd)
+
+
+class TestRecencyWindowNotEvictedByChurn:
+    """Defect 2 (TRK-176): the blunt [-20:] count cap at both write sites evicted
+    a still-in-window verification under churn. When >20 verification commands ran
+    inside the 30-min window (e.g. a concurrent implementer running repeated
+    ruff+pytest cycles), the genuine pytest pass was dropped while later ruff
+    entries stayed -> has_tests flipped False -> false 'tests not run' block. The
+    30-min recency window must be the real bound; under realistic churn no
+    in-window entry is evicted."""
+
+    def test_in_window_pytest_survives_churn(self, run_hook, make_event, tmp_state_dir, tmp_path):
+        _init_feature_repo(tmp_path)
+        old_cwd = os.getcwd()
+        os.chdir(tmp_path)
+        try:
+            # 1) record a real pytest pass through the hook's OWN write path
+            #    (seeding state directly would not exercise the write-time cap).
+            run_hook("git-safety-guard.py", make_event("Bash", command="pytest tests/"))
+            # 2) 25 DISTINCT lint runs -- distinct so the 5s already_tracked dedup
+            #    does not collapse them; identical commands would record only once.
+            for i in range(25):
+                run_hook("git-safety-guard.py",
+                         make_event("Bash", command=f"ruff check mod{i}.py"))
+            # 3) commit: pytest is now >20 entries back. Old [-20:] cap evicted it
+            #    (only ruff remains -> has_tests False -> BLOCK). Window prune keeps
+            #    all 26 in-window entries -> pytest survives -> ALLOW.
+            event = make_event("Bash", command='git commit -m "feat: add feature"')
+            result = run_hook("git-safety-guard.py", event)
+            assert result.returncode == 0, f"hook must exit 0; stderr={result.stderr!r}"
+            assert result.stdout.strip() == "", (
+                "in-window pytest pass must survive >20-entry churn -> silent allow; "
+                f"got block: {result.stdout!r}"
+            )
+        finally:
+            os.chdir(old_cwd)
+
+    def test_zero_verifications_still_blocks(self, run_hook, make_event, tmp_state_dir, tmp_path):
+        """(c) Negative control (guard purpose intact): a commit with ZERO recent
+        verifications is STILL BLOCKED after the pruning change. This is a
+        SCOPE-REGRESSION GUARD -- GREEN before AND after the fix (the pre-fix hook
+        already blocks a no-verification commit), so it is exempt from the RED-first
+        rule, exactly like the precedent at lines ~957-962 in this file."""
+        session_hash = hashlib.sha256(tmp_state_dir.encode()).hexdigest()[:12]
+        state_file = Path(f"/tmp/claude-verification-{session_hash}.json")
+        if state_file.exists():
+            state_file.unlink()
+        _init_feature_repo(tmp_path)
+        old_cwd = os.getcwd()
+        os.chdir(tmp_path)
+        try:
+            event = make_event("Bash", command='git commit -m "feat: untested change"')
+            result = run_hook("git-safety-guard.py", event)
+            assert result.parsed is not None, f"expected block JSON, got: {result.stdout!r}"
+            assert result.parsed["decision"] == "block"
+            assert "NOT run" in result.parsed["reason"] or "MUST run" in result.parsed["reason"]
+        finally:
+            os.chdir(old_cwd)
+
+    def test_out_of_window_verification_does_not_satisfy_checklist(self, run_hook, make_event, tmp_state_dir, tmp_path):
+        """A verification older than RECENCY_WINDOW_SECONDS (30 min) must NOT
+        satisfy the checklist. Seeds a `make check` at now-1801 (just outside the
+        window) as the ONLY entry -> commit still BLOCKS. Pins the age boundary /
+        the < RECENCY_WINDOW_SECONDS comparator against a constant or comparator
+        mutation."""
+        session_hash = hashlib.sha256(tmp_state_dir.encode()).hexdigest()[:12]
+        state_file = Path(f"/tmp/claude-verification-{session_hash}.json")
+        now = time.time()
+        state_file.write_text(json.dumps({
+            "verifications": [{"command": "make check", "time": now - 1801, "exit_code": None}],
+            "last_updated": now,
+        }))
+        _init_feature_repo(tmp_path)
+        old_cwd = os.getcwd()
+        os.chdir(tmp_path)
+        try:
+            event = make_event("Bash", command='git commit -m "feat: add feature"')
+            result = run_hook("git-safety-guard.py", event)
+            assert result.parsed is not None, f"expected block JSON, got: {result.stdout!r}"
+            assert result.parsed["decision"] == "block"
+            assert "NOT run" in result.parsed["reason"] or "MUST run" in result.parsed["reason"]
+        finally:
+            os.chdir(old_cwd)

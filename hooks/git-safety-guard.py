@@ -43,6 +43,8 @@ SECRET_PREFIXES = {"credentials", "secret", "serviceaccount"}
 # Verification tracking
 # ---------------------------------------------------------------------------
 STALE_SECONDS = 7200  # 2 hours
+RECENCY_WINDOW_SECONDS = 1800  # 30 minutes — the pre-completion checklist's recency bound
+MAX_VERIFICATIONS = 500  # safety backstop only; the window prune above is the real bound
 
 VERIFICATION_PATTERNS = [
     r'\bnpm\s+test\b',
@@ -1093,6 +1095,23 @@ def _is_nvm_bootstrap(command: str) -> bool:
 # Main
 # ---------------------------------------------------------------------------
 
+def _prune_verifications(verifications: list) -> list:
+    """Bound the verification log by RECENCY WINDOW first, then a high safety cap.
+
+    Drops entries older than RECENCY_WINDOW_SECONDS (the window the checklist
+    reads), then applies MAX_VERIFICATIONS as a pure safety backstop against
+    unbounded growth. Under realistic churn every in-window entry is retained --
+    this fixes the false 'tests not run' block where the old blunt [-20:] cap
+    evicted a still-valid in-window pytest pass once >20 verification commands ran
+    inside the window. A PATHOLOGICAL rate of more than MAX_VERIFICATIONS commands
+    inside a single window trims the OLDEST in-window entries; that fails toward
+    OVER-blocking (a genuine pass could be dropped and a commit wrongly blocked),
+    never toward under-blocking, so it is the safe direction."""
+    now = time.time()
+    in_window = [v for v in verifications if now - v.get("time", 0) < RECENCY_WINDOW_SECONDS]
+    return in_window[-MAX_VERIFICATIONS:]
+
+
 def _extract_exit_code(tool_result) -> int | None:
     """Extract exit code from Bash tool_result."""
     if isinstance(tool_result, dict):
@@ -1113,7 +1132,7 @@ def _extract_exit_code(tool_result) -> int | None:
 def _handle_post_tool_use(ev: dict) -> None:
     """PostToolUse: capture exit codes from verification commands."""
     command = event.get_command(ev)
-    if not command or not is_verification(command):
+    if not command or not is_verification(command) or is_commit_or_push(command):
         return
 
     tool_result = ev.get("tool_result", "")
@@ -1139,7 +1158,7 @@ def _handle_post_tool_use(ev: dict) -> None:
         "time": time.time(),
         "exit_code": exit_code,
     })
-    st["verifications"] = st["verifications"][-20:]
+    st["verifications"] = _prune_verifications(st["verifications"])
     state.save_state(state_file, st)
 
 
@@ -1183,7 +1202,7 @@ def main():
     # Wrapped fail-open: if state.py or /tmp raises any exception (restricted sandbox,
     # unexpected exception type), swallow it and continue — verification tracking is
     # best-effort; a crash here must never deny the command being intercepted.
-    if is_verification(command):
+    if is_verification(command) and not is_commit_or_push(command):
         try:
             state_file = state.get_state_file("claude-verification")
             st = state.load_state(state_file, {"verifications": [], "last_updated": time.time()})
@@ -1201,7 +1220,7 @@ def main():
                     "time": time.time(),
                     "exit_code": None,  # Unknown until PostToolUse
                 })
-                st["verifications"] = st["verifications"][-20:]
+                st["verifications"] = _prune_verifications(st["verifications"])
                 state.save_state(state_file, st)
         except Exception:
             pass  # fail-open: treat as no state recorded; never propagate
@@ -1296,14 +1315,14 @@ def main():
 
         # Recent verifications (within 30 minutes)
         recent = [v for v in st.get("verifications", [])
-                  if time.time() - v["time"] < 1800]
+                  if time.time() - v["time"] < RECENCY_WINDOW_SECONDS]
 
         has_tests = any(
-            re.search(r'test|jest|vitest|pytest|cargo\s+test|go\s+test|bash\s+-n', v["command"])
+            re.search(r'test|jest|vitest|pytest|cargo\s+test|go\s+test|bash\s+-n|make\s+(?:check|test)', v["command"])
             for v in recent
         )
         has_lint = any(
-            re.search(r'lint|eslint|tsc|mypy|ruff|clippy|bash\s+-n|shellcheck', v["command"])
+            re.search(r'lint|eslint|tsc|mypy|ruff|clippy|bash\s+-n|shellcheck|make\s+(?:check|lint)', v["command"])
             for v in recent
         )
 
