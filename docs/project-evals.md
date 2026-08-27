@@ -8,3 +8,4 @@
 - [ ] When editing CC instruction files, verify no "skip/directly/simple" language grants unscoped bypass exemptions — added 2026-03-25 from retro: case-study-audit (Case 28 recurrence)
 - [ ] After fixing a security finding, search all analogous call sites for the same vulnerability class — added 2026-03-25 from retro: case-study-audit (Case 23)
 - [ ] When multiple tasks touch the same file, verify edits don't contradict each other — added 2026-03-25 from retro: case-study-audit (3 agents on ct-harden-auditor.md)
+- [ ] When adding a detection token/case to one classifier (regex or allowlist), verify its sibling classifiers over the same input with opposite polarity (success-vs-failure, presence-vs-absence, allow-vs-deny) are updated too — or a tracked follow-up is filed naming why not — added 2026-08-24 from retro: trk-176-git-safety-guard-checklist-fix
