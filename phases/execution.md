@@ -103,6 +103,26 @@ For each task in plan:
      Do NOT proceed to audit with incomplete work.
      Known rationalization: "The agent reported DONE so it must be complete" — DONE is a claim, not evidence. Verify the count.
 
+  CLEAN-TREE CHECK (MANDATORY before accepting DONE)
+  4a. Run `git -C <repo-root> status --porcelain --untracked-files=all` (the
+      `--untracked-files=all` flag is REQUIRED — without it git collapses an
+      untracked directory to a single `?? docs/` entry, which hides whether the
+      lone thing inside is the active plan file, so a clean DONE would be falsely
+      rejected). The tree must show NOTHING other than the active plan file
+      itself — i.e. it is clean once you exclude the active plan file (which
+      accrues its own checkbox churn during the run and is bookkeeping, not work
+      lying around; some projects gitignore docs/plans so it never appears,
+      others track it and it will). If ANY path OTHER than the active plan file
+      appears, the DONE is NOT accepted: the
+      implementer left uncommitted work — re-dispatch with the exact `git status`
+      output and instruct it to commit (or, for genuine garbage, discard) before
+      reporting DONE again.
+      Known rationalization: "the implementer said it committed" — DONE is a
+      claim, not evidence. The porcelain output (minus the active plan file) is
+      the evidence; verify it, don't trust the report. This is why the
+      completion-transition guard is a backstop, not the first line: catch a
+      dirty tree here, per task.
+
   AUDIT PASS
   Read `phases/audit-loop.md` and follow its instructions for the audit pass.
 
