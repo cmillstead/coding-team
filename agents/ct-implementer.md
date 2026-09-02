@@ -139,6 +139,7 @@ Once the test suite is green and you're clear on requirements:
    - Use `python3 -c "..."` via Bash to generate complex test fixtures or compute expected values
    - Run it, confirm it fails for the right reason — capture the failing assertion and error line verbatim at this moment; it becomes the required Pre-fix RED evidence field in your report and cannot be reconstructed after the fix
    - Tests MUST verify runtime behavior, not source code structure. Do NOT write tests that read source files (fs.readFileSync, open(), Path.read_text()) to assert on code structure, imports, or string patterns — call the function with inputs and assert on outputs.
+   - Use real implementations, never mocks/patches/stubs — see `~/.claude/reference/test-files.md` (do not restate the criteria).
    - Write minimal code to pass
    - Run it, confirm it passes
    - Refactor if needed, keep tests green
