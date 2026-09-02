@@ -256,21 +256,31 @@ def _list_worktrees(repo_root: Path) -> "list[Path] | None":
     return _parse_worktree_list_z(result.stdout)
 
 
-def _same_path(a: Path, b: Path) -> bool:
-    """True iff a and b denote the same location (resolved), fail-safe on error.
+def _same_path(a: Path, b: Path) -> "bool | None":
+    """Tri-state path identity: True / False / None(=indeterminate).
 
-    Compares raw equality first, then resolved equality (so /tmp vs the
-    /private/tmp symlink, or any other symlink, still matches). On a resolve
-    error, returns False — the SAFE direction: a worktree not confirmed to be
-    the plan's own owner is treated as OTHER, which excludes NOTHING for the plan
-    path there and so fails toward reporting dirt (block), never toward a leak.
+    - True  : a and b are raw-equal, OR both resolve successfully and are equal
+      (so /tmp vs the /private/tmp symlink, or any other symlink, still matches).
+    - False : both resolve successfully and are genuinely DIFFERENT locations.
+    - None  : raw paths differ AND `.resolve()` raised — identity cannot be
+      decided.
+
+    The caller (`_collect_dirt_across_worktrees`) biases an INDETERMINATE result
+    toward treating the worktree as the plan's OWNER (exclude the plan file
+    there), never as OTHER. For THIS guard the fail-open direction on uncertainty
+    is to EXCLUDE the plan, not to withhold the exclusion: withholding it would
+    let the plan file's own mid-edit dirt (always present at completion) be
+    reported as work, manufacturing a NO-ESCAPE false BLOCK on a clean
+    completion whenever resolution hiccups — which contradicts the guard's
+    fail-open / no-trap contract. Returning False here (the old behavior) caused
+    exactly that trap (Codex P2).
     """
     if a == b:
         return True
     try:
         return a.resolve() == b.resolve()
     except (OSError, RuntimeError):
-        return False
+        return None
 
 
 def _collect_dirt_across_worktrees(
@@ -297,6 +307,16 @@ def _collect_dirt_across_worktrees(
     physical file and is real uncommitted work; excluding it by shared relative
     path would leak it.
 
+    P2 fix (indeterminate ownership fails open toward EXCLUDE): ownership is
+    tri-state (see `_same_path`). Only a DEFINITIVE non-owner (`False`) withholds
+    the plan exclusion. Both a confirmed owner (`True`) and an INDETERMINATE
+    result (`None`, a resolve hiccup) EXCLUDE the plan — so a resolution failure
+    never manufactures a false BLOCK on a clean completion whose only dirt is the
+    mid-edit plan file. The only residual leak (resolve failure AND a genuinely
+    different worktree holding a same-relative-path dirty plan) is astronomically
+    unlikely and strictly less harmful than a no-escape trap on every clean
+    completion where resolution fails.
+
     Per-worktree uncertainty (a `_dirty_excluding_plan` returning None) is
     SKIPPED, not treated as a global allow: confirmed dirt still BLOCKs even if
     another worktree's status could not be determined — positive evidence of
@@ -307,7 +327,8 @@ def _collect_dirt_across_worktrees(
     if worktrees is None:
         return None
     for worktree in worktrees:
-        exclude = plan_rel if _same_path(worktree, plan_worktree_root) else None
+        # Exclude the plan unless this worktree is DEFINITIVELY not its owner.
+        exclude = None if _same_path(worktree, plan_worktree_root) is False else plan_rel
         dirty = _dirty_excluding_plan(worktree, exclude)
         if dirty:
             return {worktree: dirty}

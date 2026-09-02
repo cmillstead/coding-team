@@ -601,3 +601,28 @@ def test_transition_short_circuits_on_first_dirty_worktree(tmp_path):
     out, rc = _run(_edit_to_complete(plan), cwd=main)
     _assert_block(out)
     assert out.count("Worktree:") == 1, f"expected exactly one worktree named, got: {out!r}"
+
+
+def test_same_path_tristate(tmp_path):
+    """P2 — `_same_path` is tri-state: True (raw-equal OR resolved-equal), False
+    (both resolve and genuinely differ), None (resolve raises + raw differ). The
+    None branch IS the fix: the OLD `_same_path` returned False on a resolve
+    error, which made an owning worktree look like a non-owner and manufactured a
+    false BLOCK on a clean completion (Codex P2). RED under the old bool
+    `_same_path`: the last assertion expects None but the old code returns False.
+    Uses a REAL symlink loop (no mock) to make `.resolve()` genuinely raise."""
+    guard = _load_guard()
+    p = tmp_path / "x"
+    p.mkdir()
+    assert guard._same_path(p, p) is True            # raw-equal
+    link = tmp_path / "link"
+    link.symlink_to(p)
+    assert guard._same_path(link, p) is True         # resolved-equal (symlink)
+    q = tmp_path / "y"
+    q.mkdir()
+    assert guard._same_path(p, q) is False           # both resolve, genuinely differ
+    loop_a = tmp_path / "loop_a"
+    loop_b = tmp_path / "loop_b"
+    loop_a.symlink_to(loop_b)
+    loop_b.symlink_to(loop_a)                         # real symlink cycle
+    assert guard._same_path(loop_a, q) is None       # resolve raises + raw differ
