@@ -114,7 +114,8 @@ def main() -> None:
             f"Python stdlib module:\n"
             f"{collision_list}\n"
             f"A hook whose name shadows a stdlib module crashes every hook in its "
-            f"directory on import. Rename with a `base-` prefix (e.g. `base-operator.py`)."
+            f"directory on import. Rename to a descriptive hyphenated name (e.g. "
+            f"`operator-guard.py`) — a hyphen cannot appear in a stdlib module name."
         )
 
 
