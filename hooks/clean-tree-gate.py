@@ -145,11 +145,19 @@ def _parse_porcelain_z(stream: bytes) -> "list[tuple[str, str]]":
     return entries
 
 
-def _dirty_excluding_plan(worktree_root: Path, plan_rel: str) -> "list[str] | None":
+def _dirty_excluding_plan(worktree_root: Path, plan_rel: "str | None") -> "list[str] | None":
     """Return dirty entries (as `XY path` strings) other than the plan file.
 
     Returns None on ANY git uncertainty (git absent, timeout, non-zero exit) —
     the caller treats None as ALLOW.
+
+    `plan_rel` is the repo-relative path to EXCLUDE, or None to exclude nothing.
+    None is passed for every worktree OTHER than the one that physically owns the
+    edited plan (FIX A): a `docs/plans/<same-name>.md` dirty in a DIFFERENT
+    worktree is a DIFFERENT physical file and is real uncommitted work, so it
+    must NOT be excluded there. A path string is never equal to None, so the
+    `path == plan_rel` test below naturally excludes nothing when plan_rel is
+    None — no special-casing needed.
 
     Uses `-z` (NUL-delimited, never quotes/escapes paths — so a plan path like
     `docs/plans/my plan.md` still equals plan_rel and is excluded; porcelain v1
@@ -189,6 +197,34 @@ def _dirty_excluding_plan(worktree_root: Path, plan_rel: str) -> "list[str] | No
     return dirty
 
 
+def _parse_worktree_list_z(stream: bytes) -> "list[Path]":
+    """Parse `git worktree list --porcelain -z` BYTES into worktree paths.
+
+    FIX B (newline-safe): the plain `--porcelain` form is newline-delimited, but
+    git permits a worktree path containing a newline and emits it RAW — so a
+    `\\n`-split truncates such a path (its worktree's status then fails/skips and
+    its dirt goes invisible → leak; a truncated prefix could also resolve to a
+    different repo → false block). The `-z` form is NUL-delimited and never
+    quotes or escapes, so it is unambiguous for ANY byte sequence.
+
+    In `-z` form each worktree record is a run of NUL-terminated attribute
+    fields — `worktree <path>\\0HEAD <sha>\\0branch <ref>\\0` (a bare or
+    detached worktree substitutes `bare\\0` / `detached\\0` for the HEAD/branch
+    fields) — and records are separated by an EMPTY field (the record's trailing
+    `\\0` immediately followed by the next record's, i.e. a `\\0\\0`), with a
+    final empty field at EOF. We split on NUL and take every field beginning
+    `worktree ` — every record starts with exactly one such field. Each path is
+    decoded with os.fsdecode (matching how `str(Path)` renders paths), so an
+    undecodable path cannot raise here.
+    """
+    paths: list[Path] = []
+    for field in stream.split(b"\0"):
+        if field.startswith(b"worktree "):
+            raw = field[len(b"worktree "):]
+            paths.append(Path(os.fsdecode(raw)))
+    return paths
+
+
 def _list_worktrees(repo_root: Path) -> "list[Path] | None":
     """Return every worktree path of repo_root's repo, or None on uncertainty.
 
@@ -201,59 +237,81 @@ def _list_worktrees(repo_root: Path) -> "list[Path] | None":
     past a `status: complete` flip — the worst case, since that is exactly where
     uncommitted work is most likely (QA HIGH).
 
-    `git worktree list --porcelain` emits one `worktree <path>` line per
-    worktree (main first, then each linked worktree). Run with the SAME
-    `_scrub_git_env()` scrub the status subprocess uses, so an ambient
+    Uses `git worktree list --porcelain -z` (NUL-delimited — see
+    `_parse_worktree_list_z` for why `-z` and not the newline form). Run with the
+    SAME `_scrub_git_env()` scrub the status subprocess uses, so an ambient
     GIT_DIR / GIT_WORK_TREE / GIT_COMMON_DIR cannot redirect enumeration to a
-    different repo. Reads stdout as raw bytes (no text=True) and decodes each
-    path with os.fsdecode — matching how `str(Path)` renders paths — so an
-    undecodable path cannot raise here. Returns None (uncertainty -> caller
-    allows) on git absent / timeout / non-zero exit.
+    different repo. Reads stdout as raw bytes (no text=True). Returns None
+    (uncertainty -> caller allows) on git absent / timeout / non-zero exit.
     """
     try:
         result = subprocess.run(
-            ["git", "-C", str(repo_root), "worktree", "list", "--porcelain"],
+            ["git", "-C", str(repo_root), "worktree", "list", "--porcelain", "-z"],
             capture_output=True, timeout=5, check=False, env=_scrub_git_env(),
         )
     except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
         return None
     if result.returncode != 0:
         return None
-    paths: list[Path] = []
-    for line in result.stdout.split(b"\n"):
-        if line.startswith(b"worktree "):
-            raw = line[len(b"worktree "):]
-            paths.append(Path(os.fsdecode(raw)))
-    return paths
+    return _parse_worktree_list_z(result.stdout)
+
+
+def _same_path(a: Path, b: Path) -> bool:
+    """True iff a and b denote the same location (resolved), fail-safe on error.
+
+    Compares raw equality first, then resolved equality (so /tmp vs the
+    /private/tmp symlink, or any other symlink, still matches). On a resolve
+    error, returns False — the SAFE direction: a worktree not confirmed to be
+    the plan's own owner is treated as OTHER, which excludes NOTHING for the plan
+    path there and so fails toward reporting dirt (block), never toward a leak.
+    """
+    if a == b:
+        return True
+    try:
+        return a.resolve() == b.resolve()
+    except (OSError, RuntimeError):
+        return False
 
 
 def _collect_dirt_across_worktrees(
-    plan_repo_root: Path, plan_rel: str
+    plan_worktree_root: Path, plan_rel: str
 ) -> "dict[Path, list[str]] | None":
-    """Map each dirty worktree to its non-excluded dirt, across ALL worktrees.
+    """First worktree with confirmed non-excluded dirt -> {that worktree: dirt}.
 
     Returns None if the worktree enumeration itself is uncertain (git error) —
     the caller treats None as ALLOW. Otherwise returns a dict of
-    {worktree_path: [dirty entries]} for every worktree that has confirmed
-    non-excluded dirt (an empty dict means every worktree is clean -> allow).
+    {worktree_path: [dirty entries]} for the FIRST worktree found to have
+    confirmed non-excluded dirt, or an EMPTY dict if every worktree is clean
+    (-> allow).
+
+    FIX C (short-circuit): returns immediately on the first confirmed dirty
+    worktree instead of scanning them all. Each `git status` has its own 5s
+    timeout and the dispatcher kills the whole handler at 30s, so scanning every
+    worktree first risks discarding dirt already found in an early worktree when
+    a later one is slow. Blocking on the first confirmed dirt closes that.
+
+    FIX A (per-worktree plan exclusion): the plan file is excluded ONLY in the
+    worktree that physically OWNS the edited plan (`plan_worktree_root`, the
+    `--show-toplevel` of the edit target). In every OTHER worktree, plan_rel is
+    NOT excluded — a `docs/plans/<same-name>.md` dirty there is a DIFFERENT
+    physical file and is real uncommitted work; excluding it by shared relative
+    path would leak it.
 
     Per-worktree uncertainty (a `_dirty_excluding_plan` returning None) is
-    SKIPPED, not treated as a global allow: confirmed dirt found in one worktree
-    still BLOCKs even if another worktree's status could not be determined —
-    positive evidence of uncommitted work wins over uncertainty elsewhere, while
-    a run that finds no confirmed dirt anywhere still allows. The plan file's
-    repo-relative path is excluded in EVERY worktree (harmless where the plan
-    file is not present or not dirty).
+    SKIPPED, not treated as a global allow: confirmed dirt still BLOCKs even if
+    another worktree's status could not be determined — positive evidence of
+    uncommitted work wins over uncertainty elsewhere, while a run that finds no
+    confirmed dirt anywhere still allows.
     """
-    worktrees = _list_worktrees(plan_repo_root)
+    worktrees = _list_worktrees(plan_worktree_root)
     if worktrees is None:
         return None
-    dirty_by_worktree: dict[Path, list[str]] = {}
     for worktree in worktrees:
-        dirty = _dirty_excluding_plan(worktree, plan_rel)
+        exclude = plan_rel if _same_path(worktree, plan_worktree_root) else None
+        dirty = _dirty_excluding_plan(worktree, exclude)
         if dirty:
-            dirty_by_worktree[worktree] = dirty
-    return dirty_by_worktree
+            return {worktree: dirty}
+    return {}
 
 
 def main() -> None:

@@ -113,12 +113,16 @@ For each task in plan:
       (the `--untracked-files=all` flag is REQUIRED — without it git collapses an
       untracked directory to a single `?? docs/` entry, which hides whether the
       lone thing inside is the active plan file, so a clean DONE would be falsely
-      rejected). EVERY worktree must show NOTHING other than the active plan file
-      itself — i.e. each is clean once you exclude the active plan file (which
+      rejected). In the ONE worktree that physically HOLDS the active plan
+      (normally the main checkout), that plan file is the only allowed dirt — it
       accrues its own checkbox churn during the run and is bookkeeping, not work
-      lying around; some projects gitignore docs/plans so it never appears,
-      others track it and it will). If ANY path OTHER than the active plan file
-      appears in ANY worktree, the DONE is NOT accepted: the
+      lying around (some projects gitignore docs/plans so it never appears,
+      others track it and it will). In EVERY OTHER worktree, NOTHING may be dirty
+      at all: exclude the active plan ONLY in its own worktree — a
+      `docs/plans/<same-name>.md` dirty in a DIFFERENT worktree is a DIFFERENT
+      physical file and counts as real uncommitted work, NOT the active plan, so
+      do not exclude it there. If any path other than the active plan (in its own
+      worktree) appears in ANY worktree, the DONE is NOT accepted: the
       implementer left uncommitted work — re-dispatch with the exact `git status`
       output (naming the worktree) and instruct it to commit (or, for genuine
       garbage, discard) before reporting DONE again.

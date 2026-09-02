@@ -30,7 +30,7 @@ Read ~/.claude/reference/user-facing-translation.md before writing this report t
 | All tests pass | Fresh test run output in this message | Run tests now |
 | Linter clean | Fresh lint output in this message | Run linter now |
 | Plan tasks complete | All tasks in plan have commits or explicit skip rationale | List gaps |
-| All worktrees clean | For EVERY worktree (`git worktree list --porcelain`, not just the current checkout — a big feature may have built in a linked worktree while the plan lives in the main one), `git -C <worktree> status --porcelain --untracked-files=all` shows nothing except the active plan file (`--untracked-files=all` REQUIRED — default collapses an untracked dir to `?? docs/` and can hide the plan) | Commit or discard uncommitted work in the named worktree before marking the plan complete |
+| All worktrees clean | For EVERY worktree (`git worktree list --porcelain`, not just the current checkout — a big feature may have built in a linked worktree while the plan lives in the main one), `git -C <worktree> status --porcelain --untracked-files=all` is clean — excluding the active plan file ONLY in the worktree that physically holds it; a `docs/plans/<same-name>.md` dirty in any OTHER worktree is a different physical file and is real work (`--untracked-files=all` REQUIRED — default collapses an untracked dir to `?? docs/` and can hide the plan) | Commit or discard uncommitted work in the named worktree before marking the plan complete |
 | Feature branch exists | Not on main/master | Cannot proceed — create branch first |
 
 Produce any missing deliverables before opening the gate. Max 2 attempts per missing item, then warn the user and proceed anyway.

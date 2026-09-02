@@ -538,3 +538,66 @@ def test_transition_all_worktrees_clean_allows(tmp_path):
                    check=True, capture_output=True)  # worktree now clean too
     out, rc = _run(_edit_to_complete(plan), cwd=main)
     _assert_allow(out, rc)
+
+
+def test_transition_dirty_plan_in_other_worktree_blocks(tmp_path):
+    """FIX A discriminator — per-worktree plan exclusion. A linked worktree's
+    ONLY dirt is `docs/plans/<same-relative-name>.md` (same repo-relative path as
+    the main plan being flipped), which is a DIFFERENT physical file and is real
+    uncommitted work. The completion transition is on the MAIN plan (main clean).
+    Under the round-1 SHARED-exclusion code the worktree's plan-named dirt was
+    excluded by the shared plan_rel -> ALLOW (the leak); the per-worktree fix
+    excludes the plan ONLY in its owning (main) worktree, so the worktree dirt is
+    real -> BLOCK."""
+    main = tmp_path / "repo"
+    main.mkdir()
+    _init_repo(main)
+    plan = _make_plan(main)                 # docs/plans/2026-09-02-feature.md
+    _commit_all(main)                       # main clean, plan committed in-progress
+    wt = tmp_path / "wt"
+    _add_worktree(main, wt, "feature")      # worktree branched from main (has the plan)
+    # Dirty ONLY the worktree's copy of the SAME relative plan path.
+    wt_plan = wt / "docs" / "plans" / "2026-09-02-feature.md"
+    wt_plan.write_text(wt_plan.read_text() + "- [x] worktree edit\n")
+    out, rc = _run(_edit_to_complete(plan), cwd=main)
+    _assert_block(out)
+
+
+def test_parse_worktree_list_z_multi_record(tmp_path):
+    """FIX B — newline-safe `-z` enumeration parse. Feeds a NUL-delimited
+    `git worktree list --porcelain -z` sample with TWO records, the second of
+    which has a path CONTAINING A NEWLINE (git permits it and emits it raw). The
+    NUL-based parse returns both paths intact, including the embedded newline —
+    the round-1 `\\n`-split enumeration would truncate that path (its worktree's
+    dirt would go invisible). Loads the guard in-process so in RED (old code with
+    no `_parse_worktree_list_z`) this ONE test fails on the missing attribute."""
+    guard = _load_guard()
+    sample = (b"worktree /repo/main\x00HEAD abc123\x00branch refs/heads/main\x00\x00"
+              b"worktree /repo/has\nnewline\x00HEAD abc123\x00branch refs/heads/feat\x00\x00")
+    assert guard._parse_worktree_list_z(sample) == [
+        Path("/repo/main"),
+        Path("/repo/has\nnewline"),
+    ]
+
+
+def test_transition_short_circuits_on_first_dirty_worktree(tmp_path):
+    """FIX C — short-circuit on first confirmed dirt. Two linked worktrees are
+    BOTH dirty (main clean). The guard must BLOCK on the FIRST dirty worktree it
+    finds and stop scanning — so the block message names EXACTLY ONE worktree.
+    The round-1 code scanned ALL worktrees and accumulated dirt from both, naming
+    TWO worktrees; asserting exactly one `Worktree:` section discriminates the
+    short-circuit (RED under round-1: count == 2)."""
+    main = tmp_path / "repo"
+    main.mkdir()
+    _init_repo(main)
+    plan = _make_plan(main)
+    _commit_all(main)                       # main clean
+    wt1 = tmp_path / "wt1"
+    wt2 = tmp_path / "wt2"
+    _add_worktree(main, wt1, "feat1")
+    _add_worktree(main, wt2, "feat2")
+    (wt1 / "a.py").write_text("v1\n")       # wt1 dirty
+    (wt2 / "b.py").write_text("v1\n")       # wt2 dirty
+    out, rc = _run(_edit_to_complete(plan), cwd=main)
+    _assert_block(out)
+    assert out.count("Worktree:") == 1, f"expected exactly one worktree named, got: {out!r}"
