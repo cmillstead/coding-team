@@ -37,18 +37,36 @@ Sync project documentation with the code that just shipped. Catches doc drift th
    | CHANGELOG.md | Latest entry covers all shipped changes |
    | Any other .md | Cross-reference against diff for stale content |
 
-3. **For each file:**
+3. **CLAUDE.md reference staleness scan (flag-only — never auto-edit):**
+
+   Regex-extract the backtick-quoted refs named in CLAUDE.md, then check each path-like ref (one containing `/`) against the CURRENT working tree. A path-like ref that does NOT resolve in the working tree is a *candidate* stale ref.
+
+   ```bash
+   REPO_ROOT=$(git rev-parse --show-toplevel)
+   # Extract backtick-quoted refs (paths, function names, script names) from CLAUDE.md
+   grep -oE '`[^`]+`' "$REPO_ROOT/CLAUDE.md" | tr -d '`' | sort -u > /tmp/claude-refs.txt
+   # For each ref that looks like a path, check whether it still resolves
+   while read -r ref; do
+     case "$ref" in
+       */*) [ -e "$REPO_ROOT/$ref" ] || echo "CANDIDATE STALE: $ref" ;;
+     esac
+   done < /tmp/claude-refs.txt
+   ```
+
+   This maps onto doc-sync's existing detect-deterministic / repair-with-LLM shape: the scan is the deterministic detector; a human is the repairer. **CRITICAL — this step FLAGS candidates for human review only. NEVER hard-fail the workflow and NEVER auto-edit CLAUDE.md from this scan.** A measured 36% false-positive rate (refs that moved, are intentionally aspirational, or live outside the working tree) makes any automatic action unsafe. Present the candidate list to the user under the same "narrative changes → ask the user" rule as step 4.
+
+4. **For each file:**
    - **Factual corrections** (stale paths, counts, commands): fix directly.
    - **Narrative changes** (positioning, philosophy, large rewrites): ask the user.
    - **Missing documentation** (new features not documented): add entries.
 
-4. **Cross-doc consistency:**
+5. **Cross-doc consistency:**
    - README feature list matches CLAUDE.md descriptions?
    - ARCHITECTURE component list matches file structure?
    - Version numbers consistent across files?
    - Every doc file reachable from README or CLAUDE.md?
 
-5. **Commit documentation updates:**
+6. **Commit documentation updates:**
    ```bash
    git add <updated-doc-files>
    git commit -m "docs: update project documentation for <feature>"
