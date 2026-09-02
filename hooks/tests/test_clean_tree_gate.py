@@ -424,3 +424,68 @@ def test_plan_file_not_in_any_repo_allows(tmp_path):
     plan.write_text("---\nstatus: in-progress\n---\n\n# Plan\n")
     out, rc = _run(_edit_to_complete(plan), cwd=outside)
     _assert_allow(out, rc)
+
+
+DISPATCHER = HOOKS_DIR / "pretooluse-dispatcher.py"
+
+
+def test_dispatcher_routes_completion_transition_to_clean_tree_gate(tmp_path):
+    """A dirty-tree completion transition, sent through the DISPATCHER, blocks."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_repo(repo)
+    plan = _make_plan(repo)
+    (repo / "src.py").write_text("v1\n")
+    _commit_all(repo)
+    (repo / "src.py").write_text("v2\n")  # dirty
+    result = subprocess.run(
+        [sys.executable, str(DISPATCHER)],
+        input=json.dumps(_edit_to_complete(plan)),
+        capture_output=True, text=True, timeout=10, cwd=str(repo),
+    )
+    assert '"decision": "block"' in result.stdout
+
+
+def test_dispatcher_allows_non_plan_edit(tmp_path):
+    """A non-plan Edit passes through the dispatcher untouched (no output)."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_repo(repo)
+    _make_plan(repo)
+    (repo / "src.py").write_text("v1\n")
+    _commit_all(repo)
+    (repo / "src.py").write_text("v2\n")
+    result = subprocess.run(
+        [sys.executable, str(DISPATCHER)],
+        input=json.dumps({"tool_name": "Edit", "tool_input": {
+            "file_path": str(repo / "src.py"), "old_string": "v1", "new_string": "v2"}}),
+        capture_output=True, text=True, timeout=10, cwd=str(repo),
+    )
+    assert result.stdout.strip() == "" and result.returncode == 0
+
+
+def test_dispatcher_clean_tree_precedes_write_guard_advisory(tmp_path):
+    """Ordering discriminator (FIX 7): a Write completion transition whose plan
+    content carries path tokens makes write-guard emit a NON-blocking C1 allow-
+    advisory. Because clean-tree runs BEFORE write-guard in the dispatcher, the
+    dirty completion is still BLOCKED. If the order were reversed, write-guard's
+    advisory stdout would win (first-response-wins) and the dirty completion
+    would LEAK — so this test fails under the wrong order."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_repo(repo)
+    plan = _make_plan(repo)
+    (repo / "src.py").write_text("v1\n")
+    _commit_all(repo)
+    (repo / "src.py").write_text("v2\n")  # dirty
+    # Full plan body with path tokens (docs/plans/..., path.resolve()) -> triggers
+    # write-guard's language-agnostic C1 path-trust ALLOW advisory on this edit.
+    content = ("---\nstatus: complete\n---\n\n# Plan\n\n"
+               "See docs/plans/feature.md and call path.resolve() here.\n")
+    result = subprocess.run(
+        [sys.executable, str(DISPATCHER)],
+        input=json.dumps({"tool_name": "Write", "tool_input": {
+            "file_path": str(plan), "content": content}}),
+        capture_output=True, text=True, timeout=10, cwd=str(repo),
+    )
+    assert '"decision": "block"' in result.stdout
