@@ -489,3 +489,52 @@ def test_dispatcher_clean_tree_precedes_write_guard_advisory(tmp_path):
         capture_output=True, text=True, timeout=10, cwd=str(repo),
     )
     assert '"decision": "block"' in result.stdout
+
+
+def _add_worktree(main_root: Path, wt_path: Path, branch: str) -> None:
+    """Create a linked worktree of `main_root` at `wt_path` on a new `branch`.
+
+    A linked worktree has its OWN working tree but SHARES `.git` with the main
+    checkout — so uncommitted work here is invisible to `git status` run in the
+    main checkout, which is exactly the leak the all-worktrees scan closes.
+    """
+    subprocess.run(["git", "-C", str(main_root), "worktree", "add", "-b", branch,
+                    str(wt_path)], check=True, capture_output=True)
+
+
+def test_transition_dirty_linked_worktree_blocks(tmp_path):
+    """QA HIGH — worktree blindness. The plan file lives in the MAIN checkout,
+    but a big feature builds in a LINKED worktree. Uncommitted work is left in
+    the worktree; the completion transition is sent against the MAIN plan file.
+    The guard must enumerate ALL worktrees and BLOCK on the worktree dirt. Under
+    the OLD single-checkout logic the main checkout is clean -> it wrongly
+    ALLOWs (the silent LEAK); the all-worktrees scan makes it BLOCK."""
+    main = tmp_path / "repo"
+    main.mkdir()
+    _init_repo(main)
+    plan = _make_plan(main)                 # plan in the MAIN checkout
+    _commit_all(main)                       # main checkout clean, plan committed
+    wt = tmp_path / "wt"
+    _add_worktree(main, wt, "feature")      # linked worktree, initially clean
+    (wt / "feature.py").write_text("v1\n")  # UNCOMMITTED work in the worktree
+    out, rc = _run(_edit_to_complete(plan), cwd=main)
+    _assert_block(out)
+
+
+def test_transition_all_worktrees_clean_allows(tmp_path):
+    """Inverse of the worktree-dirt test: MAIN and a LINKED worktree are BOTH
+    clean (everything committed). The completion transition must ALLOW — the
+    all-worktrees scan must not over-block when no worktree has dirt."""
+    main = tmp_path / "repo"
+    main.mkdir()
+    _init_repo(main)
+    plan = _make_plan(main)
+    _commit_all(main)                       # main clean
+    wt = tmp_path / "wt"
+    _add_worktree(main, wt, "feature")      # linked worktree
+    (wt / "feature.py").write_text("v1\n")
+    subprocess.run(["git", "-C", str(wt), "add", "-A"], check=True, capture_output=True)
+    subprocess.run(["git", "-C", str(wt), "commit", "-q", "-m", "wt work"],
+                   check=True, capture_output=True)  # worktree now clean too
+    out, rc = _run(_edit_to_complete(plan), cwd=main)
+    _assert_allow(out, rc)

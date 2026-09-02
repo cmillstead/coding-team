@@ -189,6 +189,73 @@ def _dirty_excluding_plan(worktree_root: Path, plan_rel: str) -> "list[str] | No
     return dirty
 
 
+def _list_worktrees(repo_root: Path) -> "list[Path] | None":
+    """Return every worktree path of repo_root's repo, or None on uncertainty.
+
+    A big feature builds in a LINKED worktree while the plan file lives in the
+    MAIN checkout (planning keeps docs/plans/ in the main repo root, never a
+    worktree). A linked worktree has its OWN working tree but SHARES `.git`, so
+    `git status` in the main checkout cannot see uncommitted work left in the
+    worktree. The guard must therefore inspect ALL worktrees, not just the
+    plan's checkout, or a big feature's uncommitted worktree work would leak
+    past a `status: complete` flip — the worst case, since that is exactly where
+    uncommitted work is most likely (QA HIGH).
+
+    `git worktree list --porcelain` emits one `worktree <path>` line per
+    worktree (main first, then each linked worktree). Run with the SAME
+    `_scrub_git_env()` scrub the status subprocess uses, so an ambient
+    GIT_DIR / GIT_WORK_TREE / GIT_COMMON_DIR cannot redirect enumeration to a
+    different repo. Reads stdout as raw bytes (no text=True) and decodes each
+    path with os.fsdecode — matching how `str(Path)` renders paths — so an
+    undecodable path cannot raise here. Returns None (uncertainty -> caller
+    allows) on git absent / timeout / non-zero exit.
+    """
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(repo_root), "worktree", "list", "--porcelain"],
+            capture_output=True, timeout=5, check=False, env=_scrub_git_env(),
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+        return None
+    if result.returncode != 0:
+        return None
+    paths: list[Path] = []
+    for line in result.stdout.split(b"\n"):
+        if line.startswith(b"worktree "):
+            raw = line[len(b"worktree "):]
+            paths.append(Path(os.fsdecode(raw)))
+    return paths
+
+
+def _collect_dirt_across_worktrees(
+    plan_repo_root: Path, plan_rel: str
+) -> "dict[Path, list[str]] | None":
+    """Map each dirty worktree to its non-excluded dirt, across ALL worktrees.
+
+    Returns None if the worktree enumeration itself is uncertain (git error) —
+    the caller treats None as ALLOW. Otherwise returns a dict of
+    {worktree_path: [dirty entries]} for every worktree that has confirmed
+    non-excluded dirt (an empty dict means every worktree is clean -> allow).
+
+    Per-worktree uncertainty (a `_dirty_excluding_plan` returning None) is
+    SKIPPED, not treated as a global allow: confirmed dirt found in one worktree
+    still BLOCKs even if another worktree's status could not be determined —
+    positive evidence of uncommitted work wins over uncertainty elsewhere, while
+    a run that finds no confirmed dirt anywhere still allows. The plan file's
+    repo-relative path is excluded in EVERY worktree (harmless where the plan
+    file is not present or not dirty).
+    """
+    worktrees = _list_worktrees(plan_repo_root)
+    if worktrees is None:
+        return None
+    dirty_by_worktree: dict[Path, list[str]] = {}
+    for worktree in worktrees:
+        dirty = _dirty_excluding_plan(worktree, plan_rel)
+        if dirty:
+            dirty_by_worktree[worktree] = dirty
+    return dirty_by_worktree
+
+
 def main() -> None:
     event = _event.parse_event()
     if not event:
@@ -215,22 +282,29 @@ def main() -> None:
     except (OSError, ValueError, RuntimeError):
         return  # cannot locate plan within its repo -> uncertainty -> allow
 
-    dirty = _dirty_excluding_plan(worktree_root, plan_rel)
-    if dirty is None:
-        return  # git uncertainty -> allow
-    if not dirty:
-        return  # clean tree (excluding the plan file) -> allow
+    dirty_by_worktree = _collect_dirt_across_worktrees(worktree_root, plan_rel)
+    if dirty_by_worktree is None:
+        return  # git uncertainty (worktree enumeration failed) -> allow
+    if not dirty_by_worktree:
+        return  # every worktree clean (excluding the plan file) -> allow
 
-    listing = "\n".join(f"  {line}" for line in dirty)
+    sections = []
+    for worktree, lines in dirty_by_worktree.items():
+        listing = "\n".join(f"    {line}" for line in lines)
+        sections.append(f"  Worktree: {worktree}\n{listing}")
+    body = "\n\n".join(sections)
     _output.block(
-        "BLOCKED: cannot mark this plan `status: complete` — the working tree "
+        "BLOCKED: cannot mark this plan `status: complete` — a working tree "
         "still has uncommitted work.\n\n"
         f"Plan: {target}\n"
         f"Repo: {worktree_root}\n\n"
-        "Uncommitted / untracked (excluding the plan file):\n"
-        f"{listing}\n\n"
-        "No coding-team run is complete until its work is committed. Before "
-        "flipping the plan to `status: complete`:\n"
+        "Uncommitted / untracked across ALL worktrees of the repo (excluding "
+        "the plan file):\n"
+        f"{body}\n\n"
+        "No coding-team run is complete until its work is committed. A big "
+        "feature may have built in a LINKED worktree — check the worktree(s) "
+        "named above, not just your current checkout. Before flipping the plan "
+        "to `status: complete`:\n"
         "  - Commit the files above (git add <files> && git commit), OR\n"
         "  - If any are genuine garbage, discard them (git checkout -- <file>, "
         "git clean -f <file>).\n"
