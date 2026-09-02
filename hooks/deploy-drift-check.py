@@ -59,6 +59,28 @@ def find_drift(source_dir: Path, deployed_dir: Path) -> list[str]:
     return sorted(drifted)
 
 
+def find_stdlib_collisions(source_dir: Path) -> list[str]:
+    """Return sorted relative paths of *.py files under source_dir (and its
+    _lib/ subdir) whose stem collides with a Python stdlib module name. A hook
+    named after a stdlib module (e.g. operator.py) shadows that module and
+    crashes every hook in the directory on import. Advisory only — never raises."""
+    collisions: list[str] = []
+    stdlib_names = sys.stdlib_module_names
+    try:
+        for src_file in source_dir.glob("*.py"):
+            if src_file.stem in stdlib_names:
+                collisions.append(src_file.name)
+    except OSError:
+        pass  # advisory hook: skip an unreadable source dir, never block session start
+    try:
+        for src_file in (source_dir / "_lib").glob("*.py"):
+            if src_file.stem in stdlib_names:
+                collisions.append(f"_lib/{src_file.name}")
+    except OSError:
+        pass  # advisory hook: skip an unreadable _lib dir, never block session start
+    return sorted(collisions)
+
+
 def main() -> None:
     if MARKER_FILE.exists():
         return
@@ -74,17 +96,26 @@ def main() -> None:
     try:
         drifted = find_drift(SOURCE, DEPLOYED)
     except OSError:
-        return
+        drifted = []  # advisory: drift check failed; still run the collision scan
 
-    if not drifted:
-        return
+    if drifted:
+        file_list = "\n".join(f"  - {f}" for f in drifted)
+        print(
+            f"⚠️  DEPLOY DRIFT: {len(drifted)} hook file(s) differ between source and deployed copies:\n"
+            f"{file_list}\n"
+            f"Run `bash ~/.claude/skills/coding-team/scripts/deploy.sh` to sync (source is canonical)."
+        )
 
-    file_list = "\n".join(f"  - {f}" for f in drifted)
-    print(
-        f"⚠️  DEPLOY DRIFT: {len(drifted)} hook file(s) differ between source and deployed copies:\n"
-        f"{file_list}\n"
-        f"Run `bash ~/.claude/skills/coding-team/scripts/deploy.sh` to sync (source is canonical)."
-    )
+    collisions = find_stdlib_collisions(SOURCE)
+    if collisions:
+        collision_list = "\n".join(f"  - {c}" for c in collisions)
+        print(
+            f"⚠️  STDLIB COLLISION: {len(collisions)} hook file(s) are named after a "
+            f"Python stdlib module:\n"
+            f"{collision_list}\n"
+            f"A hook whose name shadows a stdlib module crashes every hook in its "
+            f"directory on import. Rename with a `base-` prefix (e.g. `base-operator.py`)."
+        )
 
 
 if __name__ == "__main__":

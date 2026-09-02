@@ -125,3 +125,85 @@ class TestDeployedOnlyFileIgnored:
         # Assert
         assert "deployed-only.py" not in result
         assert result == []
+
+
+def _load_module():
+    """Load the whole deploy-drift-check module (for find_stdlib_collisions / main /
+    the SOURCE|DEPLOYED|MARKER_FILE attributes). Distinct from _load_find_drift above,
+    which returns only the find_drift callable — both coexist, neither redefines the other."""
+    spec = importlib.util.spec_from_file_location(
+        "deploy_drift_check", HOOKS_DIR / "deploy-drift-check.py"
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _write_py(directory: Path, name: str) -> None:
+    (directory / name).write_text("x = 1\n")
+
+
+class TestFindStdlibCollisions:
+    def test_colliding_top_level_file_flagged(self, tmp_path):
+        hook = _load_module()
+        _write_py(tmp_path, "operator.py")
+        assert hook.find_stdlib_collisions(tmp_path) == ["operator.py"]
+
+    def test_non_colliding_files_not_flagged(self, tmp_path):
+        hook = _load_module()
+        _write_py(tmp_path, "deploy-drift-check.py")
+        _write_py(tmp_path, "ci-orphan-detector.py")
+        assert hook.find_stdlib_collisions(tmp_path) == []
+
+    def test_colliding_lib_file_flagged(self, tmp_path):
+        hook = _load_module()
+        lib = tmp_path / "_lib"
+        lib.mkdir()
+        _write_py(lib, "types.py")
+        assert hook.find_stdlib_collisions(tmp_path) == ["_lib/types.py"]
+
+    def test_mixed_returns_only_collisions_sorted(self, tmp_path):
+        hook = _load_module()
+        lib = tmp_path / "_lib"
+        lib.mkdir()
+        _write_py(tmp_path, "operator.py")
+        _write_py(tmp_path, "safe_hook.py")
+        _write_py(lib, "io.py")
+        _write_py(lib, "helpers.py")
+        assert hook.find_stdlib_collisions(tmp_path) == ["_lib/io.py", "operator.py"]
+
+    def test_missing_dir_returns_empty_never_raises(self, tmp_path):
+        hook = _load_module()
+        assert hook.find_stdlib_collisions(tmp_path / "does-not-exist") == []
+
+
+class TestMainCollisionWarning:
+    # mock-ok: pytest monkeypatch below performs real dependency injection of the
+    # module-level Path constants (SOURCE/DEPLOYED/MARKER_FILE) — each is swapped for
+    # another real Path under tmp_path, no behavior is faked. main() reads these module
+    # globals directly, so redirecting them at real temp files requires setattr; the
+    # hook's real find_stdlib_collisions/find_drift logic runs unchanged against real files.
+    def test_warning_prints_when_collision_present(self, tmp_path, capsys, monkeypatch):  # mock-ok: see class note
+        hook = _load_module()
+        source = tmp_path / "source"
+        source.mkdir()
+        _write_py(source, "operator.py")
+        monkeypatch.setattr(hook, "SOURCE", source)  # mock-ok: real Path DI
+        monkeypatch.setattr(hook, "DEPLOYED", source)  # mock-ok: real Path DI (identical -> no drift noise)
+        monkeypatch.setattr(hook, "MARKER_FILE", tmp_path / "marker")  # mock-ok: real Path DI (unique marker)
+        hook.main()
+        out = capsys.readouterr().out
+        assert "STDLIB COLLISION" in out
+        assert "operator.py" in out
+
+    def test_no_warning_when_clean(self, tmp_path, capsys, monkeypatch):  # mock-ok: see class note
+        hook = _load_module()
+        source = tmp_path / "source"
+        source.mkdir()
+        _write_py(source, "safe-hook.py")
+        monkeypatch.setattr(hook, "SOURCE", source)  # mock-ok: real Path DI
+        monkeypatch.setattr(hook, "DEPLOYED", source)  # mock-ok: real Path DI
+        monkeypatch.setattr(hook, "MARKER_FILE", tmp_path / "marker")  # mock-ok: real Path DI (unique marker)
+        hook.main()
+        out = capsys.readouterr().out
+        assert "STDLIB COLLISION" not in out
