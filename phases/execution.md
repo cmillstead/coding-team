@@ -16,6 +16,8 @@ Apply the `/worktree` threshold to the plan's task list: 5+ files across 3+ dire
 
 ## Task-by-Task Execution
 
+@~/.claude/rules-on-demand/precomputation.md
+
 Begin execution now. **Agent team per task: implementer + audit team (spec + simplify + harden).** Implementer follows the `/tdd` skill for all implementation work.
 
 **CRITICAL: The main agent is the orchestrator, not the implementer.** During Phase 5, you dispatch all file edits to agents. Your ONLY permitted direct actions are:

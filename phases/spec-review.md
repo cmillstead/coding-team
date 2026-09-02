@@ -8,15 +8,16 @@ stalls the pipeline.
 ## Steps
 
 1. Write spec to `docs/plans/YYYY-MM-DD-<feature>-design.md` (always in the **main repo root**, not a worktree)
-2. **Spec-doc reviewer tier gate (PLANNED tier — this phase runs pre-diff, before any
+2. **Seam ownership** — for any two-agent split, the spec MUST name which agent OWNS the interface/seam between them (the shared file, data contract, or API boundary). An unowned agent↔agent seam fails every run even when both halves are individually correct. If the seam is unnamed, fix the spec before continuing.
+3. **Spec-doc reviewer tier gate (PLANNED tier — this phase runs pre-diff, before any
    implementation exists, so no effective-tier recompute is available yet):**
    - Trivial/Small SKIP the spec-doc reviewer. Small inlines a design note instead of a
      heavyweight spec; no separate reviewer dispatch is needed.
    - Medium/Large RUN it: dispatch spec-document-reviewer via Agent tool
      (subagent_type: Explore). See `~/.claude/agents/ct-spec-doc-reviewer.md`. Gate matrix:
      `phases/task-weight.md`.
-3. If Issues Found: fix, re-dispatch, repeat (max 3 iterations, then surface to user)
-4. If Approved: continue to the Second-Opinion Gate below.
+4. If Issues Found: fix, re-dispatch, repeat (max 3 iterations, then surface to user)
+5. If Approved: continue to the Second-Opinion Gate below.
 
 ## Second-Opinion Gate (before Phase 4)
 

@@ -462,7 +462,7 @@ hooks/                            # Claude Code hooks, deployed to ~/.claude/hoo
   builder-self-check.py           #   validates implementer agent output quality
   codesight-hooks.py              #   codesight indexing integration
   coding-team-lifecycle.py        #   PostToolUse(Skill) — second-opinion checkbox gate, read from plan frontmatter
-  deploy-drift-check.py           #   SessionStart — detects source↔deployed hook drift
+  deploy-drift-check.py           #   SessionStart — detects source↔deployed hook drift and stdlib-name hook collisions
   git-safety-guard.py             #   prevents force push, main branch commits, etc.
   hook-health-check.py            #   SessionStart — verifies all Python hooks are healthy
   lint-warning-enforcer.py        #   treats lint warnings as errors
