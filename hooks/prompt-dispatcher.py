@@ -34,11 +34,6 @@ from pathlib import Path
 # Registration order — MUST be preserved (spec §"The hooks").
 HOOK_PATHS: list[str] = [
     "/Users/cevin/.claude/hooks/paul-apply-review-guard.py",   # Path A fence — MUST be first
-    "/Users/cevin/src/engram/.base/hooks/active-hook.py",
-    "/Users/cevin/src/engram/.base/hooks/backlog-hook.py",
-    "/Users/cevin/src/engram/.base/hooks/base-pulse-check.py",
-    "/Users/cevin/src/engram/.base/hooks/psmm-injector.py",
-    "/Users/cevin/src/engram/.base/hooks/base-operator.py",
     "/Users/cevin/.claude/hooks/session-capture-check.py",
     "/Users/cevin/.claude/hooks/proactive-recall.py",
     "/Users/cevin/.claude/hooks/mid-session-recall.py",
