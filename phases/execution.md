@@ -103,6 +103,35 @@ For each task in plan:
      Do NOT proceed to audit with incomplete work.
      Known rationalization: "The agent reported DONE so it must be complete" — DONE is a claim, not evidence. Verify the count.
 
+  CLEAN-TREE CHECK (MANDATORY before accepting DONE)
+  4a. Check EVERY worktree of the repo, not just your current checkout: a big
+      feature builds in a LINKED worktree while the plan file lives in the main
+      checkout, so a `git status` in the main checkout alone cannot see
+      uncommitted work left in the worktree. Enumerate worktrees with
+      `git -C <repo-root> worktree list --porcelain`, then for EACH `worktree`
+      path run `git -C <worktree-path> status --porcelain --untracked-files=all`
+      (the `--untracked-files=all` flag is REQUIRED — without it git collapses an
+      untracked directory to a single `?? docs/` entry, which hides whether the
+      lone thing inside is the active plan file, so a clean DONE would be falsely
+      rejected). In the ONE worktree that physically HOLDS the active plan
+      (normally the main checkout), that plan file is the only allowed dirt — it
+      accrues its own checkbox churn during the run and is bookkeeping, not work
+      lying around (some projects gitignore docs/plans so it never appears,
+      others track it and it will). In EVERY OTHER worktree, NOTHING may be dirty
+      at all: exclude the active plan ONLY in its own worktree — a
+      `docs/plans/<same-name>.md` dirty in a DIFFERENT worktree is a DIFFERENT
+      physical file and counts as real uncommitted work, NOT the active plan, so
+      do not exclude it there. If any path other than the active plan (in its own
+      worktree) appears in ANY worktree, the DONE is NOT accepted: the
+      implementer left uncommitted work — re-dispatch with the exact `git status`
+      output (naming the worktree) and instruct it to commit (or, for genuine
+      garbage, discard) before reporting DONE again.
+      Known rationalization: "the implementer said it committed" — DONE is a
+      claim, not evidence. The porcelain output (minus the active plan file) is
+      the evidence; verify it, don't trust the report. This is why the
+      completion-transition guard is a backstop, not the first line: catch a
+      dirty tree here, per task.
+
   AUDIT PASS
   Read `phases/audit-loop.md` and follow its instructions for the audit pass.
 

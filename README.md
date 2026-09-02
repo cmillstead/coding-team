@@ -312,7 +312,7 @@ This deploys hooks to `~/.claude/hooks/`, agents to `~/.claude/agents/`, rules t
 
 | Dispatcher | Event | Routes to |
 |---|---|---|
-| `pretooluse-dispatcher.py` | PreToolUse | `paul-apply-agent-guard.py` (blocking — PAUL plan-review gate, Agent branch, runs first), `write-guard.py` (blocking — instruction-file edit guard), `git-safety-guard.py` (blocking — force-push/main-branch guard), `codesight-hooks.py` (prompt injection) |
+| `pretooluse-dispatcher.py` | PreToolUse | `paul-apply-agent-guard.py` (blocking — PAUL plan-review gate, Agent branch, runs first), `clean-tree-gate.py` (blocking — plan completion clean-tree guard, Edit\|Write branch, runs before write-guard), `write-guard.py` (blocking — instruction-file edit guard), `git-safety-guard.py` (blocking — force-push/main-branch guard), `codesight-hooks.py` (prompt injection) |
 | `posttooluse-dispatcher.py` | PostToolUse | `loop-detection.py`, `lint-warning-enforcer.py`, `ci-watch-arm.py` (arms the post-push CI watcher), `coding-team-lifecycle.py`, `codesight-hooks.py`, `builder-self-check.py` |
 | `prompt-dispatcher.py` | UserPromptSubmit | `paul-apply-review-guard.py` (PAUL plan-review gate, `/paul:apply` prompts, runs first), then the prompt-time hook set (including `ci-watch-inject.py`, which surfaces post-push CI-failure markers), run in-process via `runpy` (not subprocessed) |
 | `session-start-dispatcher.py` | SessionStart | `hook-health-check.py`, `deploy-drift-check.py`, `ci-orphan-detector.sh`, and other session-start checks, each run as its own subprocess in its own interpreter |
@@ -455,11 +455,12 @@ cookbook/                         # historical / narrative material (2 files, no
   case-studies.md                 #   worked examples and retrospective case studies
   context-inheritance-matrix.md   #   point-in-time verification artifact — historical content, not maintained
 hooks/                            # Claude Code hooks, deployed to ~/.claude/hooks/
-  pretooluse-dispatcher.py        #   PreToolUse dispatcher — routes to paul-apply-agent-guard, write-guard, git-safety-guard, codesight-hooks
+  pretooluse-dispatcher.py        #   PreToolUse dispatcher — routes to paul-apply-agent-guard, clean-tree-gate, write-guard, git-safety-guard, codesight-hooks
   posttooluse-dispatcher.py       #   PostToolUse dispatcher — routes to loop-detection, lint-warning-enforcer, coding-team-lifecycle, codesight-hooks, builder-self-check
   prompt-dispatcher.py            #   UserPromptSubmit dispatcher — routes to paul-apply-review-guard, then runs the prompt-time hook set in-process via runpy
   session-start-dispatcher.py     #   SessionStart dispatcher — runs hook-health-check, deploy-drift-check, ci-orphan-detector.sh, and related checks as subprocesses
   builder-self-check.py           #   validates implementer agent output quality
+  clean-tree-gate.py              #   PreToolUse(Edit|Write) — blocks flipping a plan to status: complete while the owning repo's tree is dirty
   codesight-hooks.py              #   codesight indexing integration
   coding-team-lifecycle.py        #   PostToolUse(Skill) — second-opinion checkbox gate, read from plan frontmatter
   deploy-drift-check.py           #   SessionStart — detects source↔deployed hook drift and stdlib-name hook collisions

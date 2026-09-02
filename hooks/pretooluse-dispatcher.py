@@ -26,7 +26,10 @@ Blocking contract (CRITICAL):
 
 Routing:
   - Agent     → paul-apply-agent-guard.py (Path B fence, blocking, first), then codesight-hooks.py (prompt injection)
-  - Edit|Write → write-guard.py (blocking guard — verbatim passthrough)
+  - Edit|Write → clean-tree-gate.py (blocking — fires only on the plan
+                  in-progress→complete transition, else silent; runs FIRST so a
+                  write-guard ALLOW advisory can't pass through ahead of it),
+                  then write-guard.py (blocking guard — verbatim passthrough)
   - Bash       → git-safety-guard.py (blocking guard — verbatim passthrough), then
                   rtk hook claude (only if git-safety-guard produced no output)
 
@@ -56,6 +59,17 @@ WRITE_GUARD = str(HOOKS / "write-guard.py")
 GIT_SAFETY_GUARD = str(HOOKS / "git-safety-guard.py")
 CODESIGHT_HOOKS = str(HOOKS / "codesight-hooks.py")
 PAUL_AGENT_GUARD = str(HOOKS / "paul-apply-agent-guard.py")
+
+# Referenced from the RESOLVED SOURCE dir, not the ~/.claude/hooks symlink dir,
+# so the guard is LIVE the moment it is written in this working tree — no separate
+# ~/.claude symlink/activation step gates enforcement. `Path(__file__).resolve()`
+# follows the dispatcher's own ~/.claude/hooks symlink back to
+# ~/.claude/skills/coding-team/hooks/ in production, and is idempotent when the
+# dispatcher is run directly from source (tests). The other handlers predate this
+# and address their already-deployed ~/.claude/hooks symlinks via HOOKS; only this
+# new guard uses the source-dir reference (documented one-off, see plan rationale).
+_SRC_HOOKS = Path(__file__).resolve().parent
+CLEAN_TREE_GATE = str(_SRC_HOOKS / "clean-tree-gate.py")
 
 
 def _skip_names() -> set[str]:
@@ -172,6 +186,22 @@ def main() -> None:
                 _passthrough(stdout, stderr, rc, Path(CODESIGHT_HOOKS).name)
 
     elif tool_name in ("Edit", "Write"):
+        # Clean-tree completion gate (blocking) — runs FIRST (FIX 7). It is
+        # SILENT except on a confirmed dirty-completion transition, so running
+        # it before write-guard is safe: if silent, write-guard runs normally
+        # next; if it blocks, the edit is blocked anyway. It MUST precede
+        # write-guard because write-guard can emit a NON-blocking ALLOW advisory
+        # (e.g. graduated Codex-learning C1 path-trust) on a plan status-flip
+        # edit — and the dispatcher's first-response-wins passthrough would then
+        # exit on that advisory's stdout before clean-tree ever ran, leaking a
+        # dirty completion. (Confirmed against write-guard.py: check_c1_path_trust
+        # is language-agnostic with no file-extension gate, and a Write flip
+        # carries the full plan body, which is full of path tokens.)
+        if not _is_skipped(CLEAN_TREE_GATE, skip):
+            stdout, stderr, rc = _run_handler([sys.executable, CLEAN_TREE_GATE], payload)
+            if stdout.strip() or rc != 0:
+                _passthrough(stdout, stderr, rc, Path(CLEAN_TREE_GATE).name)
+
         # Write guard (blocking): pass stdout verbatim and exit if it produced output.
         if not _is_skipped(WRITE_GUARD, skip):
             stdout, stderr, rc = _run_handler([sys.executable, WRITE_GUARD], payload)
