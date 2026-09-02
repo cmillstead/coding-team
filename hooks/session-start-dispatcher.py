@@ -10,7 +10,7 @@ Why subprocess (not runpy like prompt-dispatcher):
   The six checks use THREE different interpreters and one lives OUTSIDE
   ~/.claude. They cannot all be imported in-process:
     - ci-orphan-detector.sh is bash, not Python.
-    - satellite-detection.py must run from ~/src/engram/.base/hooks/ and uses a
+    - (removed 2026-09-01) satellite-detection.py / base system — deleted; used a
       pyenv-shim python3 (its __file__-relative path resolution depends on its
       real on-disk location).
     - weekly-synthesis-check.py runs under a specific pyenv 3.11.14 interpreter.
@@ -75,10 +75,7 @@ def _checks() -> list[tuple[list[str], int]]:
         ([sys.executable, str(CLAUDE_HOOKS / "deploy-drift-check.py")], 10),
         # 3. ci-orphan-detector.sh — bash: orphan PRs + stale branches.
         (["bash", str(CLAUDE_HOOKS / "ci-orphan-detector.sh")], 30),
-        # 4. satellite-detection.py — OUTSIDE ~/.claude; pyenv shim; __file__-relative.
-        ([_interp(_PYENV_SHIM),
-          "/Users/cevin/src/engram/.base/hooks/satellite-detection.py"], 15),
-        # 5. context-staleness-check.py — stale _context.md + active-projects sync.
+        # context-staleness-check.py — stale _context.md + active-projects sync.
         ([sys.executable, str(CLAUDE_HOOKS / "context-staleness-check.py")], 10),
         # 6. weekly-synthesis-check.py — pyenv 3.11.14; weekly-synthesis reminder.
         ([_interp(_PYENV_3_11), str(CLAUDE_HOOKS / "weekly-synthesis-check.py")], 10),
