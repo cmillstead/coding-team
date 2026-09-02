@@ -207,3 +207,27 @@ class TestMainCollisionWarning:
         hook.main()
         out = capsys.readouterr().out
         assert "STDLIB COLLISION" not in out
+
+    def test_drift_and_collision_fire_independently(self, tmp_path, capsys, monkeypatch):  # mock-ok: see class note
+        # mock-ok: real Path DI of module globals; separate SOURCE/DEPLOYED dirs so
+        # find_drift sees real drift, plus a stdlib-colliding file in SOURCE — proves
+        # the two advisories fire independently (collision NOT suppressed by drift).
+        hook = _load_module()
+        source = tmp_path / "source"
+        deployed = tmp_path / "deployed"
+        source.mkdir()
+        deployed.mkdir()
+        # Drift: same-named file with different content in each dir.
+        (source / "some-hook.py").write_text("x = 1\n")
+        (deployed / "some-hook.py").write_text("x = 2\n")
+        # Collision: a stdlib-named file present in SOURCE.
+        _write_py(source, "operator.py")
+        monkeypatch.setattr(hook, "SOURCE", source)  # mock-ok: real Path DI
+        monkeypatch.setattr(hook, "DEPLOYED", deployed)  # mock-ok: real Path DI (drift vs source)
+        monkeypatch.setattr(hook, "MARKER_FILE", tmp_path / "marker")  # mock-ok: real Path DI (unique marker)
+        hook.main()
+        out = capsys.readouterr().out
+        assert "DEPLOY DRIFT" in out
+        assert "some-hook.py" in out
+        assert "STDLIB COLLISION" in out
+        assert "operator.py" in out
