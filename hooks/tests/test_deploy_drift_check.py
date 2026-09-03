@@ -85,6 +85,43 @@ class TestMissingDeployedFile:
         assert "codesight-hooks.py" in result
 
 
+class TestSourceOnlyAllowList:
+    def test_source_only_hooks_not_flagged_when_deployed_missing(self, tmp_path):
+        """The run-from-source-only hooks (clean-tree-gate + the two engram hooks) have
+        NO deployed copy BY DESIGN — a missing deployed counterpart must NOT flag drift."""
+        # Arrange
+        src = tmp_path / "source" / "hooks"
+        dep = tmp_path / "deployed" / "hooks"
+        src.mkdir(parents=True)
+        dep.mkdir(parents=True)
+        for name in ("clean-tree-gate.py", "engram-pretool-inject.py",
+                     "engram-session-start.py"):
+            (src / name).write_bytes(b"# source-only hook\n")
+        # deployed dir intentionally has none of them
+
+        # Act
+        result = find_drift(src, dep)
+
+        # Assert
+        assert result == []
+
+    def test_non_allowlisted_missing_still_flags(self, tmp_path):
+        """A genuinely-missing deployed file that is NOT on the allow-list still flags."""
+        # Arrange
+        src = tmp_path / "source" / "hooks"
+        dep = tmp_path / "deployed" / "hooks"
+        src.mkdir(parents=True)
+        dep.mkdir(parents=True)
+        (src / "engram-pretool-inject.py").write_bytes(b"# allow-listed\n")   # skipped
+        (src / "write-guard.py").write_bytes(b"# real deployed hook\n")       # must flag
+
+        # Act
+        result = find_drift(src, dep)
+
+        # Assert
+        assert result == ["write-guard.py"]
+
+
 class TestLibDrift:
     def test_differing_lib_file_reported_with_prefix(self, tmp_path):
         """_lib drift: a differing _lib/foo.py shows up as '_lib/foo.py' in the result."""

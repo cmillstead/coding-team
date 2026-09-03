@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
 """SessionStart hook dispatcher.
 
-Consolidates the six SessionStart checks that previously registered as six
-separate entries under the matcher-"" block in ~/.claude/settings.json into a
-single registration, mirroring the prompt-dispatcher.py precedent (which fronts
-the UserPromptSubmit checks).
+Consolidates the SessionStart checks that previously registered as separate
+entries under the matcher-"" block in ~/.claude/settings.json into a single
+registration, mirroring the prompt-dispatcher.py precedent (which fronts the
+UserPromptSubmit checks). The engram-session-start.py briefing (TRK-209) is
+appended as an additional check — referenced from the sub-repo source dir so it
+is live the moment written (no deploy step), and emits plain text only.
 
 Why subprocess (not runpy like prompt-dispatcher):
-  The six checks use THREE different interpreters and one lives OUTSIDE
+  The checks use several different interpreters and some live OUTSIDE
   ~/.claude. They cannot all be imported in-process:
     - ci-orphan-detector.sh is bash, not Python.
     - (removed 2026-09-01) satellite-detection.py / base system — deleted; used a
@@ -20,7 +22,7 @@ Why subprocess (not runpy like prompt-dispatcher):
 Per-check isolation contract (the #1 consolidation risk):
   - Each sub-check runs in its own subprocess inside its own try/except.
   - A crash, non-zero exit, or timeout in one check NEVER prevents the other
-    five from running (previously, six independent settings.json entries each
+    checks from running (previously, independent settings.json entries each
     ran regardless of the others; this dispatcher preserves that property).
   - Each sub-check has its own per-check timeout so one slow check cannot hang
     session start.
@@ -28,7 +30,7 @@ Per-check isolation contract (the #1 consolidation risk):
 Output contract (SessionStart = PLAIN TEXT, never the decision JSON):
   SessionStart hooks must emit PLAIN TEXT to stdout, NOT the PreToolUse
   {"decision":"allow","reason":...} protocol. Emitting that JSON makes Claude
-  Code report "SessionStart:startup hook error". Two of the six legacy checks
+  Code report "SessionStart:startup hook error". Two of the legacy checks
   (hook-health-check.py, ci-orphan-detector.sh) currently emit that malformed
   envelope, and weekly-synthesis-check.py emits {"result":"allow","message":...}.
   This dispatcher UNWRAPS any such legacy envelope to its plain-text payload, so
@@ -51,6 +53,10 @@ from pathlib import Path
 
 HOME = Path(os.path.expanduser("~"))
 CLAUDE_HOOKS = HOME / ".claude" / "hooks"
+
+# Source dir of THIS dispatcher — used to reference sub-repo hooks that are LIVE
+# the moment written (no deploy step), mirroring pretooluse-dispatcher's _SRC_HOOKS.
+_SRC_HOOKS = Path(__file__).resolve().parent
 
 # Interpreter resolution for the two pyenv-pinned checks. We resolve the pinned
 # interpreters but degrade to a sane fallback if the exact path is absent, so a
@@ -79,6 +85,9 @@ def _checks() -> list[tuple[list[str], int]]:
         ([sys.executable, str(CLAUDE_HOOKS / "context-staleness-check.py")], 10),
         # 6. weekly-synthesis-check.py — pyenv 3.11.14; weekly-synthesis reminder.
         ([_interp(_PYENV_3_11), str(CLAUDE_HOOKS / "weekly-synthesis-check.py")], 10),
+        # 7. engram-session-start.py — engram briefing + per-session dedup clear.
+        #    Source-dir reference (live on write); plain-text output only.
+        ([sys.executable, str(_SRC_HOOKS / "engram-session-start.py")], 10),
     ]
 
 

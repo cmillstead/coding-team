@@ -142,3 +142,16 @@ def test_dispatcher_skip_env_excludes_named_check(tmp_path, monkeypatch):
     out = buf.getvalue()
     assert "KEEP" in out
     assert "DROP" not in out
+
+
+def test_engram_briefing_registered_in_checks():
+    """The engram briefing must be in the checks list, referenced from the source dir."""
+    names = [Path(argv[-1]).name for argv, _timeout in ssd._checks()]
+    assert "engram-session-start.py" in names
+
+
+def test_engram_briefing_runs_from_source_dir():
+    """Its path must resolve to the sub-repo hooks dir (live-on-write), not ~/.claude/hooks."""
+    src_hooks = Path(ssd.__file__).resolve().parent
+    hit = [argv for argv, _t in ssd._checks() if Path(argv[-1]).name == "engram-session-start.py"]
+    assert hit and Path(hit[0][-1]).resolve().parent == src_hooks

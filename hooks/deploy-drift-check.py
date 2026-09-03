@@ -15,6 +15,16 @@ SOURCE = Path.home() / ".claude/skills/coding-team/hooks"
 DEPLOYED = Path.home() / ".claude/hooks"
 MARKER_FILE = Path("/tmp/deploy-drift-checked")
 
+# Hooks that run LIVE from the source dir and are intentionally NOT deployed into
+# ~/.claude/hooks/. A missing deployed copy for these is BY DESIGN, not drift — deploying
+# them (via deploy.sh) would break their run-from-source contract. Real content drift for
+# any OTHER file is still flagged.
+SOURCE_ONLY_HOOKS = frozenset({
+    "clean-tree-gate.py",
+    "engram-pretool-inject.py",
+    "engram-session-start.py",
+})
+
 
 def find_drift(source_dir: Path, deployed_dir: Path) -> list[str]:
     """Return sorted relative paths of *.py files under source_dir whose
@@ -28,7 +38,9 @@ def find_drift(source_dir: Path, deployed_dir: Path) -> list[str]:
             rel = src_file.name
             deployed_file = deployed_dir / rel
             if not deployed_file.exists():
-                drifted.append(rel)
+                # Source-only-by-design hooks have no deployed copy — skip the missing flag.
+                if rel not in SOURCE_ONLY_HOOKS:
+                    drifted.append(rel)
             else:
                 try:
                     if src_file.read_bytes() != deployed_file.read_bytes():
