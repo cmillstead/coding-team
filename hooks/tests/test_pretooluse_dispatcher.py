@@ -514,3 +514,128 @@ class TestUnknownToolName:
         out, rc = _run_script(PRETOOLUSE_DISPATCHER, event)
         assert rc == 0
         assert out.strip() == ""
+
+
+# ---------------------------------------------------------------------------
+# Engram delivery injector wiring (TRK-209)
+# ---------------------------------------------------------------------------
+
+def _fake_engram_high(tmp_path):
+    import stat as _stat
+    b = tmp_path / "engram"
+    b.write_text("#!/usr/bin/env python3\n"
+                 "import json; print(json.dumps({'file':'/f','query':'q',"
+                 "'items':[{'id':1,'title':'HITBLOCK','score':0.48}],'count':1}))\n")
+    b.chmod(b.stat().st_mode | _stat.S_IEXEC | _stat.S_IRUSR)
+    return b
+
+
+def _dedup_file_for(session_id):
+    """GLOBAL /tmp dedup path for a subprocess run under session_id (mirrors
+    _lib.state.get_state_file + engram-pretool-inject.DEDUP_PREFIX). Lets wiring tests
+    clean up so dedup state never poisons a rerun."""
+    import hashlib
+    h = hashlib.sha256(session_id.encode()).hexdigest()[:12]
+    return Path(f"/tmp/engram-delivery-dedup-{h}.json")
+
+
+def _uid(prefix):
+    import uuid
+    return f"{prefix}-{uuid.uuid4().hex[:12]}"
+
+
+def test_read_event_injects_engram_block(tmp_path):
+    fake = _fake_engram_high(tmp_path)
+    sid = _uid("disp-read")
+    try:
+        env = {"ENGRAM_PRETOOL_BIN": str(fake), "ENGRAM_DELIVERY_LOG": str(tmp_path / "d.jsonl"),
+               "CLAUDE_CODE_SESSION_ID": sid,
+               "ENGRAM_PRETOOL_INJECT_TIMEOUT_S": "10"}  # fake engram is a slow Python cold-start under load
+        out, rc = _run_script(PRETOOLUSE_DISPATCHER, {"tool_name": "Read",
+                              "tool_input": {"file_path": "/f.py"}}, env=env)
+        assert rc == 0
+        assert "HITBLOCK" in out
+        assert json.loads(out)["hookSpecificOutput"]["hookEventName"] == "PreToolUse"
+    finally:
+        _dedup_file_for(sid).unlink(missing_ok=True)
+
+
+def test_write_injects_after_write_guard_is_silent(tmp_path):
+    fake = _fake_engram_high(tmp_path)
+    sid = _uid("disp-write")
+    try:
+        env = {"ENGRAM_PRETOOL_BIN": str(fake), "ENGRAM_DELIVERY_LOG": str(tmp_path / "d.jsonl"),
+               "CLAUDE_CODE_SESSION_ID": sid,
+               "ENGRAM_PRETOOL_INJECT_TIMEOUT_S": "10"}  # fake engram is a slow Python cold-start under load
+        # A benign Write to a NON-instruction file in /tmp: write-guard + clean-tree stay silent.
+        out, rc = _run_script(PRETOOLUSE_DISPATCHER, {"tool_name": "Write",
+                              "tool_input": {"file_path": str(tmp_path / "note.txt"),
+                                             "content": "hello"}}, env=env)
+        assert rc == 0
+        assert "HITBLOCK" in out
+    finally:
+        _dedup_file_for(sid).unlink(missing_ok=True)
+
+
+def test_blocked_write_does_not_inject(tmp_path):
+    """write-guard BLOCK must own the response; injector must NOT run/emit after a block."""
+    fake = _fake_engram_high(tmp_path)
+    env = {"ENGRAM_PRETOOL_BIN": str(fake), "ENGRAM_DELIVERY_LOG": str(tmp_path / "d.jsonl"),
+           "CLAUDE_CODE_SESSION_ID": _uid("disp-blk"),
+           "ENGRAM_PRETOOL_INJECT_TIMEOUT_S": "10"}  # fake engram is a slow Python cold-start under load
+    # _MOCK_CONTENT triggers write-guard's no-mocks BLOCK (see top of this file).
+    out, rc = _run_script(PRETOOLUSE_DISPATCHER, {"tool_name": "Write",
+                          "tool_input": {"file_path": str(tmp_path / "test_x.py"),
+                                         "content": _MOCK_CONTENT}}, env=env, cwd=str(tmp_path))
+    assert "HITBLOCK" not in out            # injector suppressed by first-response-wins
+    assert '"decision"' in out or rc == 2   # the block is what surfaced
+
+
+def test_injector_failure_does_not_break_read_dispatch(tmp_path):
+    """A dead engram binary must leave Read dispatch at exit 0, no output."""
+    env = {"ENGRAM_PRETOOL_BIN": "/no/such/engram",
+           "ENGRAM_DELIVERY_LOG": str(tmp_path / "d.jsonl"),
+           "CLAUDE_CODE_SESSION_ID": _uid("disp-x")}
+    out, rc = _run_script(PRETOOLUSE_DISPATCHER, {"tool_name": "Read",
+                          "tool_input": {"file_path": "/f.py"}}, env=env)
+    assert rc == 0
+    assert out.strip() == ""
+
+
+def test_injector_nonzero_exit_is_swallowed(tmp_path):
+    """An injector CRASH (import/syntax error → nonzero exit BEFORE its own __main__
+    try/except) must NOT become the dispatcher's exit code — otherwise every Read/Edit/
+    Write would fail. Point CT_ENGRAM_INJECT_PATH at a fake injector that exits 3; the
+    Read dispatch must still exit 0 with empty stdout."""
+    import stat as _stat
+    crash = tmp_path / "crash_injector.py"
+    crash.write_text("#!/usr/bin/env python3\nimport sys; sys.exit(3)\n")
+    crash.chmod(crash.stat().st_mode | _stat.S_IEXEC | _stat.S_IRUSR)
+    env = {"CT_ENGRAM_INJECT_PATH": str(crash),
+           "ENGRAM_DELIVERY_LOG": str(tmp_path / "d.jsonl"),
+           "CLAUDE_CODE_SESSION_ID": _uid("disp-crash")}
+    out, rc = _run_script(PRETOOLUSE_DISPATCHER, {"tool_name": "Read",
+                          "tool_input": {"file_path": "/f.py"}}, env=env)
+    assert rc == 0            # crash swallowed, not forwarded
+    assert out.strip() == ""
+
+
+def test_injector_nonzero_exit_is_swallowed_on_write(tmp_path):
+    """Same crash-swallow guarantee as the Read-branch test, but for the Edit|Write
+    branch (identical swallow logic, previously untested). After a SILENT write-guard on
+    a benign Write, a crashing injector (nonzero exit) must NOT become the dispatcher's
+    exit code — otherwise every Edit/Write would fail. Point CT_ENGRAM_INJECT_PATH at a
+    fake injector that exits 3; the Write dispatch must still exit 0 with empty stdout."""
+    import stat as _stat
+    crash = tmp_path / "crash_injector.py"
+    crash.write_text("#!/usr/bin/env python3\nimport sys; sys.exit(3)\n")
+    crash.chmod(crash.stat().st_mode | _stat.S_IEXEC | _stat.S_IRUSR)
+    env = {"CT_ENGRAM_INJECT_PATH": str(crash),
+           "ENGRAM_DELIVERY_LOG": str(tmp_path / "d.jsonl"),
+           "CLAUDE_CODE_SESSION_ID": _uid("disp-crash-write")}
+    # Benign Write to a NON-instruction file in /tmp: clean-tree + write-guard stay silent.
+    out, rc = _run_script(PRETOOLUSE_DISPATCHER, {"tool_name": "Write",
+                          "tool_input": {"file_path": str(tmp_path / "note.txt"),
+                                         "content": "hello"}}, env=env)
+    assert rc == 0            # crash swallowed on the Write branch, not forwarded
+    assert out.strip() == ""

@@ -26,10 +26,15 @@ Blocking contract (CRITICAL):
 
 Routing:
   - Agent     → paul-apply-agent-guard.py (Path B fence, blocking, first), then codesight-hooks.py (prompt injection)
+  - Read       → engram-pretool-inject.py (non-blocking injector — the ONLY handler
+                  in this branch; emits a PreToolUse additionalContext envelope or
+                  nothing, never a block)
   - Edit|Write → clean-tree-gate.py (blocking — fires only on the plan
                   in-progress→complete transition, else silent; runs FIRST so a
                   write-guard ALLOW advisory can't pass through ahead of it),
-                  then write-guard.py (blocking guard — verbatim passthrough)
+                  then write-guard.py (blocking guard — verbatim passthrough),
+                  then engram-pretool-inject.py (non-blocking injector — runs LAST,
+                  only if both guards above stayed silent)
   - Bash       → git-safety-guard.py (blocking guard — verbatim passthrough), then
                   rtk hook claude (only if git-safety-guard produced no output)
 
@@ -42,6 +47,8 @@ First-response-wins contract:
 Escape hatches:
   CT_PRETOOLUSE_DISPATCHER_DISABLE=1  → exit 0 immediately, no output.
   CT_PRETOOLUSE_DISPATCHER_SKIP="a,b" → skip handlers whose basename matches a name.
+  CT_ENGRAM_INJECT_PATH=/path        → override the engram injector path (test-only; point
+                                        it at a fake injector to prove a crash is swallowed).
 """
 
 import json
@@ -70,6 +77,12 @@ PAUL_AGENT_GUARD = str(HOOKS / "paul-apply-agent-guard.py")
 # new guard uses the source-dir reference (documented one-off, see plan rationale).
 _SRC_HOOKS = Path(__file__).resolve().parent
 CLEAN_TREE_GATE = str(_SRC_HOOKS / "clean-tree-gate.py")
+
+# Engram delivery injector (NON-blocking context provider, TRK-209). Source-dir
+# reference (live on write, same as CLEAN_TREE_GATE). Env-overridable (mirrors the
+# CT_PRETOOLUSE_DISPATCHER_* escape-hatch convention) so a test can point it at a
+# fake crashing injector to prove a nonzero injector exit is swallowed.
+ENGRAM_INJECT = os.environ.get("CT_ENGRAM_INJECT_PATH", str(_SRC_HOOKS / "engram-pretool-inject.py"))
 
 
 def _skip_names() -> set[str]:
@@ -185,6 +198,23 @@ def main() -> None:
             if stdout.strip() or rc != 0:
                 _passthrough(stdout, stderr, rc, Path(CODESIGHT_HOOKS).name)
 
+    elif tool_name == "Read":
+        # Read has no blocking guards — run the NON-blocking engram injector.
+        # It is a context provider, NOT a guard: it must NEVER set the dispatcher's
+        # exit code. A clean run (rc==0 + stdout) passes the envelope through; a
+        # nonzero exit (an import/syntax error raised BEFORE the injector's own
+        # __main__ try/except can catch it) is SWALLOWED so the dispatcher still
+        # exits 0 and the Read proceeds.
+        if not _is_skipped(ENGRAM_INJECT, skip):
+            stdout, stderr, rc = _run_handler(
+                [sys.executable, ENGRAM_INJECT], payload, timeout=5)
+            if rc == 0 and stdout.strip():
+                _passthrough(stdout, "", 0, Path(ENGRAM_INJECT).name)
+            elif rc != 0:
+                print(f"pretooluse-dispatcher: engram injector exit {rc} swallowed "
+                      f"(non-blocking)", file=sys.stderr)
+                # do NOT _passthrough — fall through so the dispatcher exits 0
+
     elif tool_name in ("Edit", "Write"):
         # Clean-tree completion gate (blocking) — runs FIRST (FIX 7). It is
         # SILENT except on a confirmed dirty-completion transition, so running
@@ -207,6 +237,23 @@ def main() -> None:
             stdout, stderr, rc = _run_handler([sys.executable, WRITE_GUARD], payload)
             if stdout.strip() or rc != 0:
                 _passthrough(stdout, stderr, rc, Path(WRITE_GUARD).name)
+
+        # Engram delivery injector (NON-blocking) — runs LAST, only if both blocking
+        # guards above stayed silent. Emitting the additionalContext envelope is stdout
+        # output, so under first-response-wins it MUST be last or it would pre-empt a
+        # guard. (If write-guard emitted a non-blocking ALLOW advisory, its _passthrough
+        # already exited above and the injector is correctly skipped for that call.)
+        # Same swallow-crash contract as the Read branch: a nonzero injector exit must
+        # NOT become the dispatcher's exit code (it would fail every Edit/Write).
+        if not _is_skipped(ENGRAM_INJECT, skip):
+            stdout, stderr, rc = _run_handler(
+                [sys.executable, ENGRAM_INJECT], payload, timeout=5)
+            if rc == 0 and stdout.strip():
+                _passthrough(stdout, "", 0, Path(ENGRAM_INJECT).name)
+            elif rc != 0:
+                print(f"pretooluse-dispatcher: engram injector exit {rc} swallowed "
+                      f"(non-blocking)", file=sys.stderr)
+                # do NOT _passthrough — fall through so the dispatcher exits 0
 
     elif tool_name == "Bash":
         # Git safety guard (blocking) — runs first.
