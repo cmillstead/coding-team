@@ -119,11 +119,19 @@ If no PR exists, start from step 1.
    Merge only when: (a) CI passed in step 7, or (b) no CI checks configured, or (c) user explicitly says "merge" after seeing CI status.
    ```bash
    PR_NUM=$(gh pr view --json number -q .number)
+   FEATURE=$(git rev-parse --abbrev-ref HEAD)
    gh pr merge "$PR_NUM" --merge --delete-branch
    ```
-   After merge, switch to base branch and pull:
+   `gh pr merge --delete-branch`, run from inside the repo, already switches you to `$BASE` and deletes the local feature branch — so normally you land back on the base automatically. Confirm where gh left you, and only act if it did not clean up:
    ```bash
-   git checkout "$BASE" && git pull origin "$BASE"
+   git rev-parse --abbrev-ref HEAD   # expect "$BASE"
+   ```
+   - If on `$BASE`: you are returned. If base is behind origin, catch up with `git pull --ff-only origin "$BASE"` (the git-safety-guard permits `--ff-only` pulls on base; it blocks a plain `git pull`/merge on base).
+   - If NOT on `$BASE` (e.g. you merged with `-R` or from outside the repo, so gh touched only the remote): return guard-safely — a fetch is not blocked, and it must run BEFORE the checkout so you don't land on a stale base:
+   ```bash
+   git fetch origin "$BASE":"$BASE"   # fast-forward LOCAL base to the merged origin/base via a FETCH
+   git checkout "$BASE"
+   git branch -d "$FEATURE"           # only if the local feature branch still exists
    ```
    Report: "Merged PR #N into $BASE. Branch deleted."
 
