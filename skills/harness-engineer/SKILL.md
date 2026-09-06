@@ -20,6 +20,7 @@ Designs and audits the infrastructure that governs AI agent behavior: hooks, rul
 | "This SKILL.md has vague language" | — | /prompt-craft |
 | "CC keeps misinterpreting instructions" | — | /prompt-craft diagnose |
 | "Implement these hook changes" | — | /coding-team |
+| "What does the CIVC verb grid / maturity level 0–4 actually mean?" | /harness-engineering-kb (reference lookup) | — |
 
 ## Modes
 
