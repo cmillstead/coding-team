@@ -460,7 +460,7 @@ hooks/                            # Claude Code hooks, deployed to ~/.claude/hoo
   prompt-dispatcher.py            #   UserPromptSubmit dispatcher — routes to paul-apply-review-guard, then runs the prompt-time hook set in-process via runpy
   session-start-dispatcher.py     #   SessionStart dispatcher — runs hook-health-check, deploy-drift-check, engram-session-start, ci-orphan-detector.sh, and related checks as subprocesses
   builder-self-check.py           #   validates implementer agent output quality
-  clean-tree-gate.py              #   PreToolUse(Edit|Write) — blocks flipping a plan to status: complete while the owning repo's tree is dirty
+  clean-tree-gate.py              #   PreToolUse(Edit|Write) — snapshots pre-run dirt at plan arming (planned→in-progress) and blocks flipping a plan to status: complete only on work created SINCE (baseline subtraction; pre-existing junk grandfathered)
   codesight-hooks.py              #   codesight indexing integration
   coding-team-lifecycle.py        #   PostToolUse(Skill) — second-opinion checkbox gate, read from plan frontmatter
   deploy-drift-check.py           #   SessionStart — detects source↔deployed hook drift and stdlib-name hook collisions (source-dir-only hooks allow-listed)
